@@ -49,7 +49,7 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     chat_id = getattr(message.chat, 'id', None) if getattr(message, 'chat', None) else None
     key = f"{chat_id}_{msg_id}" if (chat_id and msg_id) else (msg_id or id(message))
 
-    if msg_id in CANCEL_REQUESTS or (chat_id and f"{chat_id}_{msg_id}" in CANCEL_REQUESTS):
+    if msg_id in CANCEL_REQUESTS or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS)):
         PROGRESS_TIMESTAMPS.pop(key, None)
         raise StopTransmission("Operation Cancelled by User")
 

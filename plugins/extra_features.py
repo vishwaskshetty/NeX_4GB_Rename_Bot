@@ -476,6 +476,19 @@ async def cancel_action_cb(client, query: CallbackQuery):
         pass
 
 
+@Client.on_message(filters.private & filters.command("cancel"))
+async def cancel_command(client, message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    CANCEL_REQUESTS.add(user_id)
+    CANCEL_REQUESTS.add(chat_id)
+    await message.reply_text(
+        "🛑 <b>Cancellation Request Sent!</b>\n\n"
+        "Any active file download, rename, or upload running in this chat will be aborted.\n\n"
+        "⚡ @Nex_bots"
+    )
+
+
 # ==================== METADATA COMMANDS ====================
 
 @Client.on_message(filters.private & filters.command("metadata"))
@@ -569,7 +582,52 @@ async def see_cleaner_cmd(client, message):
     await message.reply_text(text, reply_markup=btn)
 
 
-@Client.on_message(filters.private & filters.command("del_cleaner"))
+@Client.on_message(filters.private & filters.command("add_clean"))
+async def add_clean_cmd(client, message):
+    user_id = message.from_user.id
+    if len(message.command) == 1:
+        return await message.reply_text(
+            "⚠️ <b>Please provide word(s) to add to cleaner!</b>\n\n"
+            "<b>Example:</b> <code>/add_clean [MkvCinemas]</code>"
+        )
+    new_words = message.text.split(" ", 1)[1].strip()
+    current = await db.get_clean_words(user_id)
+    combined = f"{current}, {new_words}" if current else new_words
+    await db.set_clean_words(user_id, combined)
+    await message.reply_text(
+        f"✅ <b>Word Added to Cleaner!</b>\n\n"
+        f"🧹 <b>Active Words:</b> <code>{combined}</code>\n\n⚡ @Nex_bots"
+    )
+
+
+@Client.on_message(filters.private & filters.command("del_clean"))
+async def del_clean_cmd(client, message):
+    user_id = message.from_user.id
+    if len(message.command) == 1:
+        return await message.reply_text(
+            "⚠️ <b>Please specify the word to remove from cleaner rules!</b>\n\n"
+            "<b>Example:</b> <code>/del_clean [MkvCinemas]</code>"
+        )
+    target = message.text.split(" ", 1)[1].strip().lower()
+    current = await db.get_clean_words(user_id)
+    if not current:
+        return await message.reply_text("❌ <b>You have no active cleaner rules!</b>")
+    
+    parts = [w.strip() for w in current.split(",") if w.strip()]
+    remaining = [w for w in parts if w.lower() != target]
+    
+    if len(remaining) == len(parts):
+        return await message.reply_text(f"⚠️ Word '<code>{target}</code>' not found in your cleaner rules.")
+    
+    new_val = ", ".join(remaining) if remaining else None
+    await db.set_clean_words(user_id, new_val)
+    await message.reply_text(
+        f"✅ <b>Word Removed from Cleaner!</b>\n\n"
+        f"🧹 <b>Remaining:</b> <code>{new_val or 'None'}</code>\n\n⚡ @Nex_bots"
+    )
+
+
+@Client.on_message(filters.private & filters.command(["clear_clean", "del_cleaner"]))
 async def del_cleaner_cmd(client, message):
     user_id = message.from_user.id
     await db.set_clean_words(user_id, None)
@@ -610,7 +668,7 @@ async def set_sample_cmd(client, message):
 
 # ==================== SCREENSHOT GENERATOR COMMAND ====================
 
-@Client.on_message(filters.private & filters.command("set_screenshots"))
+@Client.on_message(filters.private & filters.command(["set_shots", "set_screenshots"]))
 async def set_screenshots_cmd(client, message):
     user_id = message.from_user.id
     if len(message.command) == 1:
@@ -666,6 +724,13 @@ async def set_dump_cmd(client, message):
         f"✅ <b>Custom Dump Channel Saved!</b>\n\n"
         f"📦 <b>Channel ID:</b> <code>{channel_id}</code>\n\n⚡ @Nex_bots"
     )
+
+
+@Client.on_message(filters.private & filters.command(["del_dump", "remove_dump"]))
+async def del_dump_cmd(client, message):
+    user_id = message.from_user.id
+    await db.set_dump_channel(user_id, None)
+    await message.reply_text("🗑️ <b>Custom Dump Channel Removed Successfully!</b>\n\n⚡ @Nex_bots")
 
 
 # ==================== DISK / SERVER CACHE CLEANUP (ADMIN) ====================

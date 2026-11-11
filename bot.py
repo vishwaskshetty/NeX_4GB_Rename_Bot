@@ -12,6 +12,74 @@ import pyrogram.utils
 # Support for channels with large IDs
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 
+# Bot Commands Definitions
+# 1. Public User Commands (Default Scope - 32 Commands with /start strictly #1)
+USER_COMMANDS = [
+    BotCommand("start", "⚡ Start the Bot & Main Menu"),
+    BotCommand("plan", "💎 Upgrade to 4GB Premium & Plans"),
+    BotCommand("myplan", "📊 My Plan, Quota & Usage Stats"),
+    BotCommand("trial", "🎁 Claim 3-Day Free 4GB Trial"),
+    BotCommand("settings", "⚙️ Rename, Watermark & Sample Settings"),
+    BotCommand("leaderboard", "🏆 Top Renamers Leaderboard"),
+    BotCommand("redeem", "🎟️ Redeem Premium Coupon Code"),
+    BotCommand("usage", "📈 Check Daily & Lifetime Data Usage"),
+    BotCommand("timezone", "🌍 Set Your Local Timezone"),
+    BotCommand("metadata", "🏷️ Configure Video/Audio Metadata"),
+    BotCommand("set_metadata", "✍️ Set Custom Metadata Text"),
+    BotCommand("set_prefix", "🏷️ Set Filename Prefix"),
+    BotCommand("del_prefix", "🗑️ Delete Filename Prefix"),
+    BotCommand("set_suffix", "🏷️ Set Filename Suffix"),
+    BotCommand("del_suffix", "🗑️ Delete Filename Suffix"),
+    BotCommand("set_caption", "📝 Set Custom File Caption"),
+    BotCommand("see_caption", "👀 View Custom File Caption"),
+    BotCommand("del_caption", "🗑️ Delete Custom File Caption"),
+    BotCommand("view_thumb", "🖼️ View Custom Thumbnail"),
+    BotCommand("del_thumb", "🗑️ Delete Custom Thumbnail"),
+    BotCommand("set_watermark", "💧 Set Video Watermark Position & Size"),
+    BotCommand("set_sample", "🎬 Toggle Sample Video Generator (ON/OFF)"),
+    BotCommand("set_sample_time", "⏱️ Set Sample Duration (10s-120s)"),
+    BotCommand("set_shots", "📸 Set Sample Screenshots Count (0-10)"),
+    BotCommand("clean_words", "🧹 View Filename Word Cleaner Rules"),
+    BotCommand("add_clean", "➕ Add Word to Clean from Filenames"),
+    BotCommand("del_clean", "➖ Remove Word from Cleaner Rules"),
+    BotCommand("clear_clean", "🗑️ Clear All Cleaner Rules"),
+    BotCommand("set_dump", "📦 Set Private Dump Channel ID"),
+    BotCommand("del_dump", "🗑️ Remove Private Dump Channel"),
+    BotCommand("donate", "☕ Support Bot with Telegram Stars / UPI"),
+    BotCommand("cancel", "🛑 Cancel Active File Rename Task")
+]
+
+# 2. Owner / Admin Extra Commands (24 Commands)
+OWNER_EXTRA_COMMANDS = [
+    BotCommand("owner", "👑 Open Owner Control Panel"),
+    BotCommand("admin", "👑 Quick Admin Actions"),
+    BotCommand("mode", "🌐 Toggle Public / Private Bot Mode"),
+    BotCommand("maintenance", "🛠️ Toggle Maintenance Mode"),
+    BotCommand("status", "📊 Server Diagnostics & System Stats"),
+    BotCommand("users", "👥 Total Registered Bot Users Count"),
+    BotCommand("broadcast", "📢 Broadcast Message to All Users"),
+    BotCommand("bcast_btn", "📢 Broadcast with Inline Button"),
+    BotCommand("add_prem", "💎 Grant User 4GB Premium Access"),
+    BotCommand("rem_prem", "🗑️ Revoke User 4GB Premium Access"),
+    BotCommand("prem_list", "📋 View All Active 4GB Premium Users"),
+    BotCommand("add_user", "🛡️ Authorize User for Private Mode"),
+    BotCommand("rem_user", "🗑️ Revoke Authorized User"),
+    BotCommand("auth_list", "📋 View Authorized Users in Private Mode"),
+    BotCommand("ban", "🚫 Ban a User from the Bot"),
+    BotCommand("unban", "✅ Unban a Blocked User"),
+    BotCommand("ban_list", "📋 View All Banned Users"),
+    BotCommand("add_coupon", "➕ Create New Discount/Premium Coupon"),
+    BotCommand("del_coupon", "🗑️ Delete an Existing Coupon Code"),
+    BotCommand("coupons", "🎟️ View All Active Coupon Codes"),
+    BotCommand("set_fsub", "📢 Configure Force-Subscription Channels"),
+    BotCommand("set_global_meta", "🏷️ Set Bot Default Global Metadata"),
+    BotCommand("set_upi", "💳 Update Active Payment UPI ID"),
+    BotCommand("restart", "🔄 Restart the Bot Server")
+]
+
+# Combined Owner Commands (56 Total <= 100 limit)
+ALL_OWNER_COMMANDS = USER_COMMANDS + OWNER_EXTRA_COMMANDS
+
 # 4GB Premium Secondary Client (Session String)
 app_4gb = None
 if Config.STRING_SESSION:
@@ -60,56 +128,17 @@ class Bot(Client):
 
         # Register Bot Commands Menu in Telegram (Strict Scoping)
         try:
-            # 1. Public Command Menu (Default Scope - Visible to All Users)
-            public_commands = [
-                BotCommand("plan", "💎 Upgrade to 4GB Premium & Plans"),
-                BotCommand("myplan", "📊 My Plan, Quota & Usage"),
-                BotCommand("trial", "🎁 Claim 3-Day Free 4GB Trial"),
-                BotCommand("start", "⚡ Start the Bot"),
-                BotCommand("settings", "⚙️ Configure Rename, Watermark & Sample Settings"),
-                BotCommand("leaderboard", "🏆 Top Renamers Leaderboard"),
-                BotCommand("redeem", "🎟️ Redeem Premium Coupon Code"),
-                BotCommand("metadata", "🏷️ Configure File Metadata"),
-                BotCommand("set_caption", "📝 Set Custom File Caption"),
-                BotCommand("del_caption", "🗑️ Delete Custom Caption"),
-                BotCommand("view_thumb", "🖼️ View Custom Thumbnail"),
-                BotCommand("del_thumb", "🗑️ Delete Custom Thumbnail"),
-                BotCommand("clean_words", "🧹 Manage Filename Word Cleaner"),
-                BotCommand("cancel", "🛑 Cancel Stuck Rename Task")
-            ]
-            await self.set_bot_commands(public_commands, scope=BotCommandScopeDefault())
-            print("Telegram Public Bot Commands registered successfully! 📋")
+            # 1. Public Command Menu (Default Scope - Visible to All Users with /start #1)
+            await self.set_bot_commands(USER_COMMANDS, scope=BotCommandScopeDefault())
+            print("Telegram Public Bot Commands registered successfully! 📋 (32 commands, /start #1)")
 
-            # 2. Owner / Admin Commands (Scope: Registered ONLY for Admins)
-            admin_commands = public_commands + [
-                BotCommand("owner", "👑 Open Owner Control Panel"),
-                BotCommand("mode", "🌐 Toggle Public / Private Mode"),
-                BotCommand("maintenance", "🛠️ Toggle Maintenance Mode"),
-                BotCommand("fsub", "📢 Force-Sub Settings & Mode"),
-                BotCommand("add_user", "🛡️ Authorize user for Private Mode"),
-                BotCommand("rem_user", "🗑️ Revoke authorized user"),
-                BotCommand("auth_list", "📋 List all authorized users"),
-                BotCommand("add_prem", "💎 Grant 4GB Premium access"),
-                BotCommand("rem_prem", "🗑️ Remove 4GB Premium access"),
-                BotCommand("prem_list", "💎 List all 4GB Premium users"),
-                BotCommand("coupons", "🎟️ View active coupons"),
-                BotCommand("add_coupon", "➕ Create a coupon code"),
-                BotCommand("del_coupon", "🗑️ Delete a coupon code"),
-                BotCommand("set_upi", "💳 Update active UPI ID"),
-                BotCommand("ban", "🚫 Ban a user from the bot"),
-                BotCommand("unban", "✅ Unban a user"),
-                BotCommand("set_global_meta", "🏷️ Set bot default metadata tag"),
-                BotCommand("status", "📊 Server & 4GB status"),
-                BotCommand("clear_cache", "🧹 Clear temp downloads"),
-                BotCommand("restart", "🔄 Restart the bot"),
-                BotCommand("broadcast", "📢 Broadcast message")
-            ]
+            # 2. Owner / Admin Commands (Scope: Registered for Admins - 56 Commands)
             for admin_id in Config.ADMIN:
                 try:
-                    await self.set_bot_commands(admin_commands, scope=BotCommandScopeChat(chat_id=int(admin_id)))
+                    await self.set_bot_commands(ALL_OWNER_COMMANDS, scope=BotCommandScopeChat(chat_id=int(admin_id)))
                 except Exception as admin_err:
                     print(f"Failed to register Admin Commands for {admin_id}: {admin_err}")
-            print("Telegram Owner/Admin Bot Commands registered successfully! 👑")
+            print("Telegram Owner/Admin Bot Commands registered successfully! 👑 (56 commands)")
         except Exception as e:
             print(f"Failed to register Bot Commands Menu: {e}")
 

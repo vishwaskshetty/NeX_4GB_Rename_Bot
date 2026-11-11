@@ -4,7 +4,7 @@ import psutil
 import time
 import shutil
 from pyrogram import Client, filters, enums, __version__
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from helper.database import db
 from config import Config, Txt  
 from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content
@@ -118,7 +118,16 @@ async def build_server_diagnostics(back_cb: str = "start"):
 async def start(client, message):
     user = message.from_user
     # Non-blocking add_user: skip on timeout so /start is instant
-    await _safe(db.add_user(client, message))                
+    await _safe(db.add_user(client, message))
+
+    # Dynamically ensure all 56 Owner Commands are registered for Admin
+    if user.id in Config.ADMIN:
+        try:
+            from bot import ALL_OWNER_COMMANDS
+            asyncio.create_task(client.set_bot_commands(ALL_OWNER_COMMANDS, scope=BotCommandScopeChat(chat_id=user.id)))
+        except Exception:
+            pass
+
     button = build_start_keyboard(user.id)
     if Config.START_PIC:
         await message.reply_photo(Config.START_PIC, caption=Txt.START_TXT.format(user.mention), reply_markup=button)       

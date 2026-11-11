@@ -430,7 +430,7 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             except Exception as e:
                 return await ms.edit(f"❌ <b>Download Failed:</b> <code>{e}</code>")
 
-            if ms.id in CANCEL_REQUESTS or f"{ms.chat.id}_{ms.id}" in CANCEL_REQUESTS:
+            if ms.id in CANCEL_REQUESTS or f"{ms.chat.id}_{ms.id}" in CANCEL_REQUESTS or (ms.chat and ms.chat.id in CANCEL_REQUESTS) or user_id in CANCEL_REQUESTS:
                 return await ms.edit("❌ <b>Operation Aborted!</b>\n\n⚡ @Nex_bots")
 
             actual_file_size = os.path.getsize(file_path)
@@ -714,7 +714,9 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
         finally:
             # 9. Strict Cleanup of Temporary Files & Cancellation Set
             CANCEL_REQUESTS.discard(ms.id)
+            CANCEL_REQUESTS.discard(user_id)
             if ms.chat:
+                CANCEL_REQUESTS.discard(ms.chat.id)
                 CANCEL_REQUESTS.discard(f"{ms.chat.id}_{ms.id}")
             try:
                 await ms.delete()

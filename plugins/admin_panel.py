@@ -9,7 +9,7 @@ import random
 import string
 import datetime
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, PeerIdInvalid
 
 from config import Config
@@ -51,10 +51,10 @@ async def send_security_alert(client: Client, user, action_desc: str):
 
 
 ADMIN_COMMANDS = [
-    "owner", "admin", "mode", "maintenance", "fsub", "set_fsub", "add_user", "rem_user",
-    "auth_list", "add_prem", "rem_prem", "prem_list", "coupons", "add_coupon",
-    "del_coupon", "set_upi", "ban", "unban", "set_global_meta", "restart",
-    "broadcast", "bcast_btn"
+    "owner", "admin", "mode", "maintenance", "status", "users", "broadcast", "bcast_btn",
+    "add_prem", "rem_prem", "prem_list", "add_user", "rem_user", "auth_list",
+    "ban", "unban", "ban_list", "add_coupon", "del_coupon", "coupons",
+    "set_fsub", "fsub", "set_global_meta", "set_upi", "restart"
 ]
 
 
@@ -163,6 +163,9 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton("🔄 Restart Bot", callback_data="cb_owner_restart")
         ],
         [
+            InlineKeyboardButton("📋 All Commands List", callback_data="cb_owner_cmds")
+        ],
+        [
             InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
             InlineKeyboardButton("❌ Close", callback_data="close")
         ]
@@ -174,6 +177,11 @@ async def build_owner_panel(client: Client):
 
 @Client.on_message(filters.private & filters.command(["owner", "admin"]) & filters.user(Config.ADMIN))
 async def owner_panel_cmd(client, message):
+    try:
+        from bot import ALL_OWNER_COMMANDS
+        asyncio.create_task(client.set_bot_commands(ALL_OWNER_COMMANDS, scope=BotCommandScopeChat(chat_id=message.from_user.id)))
+    except Exception:
+        pass
     text, markup = await build_owner_panel(client)
     await message.reply_text(text, reply_markup=markup)
 
@@ -241,6 +249,31 @@ async def auth_list_cmd(client, message):
         return await message.reply_text("🛡️ <b>Authorized Users:</b> None (Admins always have access).")
     formatted = "\n".join([f"• <code>{uid}</code>" for uid in users])
     await message.reply_text(f"🛡️ <b><u>Authorized Users ({len(users)})</u></b>\n\n{formatted}\n\n⚡ @Nex_bots")
+
+
+@Client.on_message(filters.private & filters.command("users") & filters.user(Config.ADMIN))
+async def total_users_cmd(client, message):
+    total = await _safe(db.total_users_count(), default=0)
+    auth_cnt = len(await _safe(db.get_auth_users(), default=[]))
+    ban_cnt = len(await _safe(db.get_banned_users(), default=[]))
+    prem_stats = await _safe(db.get_global_usage(), default={})
+    prem_cnt = prem_stats.get("total_premium", 0)
+    
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   👥 <b>NeX Registered Bot Users</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Total Registered Users :</b> <code>{total}</code>\n"
+        f"◈ <b>Active 4GB Premium Users :</b> <code>{prem_cnt}</code>\n"
+        f"◈ <b>Authorized Users (Private) :</b> <code>{auth_cnt}</code>\n"
+        f"◈ <b>Banned / Blocked Users :</b> <code>{ban_cnt}</code>\n\n"
+        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    await message.reply_text(text, reply_markup=markup)
 
 
 @Client.on_message(filters.private & filters.command(["add_prem", "set_prem"]) & filters.user(Config.ADMIN))
@@ -361,6 +394,31 @@ async def unban_cmd(client, message):
     
     await db.unban_user(target_id)
     await message.reply_text(f"✅ <b>User Unbanned!</b> <code>{target_id}</code>\n\n⚡ @Nex_bots")
+
+
+@Client.on_message(filters.private & filters.command("ban_list") & filters.user(Config.ADMIN))
+async def ban_list_cmd(client, message):
+    banned = await _safe(db.get_banned_users(), default=[])
+    if not banned:
+        return await message.reply_text("✅ <b>No users are currently banned from NeX Bot!</b>\n\n⚡ @Nex_bots")
+    
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🚫 <b>Banned Users Directory</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Total Banned Users :</b> <code>{len(banned)}</code>\n\n"
+    )
+    for idx, uid in enumerate(banned[:30], 1):
+        text += f"{idx}. <code>{uid}</code>\n"
+    if len(banned) > 30:
+        text += f"\n<i>... and {len(banned) - 30} more users.</i>\n"
+    text += "\n<i>To unban: <code>/unban &lt;user_id&gt;</code></i>\n⚡ @Nex_bots"
+    
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    await message.reply_text(text, reply_markup=markup)
 
 
 @Client.on_message(filters.private & filters.command("set_global_meta") & filters.user(Config.ADMIN))
@@ -1008,6 +1066,41 @@ async def cb_owner_restart(client, query: CallbackQuery):
     except Exception:
         pass
     os.execl(sys.executable, sys.executable, *sys.argv)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_cmds$") & filters.user(Config.ADMIN))
+async def cb_owner_cmds_view(client, query: CallbackQuery):
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   📋 <b>NeX Bot Commands Cheat-Sheet</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "👑 <b>Owner Commands:</b>\n"
+        "• <code>/owner</code> | <code>/admin</code> - Open Control Panel\n"
+        "• <code>/mode</code> | <code>/maintenance</code> - Toggle Modes\n"
+        "• <code>/status</code> | <code>/users</code> - System & User Counts\n"
+        "• <code>/broadcast</code> | <code>/bcast_btn</code> - Broadcast msgs\n"
+        "• <code>/add_prem</code> | <code>/rem_prem</code> | <code>/prem_list</code>\n"
+        "• <code>/add_user</code> | <code>/rem_user</code> | <code>/auth_list</code>\n"
+        "• <code>/ban</code> | <code>/unban</code> | <code>/ban_list</code>\n"
+        "• <code>/add_coupon</code> | <code>/del_coupon</code> | <code>/coupons</code>\n"
+        "• <code>/set_fsub</code> | <code>/set_global_meta</code> | <code>/set_upi</code>\n"
+        "• <code>/restart</code> - Restart the server\n\n"
+        "⚡ <b>Key User Commands:</b>\n"
+        "• <code>/start</code> | <code>/settings</code> | <code>/plan</code> | <code>/myplan</code>\n"
+        "• <code>/trial</code> | <code>/redeem</code> | <code>/leaderboard</code> | <code>/usage</code>\n"
+        "• <code>/metadata</code> | <code>/set_metadata</code> | <code>/set_watermark</code>\n"
+        "• <code>/set_sample</code> | <code>/set_sample_time</code> | <code>/set_shots</code>\n"
+        "• <code>/set_prefix</code> | <code>/set_suffix</code> | <code>/set_caption</code>\n"
+        "• <code>/clean_words</code> | <code>/add_clean</code> | <code>/del_clean</code>\n"
+        "• <code>/set_dump</code> | <code>/del_dump</code> | <code>/donate</code> | <code>/cancel</code>\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
 
 
 # ==================== ADVANCED INTERACTIVE BROADCAST ====================
