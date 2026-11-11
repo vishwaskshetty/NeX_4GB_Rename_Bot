@@ -1,0 +1,70 @@
+{
+    "name": "NeX 4GB Rename Bot",
+    "description": "Telegram 4GB File & Video Renamer Bot powered by Pyrogram and FFmpeg",
+    "keywords": ["Renamer Bot", "4GB", "NeX", "Pyrogram", "FFmpeg", "Mongo DB"],    
+    "repository": "https://github.com/vishwaskshetty/NeX_4GB_Rename_Bot",
+    "env": {
+        "API_ID": {
+            "description": "Your APP ID From my.telegram.org",
+            "required": true
+        },
+        "API_HASH": {
+            "description": "Your API Hash From my.telegram.org",
+            "required": true
+        },
+        "BOT_TOKEN": {
+            "description": "Your Bot Token From @BotFather",
+            "required": true
+        },
+        "STRING_SESSION": {
+            "description": "Pyrogram Session String for 4GB uploads (Telegram Premium account)",
+            "required": false
+        },
+        "WEBHOOK": {
+            "description": "Enable web service for health checks (True/False)",
+            "value": "True",
+            "required": false
+        },
+        "FORCE_SUB": {
+            "description": "Your force sub channel username without [@]",
+            "value": "Nex_bots",
+            "required": false 
+        },
+        "ADMIN": {
+            "description": "Admin User IDs separated by space",
+            "required": true
+        },
+        "OWNER_ONLY": {
+            "description": "Lock bot for personal/owner use only (True/False)",
+            "value": "False",
+            "required": false
+        },
+        "LOG_CHANNEL": {
+            "description": "Bot Log Sending Channel ID (must start with -100)",
+            "required": false           
+        },
+        "FILES_CHANNEL": {
+            "description": "Backup / Dump Channel ID (must start with -100)",
+            "required": false
+        },
+        "DB_URL": {
+            "description": "Your MongoDB URL from mongodb.com",
+            "required": true
+        },
+        "DB_NAME": { 
+            "description": "Your MongoDB Database Name",
+            "value": "NeX_4GB_Rename_Bot",
+            "required": false
+        },
+        "START_PIC": {
+            "description": "Bot start image URL",
+            "value": "",
+            "required": false
+        }
+    },
+    "buildpacks": [
+        {
+            "url": "heroku/python"
+        }
+    ]
+}

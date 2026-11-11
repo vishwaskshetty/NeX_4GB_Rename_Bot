@@ -1,0 +1,12 @@
+pyrotgfork>=2.2.11
+TgCrypto==1.2.5
+motor>=3.7.1
+pymongo>=4.10.0
+dnspython>=2.7.0
+hachoir==3.2.0
+Pillow>=9.5.0
+aiohttp>=3.8.4
+pytz
+psutil
+humanize
+python-dotenv
