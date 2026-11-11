@@ -4,7 +4,7 @@ import psutil
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from helper.database import db
-from helper.utils import humanbytes, get_readable_file_size, CANCEL_REQUESTS
+from helper.utils import humanbytes, get_readable_file_size, CANCEL_REQUESTS, edit_message_content
 from config import Config
 
 # NeX 4GB Rename Bot - Extra Features & Settings Dashboard
@@ -77,7 +77,7 @@ async def open_settings_cb(client, query: CallbackQuery):
     user_id = query.from_user.id
     text, markup = await build_settings_panel(user_id)
     try:
-        await query.message.edit_text(text, reply_markup=markup)
+        await edit_message_content(query.message, text, reply_markup=markup)
     except Exception:
         pass
     await query.answer("Settings refreshed! ⚙️")
@@ -91,7 +91,7 @@ async def set_toggle_meta_cb(client, query: CallbackQuery):
     await db.set_metadata_bool(user_id, new_state)
     text, markup = await build_settings_panel(user_id)
     try:
-        await query.message.edit_text(text, reply_markup=markup)
+        await edit_message_content(query.message, text, reply_markup=markup)
     except Exception:
         pass
     await query.answer(f"Metadata is now {'ENABLED 🟢' if new_state else 'DISABLED 🔴'}")
@@ -106,7 +106,7 @@ async def set_cycle_sample_cb(client, query: CallbackQuery):
     await db.set_sample_duration(user_id, next_val)
     text, markup = await build_settings_panel(user_id)
     try:
-        await query.message.edit_text(text, reply_markup=markup)
+        await edit_message_content(query.message, text, reply_markup=markup)
     except Exception:
         pass
     await query.answer(f"Sample Video: {next_val}s 🎬" if next_val > 0 else "Sample Video Disabled ❌")
@@ -121,7 +121,7 @@ async def set_cycle_ss_cb(client, query: CallbackQuery):
     await db.set_screenshots(user_id, next_val)
     text, markup = await build_settings_panel(user_id)
     try:
-        await query.message.edit_text(text, reply_markup=markup)
+        await edit_message_content(query.message, text, reply_markup=markup)
     except Exception:
         pass
     await query.answer(f"Screenshots: {next_val} frames 📸" if next_val > 0 else "Screenshots Disabled ❌")
@@ -152,7 +152,7 @@ async def set_del_thumb_cb(client, query: CallbackQuery):
     await query.answer("🗑️ Thumbnail Deleted Successfully!", show_alert=True)
     text, markup = await build_settings_panel(user_id)
     try:
-        await query.message.edit_text(text, reply_markup=markup)
+        await edit_message_content(query.message, text, reply_markup=markup)
     except Exception:
         pass
 
@@ -173,7 +173,7 @@ async def set_view_cleaner_cb(client, query: CallbackQuery):
         "⚡ @Nex_bots"
     )
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Settings", callback_data="open_settings")]])
-    await query.message.edit_text(text, reply_markup=btn)
+    await edit_message_content(query.message, text, reply_markup=btn)
 
 
 @Client.on_callback_query(filters.regex(r"^set_view_dump$"))
@@ -190,7 +190,7 @@ async def set_view_dump_cb(client, query: CallbackQuery):
         "⚡ @Nex_bots"
     )
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Settings", callback_data="open_settings")]])
-    await query.message.edit_text(text, reply_markup=btn)
+    await edit_message_content(query.message, text, reply_markup=btn)
 
 
 # ==================== CANCEL TASK CALLBACK ====================

@@ -5,7 +5,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from helper.database import db
 from config import Config, Txt  
-from helper.utils import get_readable_file_size, get_readable_time
+from helper.utils import get_readable_file_size, get_readable_time, edit_message_content
 
 
 @Client.on_message(filters.private & filters.command("start"))
@@ -29,7 +29,7 @@ async def start(client, message):
     if Config.START_PIC:
         await message.reply_photo(Config.START_PIC, caption=Txt.START_TXT.format(user.mention), reply_markup=button)       
     else:
-        await message.reply_text(text=Txt.START_TXT.format(user.mention), reply_markup=button, disable_web_page_preview=True)
+        await message.reply_text(text=Txt.START_TXT.format(user.mention), reply_markup=button)
 
 
 @Client.on_callback_query()
@@ -50,9 +50,9 @@ async def cb_handler(client, query: CallbackQuery):
                 InlineKeyboardButton('⚡ ᴅᴇᴠᴇʟᴏᴘᴇʀ', url='https://t.me/Nex_bots')
             ]
         ])
-        await query.message.edit_text(
+        await edit_message_content(
+            query.message,
             text=Txt.START_TXT.format(query.from_user.mention),
-            disable_web_page_preview=True,
             reply_markup=button
         )
     elif data == "render":
@@ -79,9 +79,9 @@ async def cb_handler(client, query: CallbackQuery):
         )
         await query.answer(text=stats, show_alert=True)
     elif data == "help":
-        await query.message.edit_text(
+        await edit_message_content(
+            query.message,
             text=Txt.HELP_TXT,
-            disable_web_page_preview=True,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🖥️ ꜱᴇʀᴠᴇʀ ɪɴꜰᴏ", callback_data="render"),
                  InlineKeyboardButton("⚙️ ꜱᴇᴛᴛɪɴɢꜱ", callback_data="open_settings")],
@@ -95,15 +95,16 @@ async def cb_handler(client, query: CallbackQuery):
             [InlineKeyboardButton('🏠 Home', callback_data='start'),
              InlineKeyboardButton('✖️ Close', callback_data='close')]
         ]
-        await query.message.edit_text(
+        await edit_message_content(
+            query.message,
             text=Txt.DON_TXT.format(query.from_user.mention),
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode=enums.ParseMode.HTML
         )
     elif data == "about":
-        await query.message.edit_text(
+        await edit_message_content(
+            query.message,
             text=Txt.ABOUT_TXT.format(client.mention),
-            disable_web_page_preview=True,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots"),
                  InlineKeyboardButton("💬 ꜱᴜᴘᴘᴏʀᴛ", url="https://t.me/Nex_bots")],

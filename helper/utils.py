@@ -138,3 +138,34 @@ async def send_log(b, u):
             )
         except Exception:
             pass
+
+
+async def edit_message_content(message, text, reply_markup=None, parse_mode=None):
+    """
+    Safely edits a message's content whether it is a regular text message
+    or a media message (e.g. photo from START_PIC), avoiding caption/text mismatch errors.
+    """
+    is_media = bool(getattr(message, "photo", None) or getattr(message, "media", None))
+    if is_media:
+        kwargs = {"caption": text, "reply_markup": reply_markup}
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        try:
+            return await message.edit_caption(**kwargs)
+        except Exception:
+            kwargs_fallback = {"text": text, "reply_markup": reply_markup}
+            if parse_mode:
+                kwargs_fallback["parse_mode"] = parse_mode
+            return await message.edit_text(**kwargs_fallback)
+    else:
+        kwargs = {"text": text, "reply_markup": reply_markup}
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        try:
+            return await message.edit_text(**kwargs)
+        except Exception:
+            kwargs_fallback = {"caption": text, "reply_markup": reply_markup}
+            if parse_mode:
+                kwargs_fallback["parse_mode"] = parse_mode
+            return await message.edit_caption(**kwargs_fallback)
+
