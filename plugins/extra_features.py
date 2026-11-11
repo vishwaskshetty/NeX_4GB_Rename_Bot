@@ -42,7 +42,7 @@ async def build_settings_panel(user_id: int):
         f"⚡ <b>Powered by:</b> @Nex_bots"
     )
 
-    keyboard = InlineKeyboardMarkup([
+    keyboard_buttons = [
         [
             InlineKeyboardButton(f"🏷️ Metadata: {meta_status}", callback_data="set_toggle_meta")
         ],
@@ -59,7 +59,11 @@ async def build_settings_panel(user_id: int):
             InlineKeyboardButton("🔄 Refresh", callback_data="open_settings"),
             InlineKeyboardButton("✖️ Close", callback_data="close")
         ]
-    ])
+    ]
+    if user_id in Config.ADMIN:
+        keyboard_buttons.append([InlineKeyboardButton("👑 Owner Control Panel", callback_data="owner_panel")])
+
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
     return text, keyboard
 
 
@@ -521,9 +525,15 @@ async def commands_list_cmd(client, message):
         "• <code>/set_suffix &lt;text&gt;</code> - Set suffix after filename\n"
         "• <code>/see_suffix</code> - View current suffix\n"
         "• <code>/del_suffix</code> - Delete suffix\n\n"
-        "🛠️ <b>Admin Commands:</b>\n"
+        "🛠️ <b>Admin / Owner Commands:</b>\n"
+        "• <code>/owner</code> | <code>/admin</code> - Open interactive Owner Control Panel\n"
+        "• <code>/mode [private|public]</code> - Toggle or set bot access mode\n"
+        "• <code>/add_user &lt;id&gt;</code> | <code>/rem_user &lt;id&gt;</code> - Manage authorized users\n"
+        "• <code>/add_prem &lt;id&gt;</code> | <code>/rem_prem &lt;id&gt;</code> - Manage 4GB Premium users\n"
+        "• <code>/ban &lt;id&gt;</code> | <code>/unban &lt;id&gt;</code> - Ban or unban users\n"
+        "• <code>/set_global_meta &lt;tag&gt;</code> - Set bot default metadata\n"
         "• <code>/status</code> - View bot uptime, ping, and user count\n"
-        "• <code>/clear_cache</code> - Clean temp downloads folder & show RAM/Disk\n"
+        "• <code>/clear_cache</code> - Clean temp downloads folder\n"
         "• <code>/restart</code> - Restart the bot\n"
         "• <code>/broadcast</code> - Broadcast message to all users (reply to msg)\n\n"
         "📢 <b>Powered by:</b> @Nex_bots"

@@ -13,6 +13,7 @@ class Database:
         )
         self.db = self._client[database_name]
         self.col = self.db.user
+        self.cfg = self.db.bot_config
 
     def new_user(self, id):
         return dict(
@@ -102,8 +103,8 @@ class Database:
     async def get_metadata_code(self, id):
         user = await self.col.find_one({'_id': int(id)})
         if not user or not user.get('metadata_code'):
-            return "Telegram : @Nex_bots"
-        return user.get('metadata_code', "Telegram : @Nex_bots")
+            return await self.get_default_metadata()
+        return user.get('metadata_code') or await self.get_default_metadata()
 
     # Word cleaner & replacer methods
     async def set_clean_words(self, id, clean_words):
@@ -186,6 +187,92 @@ class Database:
             "dump_channel": user.get('dump_channel') or user.get('user_dump'),
             "upload_mode": user.get('upload_mode', "Ask")
         }
+
+    # ==================== BOT CONFIGURATION & OWNER PERSISTENCE ====================
+
+    # Bot Access Mode ("private" or "public")
+    async def get_bot_mode(self) -> str:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        if cfg and 'bot_mode' in cfg:
+            return cfg.get('bot_mode')
+        return "private" if Config.OWNER_ONLY else "public"
+
+    async def set_bot_mode(self, mode: str) -> str:
+        mode = "private" if str(mode).strip().lower() == "private" else "public"
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': {'bot_mode': mode}}, upsert=True)
+        return mode
+
+    # Authorized Users Management (for Private Mode)
+    async def add_auth_user(self, user_id: int):
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$addToSet': {'auth_users': int(user_id)}}, upsert=True)
+
+    async def remove_auth_user(self, user_id: int):
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$pull': {'auth_users': int(user_id)}}, upsert=True)
+
+    async def get_auth_users(self) -> list:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        return cfg.get('auth_users', []) if cfg else []
+
+    async def is_auth_user(self, user_id: int) -> bool:
+        if int(user_id) in Config.ADMIN:
+            return True
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        auth_users = cfg.get('auth_users', []) if cfg else []
+        return int(user_id) in auth_users
+
+    # Premium Users Management (4GB Access in Public Mode)
+    async def set_premium_user(self, user_id: int, is_premium: bool):
+        if is_premium:
+            await self.cfg.update_one({'_id': 'bot_settings'}, {'$addToSet': {'premium_users': int(user_id)}}, upsert=True)
+        else:
+            await self.cfg.update_one({'_id': 'bot_settings'}, {'$pull': {'premium_users': int(user_id)}}, upsert=True)
+
+    async def add_premium_user(self, user_id: int):
+        await self.set_premium_user(user_id, True)
+
+    async def remove_premium_user(self, user_id: int):
+        await self.set_premium_user(user_id, False)
+
+    async def get_premium_users(self) -> list:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        return cfg.get('premium_users', []) if cfg else []
+
+    async def is_premium_user(self, user_id: int) -> bool:
+        if int(user_id) in Config.ADMIN:
+            return True
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        prem_users = cfg.get('premium_users', []) if cfg else []
+        return int(user_id) in prem_users
+
+    # Banned Users Management
+    async def ban_user(self, user_id: int):
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$addToSet': {'banned_users': int(user_id)}}, upsert=True)
+
+    async def unban_user(self, user_id: int):
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$pull': {'banned_users': int(user_id)}}, upsert=True)
+
+    async def get_banned_users(self) -> list:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        return cfg.get('banned_users', []) if cfg else []
+
+    async def is_banned(self, user_id: int) -> bool:
+        if int(user_id) in Config.ADMIN:
+            return False
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        banned = cfg.get('banned_users', []) if cfg else []
+        return int(user_id) in banned
+
+    # Global Default Metadata Tag
+    async def get_default_metadata(self) -> str:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        if cfg and cfg.get('default_metadata'):
+            return cfg.get('default_metadata')
+        return "Telegram : @Nex_bots"
+
+    async def set_default_metadata(self, text: str) -> str:
+        text = str(text).strip()
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': {'default_metadata': text}}, upsert=True)
+        return text
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

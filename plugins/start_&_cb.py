@@ -12,7 +12,7 @@ from helper.utils import get_readable_file_size, get_readable_time, edit_message
 async def start(client, message):
     user = message.from_user
     await db.add_user(client, message)                
-    button = InlineKeyboardMarkup([
+    rows = [
         [
             InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇꜱ', url='https://t.me/Nex_bots'),
             InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/Nex_bots')
@@ -25,18 +25,22 @@ async def start(client, message):
             InlineKeyboardButton('ℹ️ ᴀʙᴏᴜᴛ', callback_data='about'),
             InlineKeyboardButton('⚡ ᴅᴇᴠᴇʟᴏᴘᴇʀ', url='https://t.me/Nex_bots')
         ]
-    ])
+    ]
+    if user.id in Config.ADMIN:
+        rows.append([InlineKeyboardButton('👑 ᴏᴡɴᴇʀ ᴘᴀɴᴇʟ', callback_data='owner_panel')])
+    
+    button = InlineKeyboardMarkup(rows)
     if Config.START_PIC:
         await message.reply_photo(Config.START_PIC, caption=Txt.START_TXT.format(user.mention), reply_markup=button)       
     else:
         await message.reply_text(text=Txt.START_TXT.format(user.mention), reply_markup=button)
 
 
-@Client.on_callback_query()
+@Client.on_callback_query(filters.regex(r"^(start|render|help|donation|about|close)$"))
 async def cb_handler(client, query: CallbackQuery):
     data = query.data 
     if data == "start":
-        button = InlineKeyboardMarkup([
+        rows = [
             [
                 InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇꜱ', url='https://t.me/Nex_bots'),
                 InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/Nex_bots')
@@ -49,7 +53,11 @@ async def cb_handler(client, query: CallbackQuery):
                 InlineKeyboardButton('ℹ️ ᴀʙᴏᴜᴛ', callback_data='about'),
                 InlineKeyboardButton('⚡ ᴅᴇᴠᴇʟᴏᴘᴇʀ', url='https://t.me/Nex_bots')
             ]
-        ])
+        ]
+        if query.from_user.id in Config.ADMIN:
+            rows.append([InlineKeyboardButton('👑 ᴏᴡɴᴇʀ ᴘᴀɴᴇʟ', callback_data='owner_panel')])
+        
+        button = InlineKeyboardMarkup(rows)
         await edit_message_content(
             query.message,
             text=Txt.START_TXT.format(query.from_user.mention),

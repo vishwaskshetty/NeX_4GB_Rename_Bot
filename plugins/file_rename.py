@@ -132,18 +132,34 @@ async def rename_start(client, message):
         except Exception:
             pass
 
-    # Check 2GB threshold vs 4GB Session configuration
+    # Check 2GB threshold vs Premium access & 4GB Session configuration
     client_4gb = getattr(client, "app_4gb", None) or app_4gb
-    if file_size > (2000 * 1024 * 1024) and not client_4gb:
-        await message.reply_text(
-            "🚫 <b>Files larger than 2GB require 4GB Premium Mode!</b>\n\n"
-            "<i>Telegram restricts standard bot tokens to 2GB uploads.\n"
-            "To enable 4GB uploads, configure <code>STRING_SESSION</code> with a Telegram Premium account.\n"
-            "Need help? Contact @Nex_bots.</i>",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Support Channel", url="https://t.me/Nex_bots")]]),
-            quote=True
-        )
-        return
+    if file_size > (2 * 1024 * 1024 * 1024):
+        is_admin = user_id in Config.ADMIN
+        is_premium = await db.is_premium_user(user_id)
+        if not (is_admin or is_premium):
+            await message.reply_text(
+                "⭐ <b>4GB+ File Detected!</b>\n\n"
+                "Files over 2GB require <b>Premium Access</b>.\n"
+                "Contact the owner to upgrade!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💬 Contact Owner", url="https://t.me/Nex_bots")],
+                    [InlineKeyboardButton("⚡ Support Channel", url="https://t.me/Nex_bots")]
+                ]),
+                quote=True
+            )
+            return
+
+        if not client_4gb:
+            await message.reply_text(
+                "🚫 <b>Files larger than 2GB require 4GB Premium Mode!</b>\n\n"
+                "<i>Telegram restricts standard bot tokens to 2GB uploads.\n"
+                "To enable 4GB uploads, configure <code>STRING_SESSION</code> with a Telegram Premium account.\n"
+                "Need help? Contact @Nex_bots.</i>",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Support Channel", url="https://t.me/Nex_bots")]]),
+                quote=True
+            )
+            return
 
     media_info_text = (
         f"🗂️ <b><u>NeX 4GB Media Information</u></b>\n\n"
@@ -306,6 +322,20 @@ async def upload_callback_router(client, update: CallbackQuery):
 async def execute_rename_pipeline(client, update, new_filename: str, upload_type: str, file_msg):
     user_id = update.from_user.id
     ms = update.message if hasattr(update, 'message') else update
+
+    # Verify 4GB Premium permission before entering semaphore
+    file = file_msg.document or file_msg.video or file_msg.audio
+    file_size = getattr(file, "file_size", 0) if file else 0
+    if file_size > (2 * 1024 * 1024 * 1024):
+        is_admin = user_id in Config.ADMIN
+        is_premium = await db.is_premium_user(user_id)
+        if not (is_admin or is_premium):
+            return await ms.edit(
+                "⭐ <b>4GB+ File Detected!</b>\n\n"
+                "Files over 2GB require <b>Premium Access</b>.\n"
+                "Contact the owner to upgrade!",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Owner", url="https://t.me/Nex_bots")]])
+            )
 
     # Ensure queue concurrency limit
     await ms.edit("⏳ <b>Adding to processing queue... Please wait.</b>")

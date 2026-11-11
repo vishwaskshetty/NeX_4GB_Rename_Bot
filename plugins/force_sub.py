@@ -3,8 +3,9 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQ
 from pyrogram.errors import UserNotParticipant
 from pyrogram.enums import ChatMemberStatus
 from config import Config
+from helper.database import db
 
-# NeX 4GB Rename Bot - Personal Bot Protection & Force Sub
+# NeX 4GB Rename Bot - Personal Bot Protection, Access Control & Force Sub
 # Developed by @Nex_bots
 
 
@@ -46,30 +47,50 @@ async def get_invite_link(client: Client) -> str:
 
 @Client.on_message(filters.private & ~filters.user(Config.ADMIN), group=-1)
 async def force_sub_message_interceptor(client, message):
-    # 1. Personal Bot Protection (OWNER_ONLY mode)
-    if Config.OWNER_ONLY:
+    user_id = message.from_user.id
+
+    # 1. Ban Check
+    if await db.is_banned(user_id):
         await message.reply_text(
-            "🔒 **NeX 4GB Rename Bot** is a private personal bot owned by @Nex_bots.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 Channel", url="https://t.me/Nex_bots")]
-            ])
+            "🚫 <b>You are banned from using this bot.</b>\n\n"
+            "If you believe this is an error, please contact @Nex_bots.",
+            quote=True
         )
         message.stop_propagation()
         return
 
-    # 2. Force Subscribe check
+    # 2. Bot Access Mode Check (Private vs Public)
+    bot_mode = await db.get_bot_mode()
+    if bot_mode == "private":
+        is_auth = await db.is_auth_user(user_id)
+        if not is_auth:
+            await message.reply_text(
+                "🔒 <b>NeX 4GB Rename Bot is in Private Mode!</b>\n\n"
+                "Only the owner and authorized users can access this bot.\n"
+                "Please contact the owner to request access.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💬 Contact Owner", url="https://t.me/Nex_bots")],
+                    [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/Nex_bots")]
+                ]),
+                quote=True
+            )
+            message.stop_propagation()
+            return
+
+    # 3. Force Subscribe check in Public Mode
     if Config.FORCE_SUB:
-        if not await is_subscribed(client, message.from_user.id):
+        if not await is_subscribed(client, user_id):
             invite_link = await get_invite_link(client)
             button = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📢 Join @Nex_bots", url=invite_link)],
                 [InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")]
             ])
             await message.reply_text(
-                f"👋 **Hello {message.from_user.mention}!**\n\n"
-                f"⚠️ Please join **@Nex_bots** to use **NeX 4GB Rename Bot**.\n\n"
-                f"Click the button below to join, then click **Try Again**!",
-                reply_markup=button
+                f"👋 <b>Hello {message.from_user.mention}!</b>\n\n"
+                f"⚠️ Please join <b>@Nex_bots</b> to use <b>NeX 4GB Rename Bot</b>.\n\n"
+                f"Click the button below to join, then click <b>Try Again</b>!",
+                reply_markup=button,
+                quote=True
             )
             message.stop_propagation()
             return
@@ -80,15 +101,26 @@ async def force_sub_callback_interceptor(client, query: CallbackQuery):
     if query.data == "check_sub":
         return
 
-    # 1. Owner-Only check
-    if Config.OWNER_ONLY:
-        await query.answer("🔒 NeX 4GB Rename Bot is a private personal bot owned by @Nex_bots.", show_alert=True)
+    user_id = query.from_user.id
+
+    # 1. Ban Check
+    if await db.is_banned(user_id):
+        await query.answer("🚫 You are banned from using this bot.", show_alert=True)
         query.stop_propagation()
         return
 
-    # 2. Force Subscribe check
+    # 2. Bot Access Mode Check
+    bot_mode = await db.get_bot_mode()
+    if bot_mode == "private":
+        is_auth = await db.is_auth_user(user_id)
+        if not is_auth:
+            await query.answer("🔒 NeX 4GB Rename Bot is in Private Mode. Access Denied!", show_alert=True)
+            query.stop_propagation()
+            return
+
+    # 3. Force Subscribe check
     if Config.FORCE_SUB:
-        if not await is_subscribed(client, query.from_user.id):
+        if not await is_subscribed(client, user_id):
             await query.answer("⚠️ Please join @Nex_bots first before performing this action!", show_alert=True)
             query.stop_propagation()
             return
@@ -97,6 +129,14 @@ async def force_sub_callback_interceptor(client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^check_sub$"))
 async def check_sub_callback_handler(client, query: CallbackQuery):
     user_id = query.from_user.id
+
+    if await db.is_banned(user_id):
+        return await query.answer("🚫 You are banned from using this bot.", show_alert=True)
+
+    bot_mode = await db.get_bot_mode()
+    if bot_mode == "private" and not await db.is_auth_user(user_id):
+        return await query.answer("🔒 The bot is currently in Private Mode. Contact owner!", show_alert=True)
+
     if await is_subscribed(client, user_id):
         try:
             await query.message.delete()
@@ -105,8 +145,8 @@ async def check_sub_callback_handler(client, query: CallbackQuery):
         await client.send_message(
             chat_id=user_id,
             text=(
-                "✅ **Thank you for joining!**\n\n"
-                "Your subscription is verified. You now have full access to **NeX 4GB Rename Bot**!\n\n"
+                "✅ <b>Thank you for joining!</b>\n\n"
+                "Your subscription is verified. You now have full access to <b>NeX 4GB Rename Bot</b>!\n\n"
                 "⚡ @Nex_bots"
             ),
             reply_markup=InlineKeyboardMarkup([

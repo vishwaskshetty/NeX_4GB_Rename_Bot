@@ -68,10 +68,21 @@
 | `/set_dump` | Set private dump channel ID | `/set_dump -1001234567890` (or `off`) |
 | `/donate` | Support bot development and hosting | `/donate` |
 
-### 🛠️ Admin Commands
+### 🛠️ Owner & Admin Commands
 
 | Command | Description |
 | :--- | :--- |
+| `/owner` or `/admin` | Open interactive visual Owner Control Panel (Private/Public mode, user controls, stats) |
+| `/mode [private\|public]` | Toggle or set bot access mode (Private = Owner/Auth only, Public = Everyone) |
+| `/add_user <user_id>` | Authorize a user to use the bot in Private Mode |
+| `/rem_user <user_id>` | Revoke a user's access in Private Mode |
+| `/auth_list` | List all authorized users |
+| `/add_prem <user_id>` | Grant 4GB Premium access & priority queue to a user |
+| `/rem_prem <user_id>` | Remove 4GB Premium access from a user |
+| `/prem_list` | List all 4GB Premium users |
+| `/ban <user_id>` | Ban a user from using the bot |
+| `/unban <user_id>` | Unban a user |
+| `/set_global_meta <text>` | Set global default metadata tag for the bot |
 | `/status` or `/stats` | View bot uptime, ping, total users, 4GB engine status, RAM/CPU/Disk usage |
 | `/clear_cache` | Delete residual files in `downloads/` and display freed disk space |
 | `/broadcast` | Broadcast a replied message to all registered bot users |
@@ -87,6 +98,17 @@ Send these commands to [@BotFather](https://t.me/BotFather) using `/setcommands`
 start - ⚡ Start the bot & check status
 settings - ⚙️ Open interactive settings dashboard
 commands - 📋 View all commands list
+owner - 👑 Open Owner Control Panel (Admin)
+mode - 🌐 Toggle Public / Private Mode (Admin)
+add_user - 🛡️ Authorize user for Private Mode (Admin)
+rem_user - 🗑️ Revoke authorized user (Admin)
+auth_list - 📋 List all authorized users (Admin)
+add_prem - 💎 Grant 4GB Premium access (Admin)
+rem_prem - 🗑️ Remove 4GB Premium access (Admin)
+prem_list - 💎 List all 4GB Premium users (Admin)
+ban - 🚫 Ban a user from the bot (Admin)
+unban - ✅ Unban a user (Admin)
+set_global_meta - 🏷️ Set bot default metadata tag (Admin)
 metadata - 🏷️ View current metadata settings
 set_metadata - ✍️ Set custom metadata tag
 toggle_metadata - 🔄 Turn metadata ON or OFF

@@ -66,17 +66,17 @@ class Txt(object):
 
     HELP_TXT = """📖 <b><u>NeX 4GB Rename Bot - Help</u></b> ⚡
 
-⚙️ <b><u>Settings & Features:</u></b>
-• <code>/settings</code> - Interactive visual control panel
-• <code>/commands</code> - Full list of all 27 bot commands
+⚙️ <b><u>Settings & Controls:</u></b>
+• <code>/settings</code> - Interactive visual dashboard
+• <code>/commands</code> - Full list of bot commands
 
 ✏️ <b><u>How To Rename:</u></b>
 1. Send any document, video, or audio up to 4GB.
-2. Click <b>⚡ Auto Clean & Rename</b> for 1-click rename, or <b>📝 Type New Name</b>.
-3. Choose format: [<b>📁 Document</b> | <b>🎥 Video</b> | <b>🎵 Audio</b>].
+2. Tap <b>⚡ Auto Clean</b> or <b>📝 Type Name</b>.
+3. Choose: [<b>📁 Doc</b> | <b>🎥 Video</b> | <b>🎵 Audio</b>].
 
 🏷️ <b><u>Key Commands:</u></b>
-• <code>/metadata</code> | <code>/set_metadata &lt;tag&gt;</code> | <code>/toggle_metadata</code>
+• <code>/metadata</code> | <code>/set_metadata &lt;tag&gt;</code>
 • <code>/set_remove &lt;words&gt;</code> | <code>/set_replace &lt;old:new&gt;</code>
 • <code>/set_sample &lt;sec&gt;</code> | <code>/set_screenshots &lt;1-10&gt;</code>
 • <code>/set_caption &lt;text&gt;</code> | <code>/view_thumb</code> | <code>/del_thumb</code>
