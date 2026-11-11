@@ -2,14 +2,17 @@ import motor.motor_asyncio
 from config import Config
 from .utils import send_log
 
-
 class Database:
 
     def __init__(self, uri, database_name):
+        # serverSelectionTimeoutMS=5000 means MongoDB gives up after 5 s rather
+        # than 10 s, keeping the bot responsive even when Atlas is unreachable.
         self._client = motor.motor_asyncio.AsyncIOMotorClient(
             uri,
             tlsAllowInvalidCertificates=True,
-            serverSelectionTimeoutMS=10000
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
         )
         self.db = self._client[database_name]
         self.col = self.db.user

@@ -1,3 +1,4 @@
+import asyncio
 import psutil
 import time
 import shutil
@@ -7,11 +8,21 @@ from helper.database import db
 from config import Config, Txt  
 from helper.utils import get_readable_file_size, get_readable_time, edit_message_content
 
+_DB_TIMEOUT = 5  # seconds – same guard as force_sub.py
+
+
+async def _safe(coro, default=None):
+    try:
+        return await asyncio.wait_for(coro, timeout=_DB_TIMEOUT)
+    except (asyncio.TimeoutError, Exception):
+        return default
+
 
 @Client.on_message(filters.private & filters.command("start"))
 async def start(client, message):
     user = message.from_user
-    await db.add_user(client, message)                
+    # Non-blocking add_user: skip on timeout so /start is instant
+    await _safe(db.add_user(client, message))                
     rows = [
         [
             InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇꜱ', url='https://t.me/Nex_bots'),

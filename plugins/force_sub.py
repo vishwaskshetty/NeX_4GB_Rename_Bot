@@ -1,3 +1,4 @@
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from pyrogram.errors import UserNotParticipant
@@ -8,6 +9,17 @@ from helper.database import db
 # NeX 4GB Rename Bot - Personal Bot Protection, Access Control & Force Sub
 # Developed by @Nex_bots
 
+_DB_TIMEOUT = 5  # seconds – max wait for any MongoDB call before fallback
+
+
+async def _safe(coro, default=None):
+    """Wrap any DB coroutine with a timeout so a slow/unreachable MongoDB
+    never blocks the bot's message handlers."""
+    try:
+        return await asyncio.wait_for(coro, timeout=_DB_TIMEOUT)
+    except (asyncio.TimeoutError, Exception):
+        return default
+
 
 async def is_subscribed(client: Client, user_id: int) -> bool:
     if not Config.FORCE_SUB:
@@ -15,7 +27,10 @@ async def is_subscribed(client: Client, user_id: int) -> bool:
     if user_id in Config.ADMIN:
         return True
     try:
-        member = await client.get_chat_member(Config.FORCE_SUB, user_id)
+        member = await asyncio.wait_for(
+            client.get_chat_member(Config.FORCE_SUB, user_id),
+            timeout=_DB_TIMEOUT
+        )
         if member.status in [
             ChatMemberStatus.OWNER,
             ChatMemberStatus.ADMINISTRATOR,
@@ -28,7 +43,7 @@ async def is_subscribed(client: Client, user_id: int) -> bool:
         return False
     except Exception as e:
         print(f"Force sub check error: {e}")
-        return True
+        return True  # fail-open
 
 
 async def get_invite_link(client: Client) -> str:
@@ -37,7 +52,7 @@ async def get_invite_link(client: Client) -> str:
         return "https://t.me/Nex_bots"
     if str(channel).startswith("-100"):
         try:
-            chat = await client.get_chat(int(channel))
+            chat = await asyncio.wait_for(client.get_chat(int(channel)), timeout=_DB_TIMEOUT)
             return chat.invite_link or "https://t.me/Nex_bots"
         except Exception:
             return "https://t.me/Nex_bots"
@@ -45,12 +60,17 @@ async def get_invite_link(client: Client) -> str:
     return f"https://t.me/{channel_clean}"
 
 
+# ---------------------------------------------------------------------------
+# MESSAGE INTERCEPTOR (group=-1 → runs BEFORE all other handlers)
+# Applies only to NON-admin users (admin always bypass via ~filters.user(ADMIN))
+# ---------------------------------------------------------------------------
 @Client.on_message(filters.private & ~filters.user(Config.ADMIN), group=-1)
 async def force_sub_message_interceptor(client, message):
     user_id = message.from_user.id
 
-    # 1. Ban Check
-    if await db.is_banned(user_id):
+    # 1. Ban Check (with timeout fallback – default=False means pass on timeout)
+    is_banned = await _safe(db.is_banned(user_id), default=False)
+    if is_banned:
         await message.reply_text(
             "🚫 <b>You are banned from using this bot.</b>\n\n"
             "If you believe this is an error, please contact @Nex_bots.",
@@ -59,10 +79,11 @@ async def force_sub_message_interceptor(client, message):
         message.stop_propagation()
         return
 
-    # 2. Bot Access Mode Check (Private vs Public)
-    bot_mode = await db.get_bot_mode()
+    # 2. Bot Access Mode (private vs public) – default="private" on timeout/error
+    bot_mode = await _safe(db.get_bot_mode(), default="private" if Config.OWNER_ONLY else "public")
     if bot_mode == "private":
-        is_auth = await db.is_auth_user(user_id)
+        # is_auth default=False means deny on DB timeout (safe for private mode)
+        is_auth = await _safe(db.is_auth_user(user_id), default=False)
         if not is_auth:
             await message.reply_text(
                 "🔒 <b>NeX 4GB Rename Bot is in Private Mode!</b>\n\n"
@@ -77,8 +98,8 @@ async def force_sub_message_interceptor(client, message):
             message.stop_propagation()
             return
 
-    # 3. Force Subscribe check in Public Mode
-    if Config.FORCE_SUB:
+    # 3. Force Subscribe check (only in public mode when FORCE_SUB is configured)
+    if Config.FORCE_SUB and bot_mode != "private":
         if not await is_subscribed(client, user_id):
             invite_link = await get_invite_link(client)
             button = InlineKeyboardMarkup([
@@ -95,46 +116,57 @@ async def force_sub_message_interceptor(client, message):
             message.stop_propagation()
             return
 
+    # User is allowed → DO NOT call stop_propagation() so group=0 handlers fire
+    # (Pyrogram automatically continues to the next group when no stop is issued)
 
+
+# ---------------------------------------------------------------------------
+# CALLBACK INTERCEPTOR (group=-1 → runs BEFORE all other callback handlers)
+# ---------------------------------------------------------------------------
 @Client.on_callback_query(~filters.user(Config.ADMIN), group=-1)
 async def force_sub_callback_interceptor(client, query: CallbackQuery):
+    # Let check_sub handle itself (it has its own handler below)
     if query.data == "check_sub":
         return
 
     user_id = query.from_user.id
 
     # 1. Ban Check
-    if await db.is_banned(user_id):
+    is_banned = await _safe(db.is_banned(user_id), default=False)
+    if is_banned:
         await query.answer("🚫 You are banned from using this bot.", show_alert=True)
         query.stop_propagation()
         return
 
-    # 2. Bot Access Mode Check
-    bot_mode = await db.get_bot_mode()
+    # 2. Access Mode
+    bot_mode = await _safe(db.get_bot_mode(), default="private" if Config.OWNER_ONLY else "public")
     if bot_mode == "private":
-        is_auth = await db.is_auth_user(user_id)
+        is_auth = await _safe(db.is_auth_user(user_id), default=False)
         if not is_auth:
             await query.answer("🔒 NeX 4GB Rename Bot is in Private Mode. Access Denied!", show_alert=True)
             query.stop_propagation()
             return
 
-    # 3. Force Subscribe check
-    if Config.FORCE_SUB:
+    # 3. Force Subscribe
+    if Config.FORCE_SUB and bot_mode != "private":
         if not await is_subscribed(client, user_id):
             await query.answer("⚠️ Please join @Nex_bots first before performing this action!", show_alert=True)
             query.stop_propagation()
             return
+
+    # Allowed → continue propagation naturally
 
 
 @Client.on_callback_query(filters.regex(r"^check_sub$"))
 async def check_sub_callback_handler(client, query: CallbackQuery):
     user_id = query.from_user.id
 
-    if await db.is_banned(user_id):
+    is_banned = await _safe(db.is_banned(user_id), default=False)
+    if is_banned:
         return await query.answer("🚫 You are banned from using this bot.", show_alert=True)
 
-    bot_mode = await db.get_bot_mode()
-    if bot_mode == "private" and not await db.is_auth_user(user_id):
+    bot_mode = await _safe(db.get_bot_mode(), default="private" if Config.OWNER_ONLY else "public")
+    if bot_mode == "private" and not await _safe(db.is_auth_user(user_id), default=False):
         return await query.answer("🔒 The bot is currently in Private Mode. Contact owner!", show_alert=True)
 
     if await is_subscribed(client, user_id):

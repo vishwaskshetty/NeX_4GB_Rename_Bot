@@ -20,21 +20,32 @@ from helper.utils import get_readable_file_size, edit_message_content
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+_DB_TIMEOUT = 5  # seconds for every DB call in this module
+
+
+async def _safe(coro, default=None):
+    """Wrap any DB coroutine with a timeout so a slow/unreachable MongoDB
+    never blocks admin commands."""
+    try:
+        return await asyncio.wait_for(coro, timeout=_DB_TIMEOUT)
+    except (asyncio.TimeoutError, Exception):
+        return default
+
 
 # ==================== LIVE OWNER DASHBOARD BUILDER ====================
 
 async def build_owner_panel(client: Client):
-    bot_mode = await db.get_bot_mode()
+    bot_mode = await _safe(db.get_bot_mode(), default="private" if Config.OWNER_ONLY else "public")
     mode_str = "🔒 Private (Owner/Auth)" if bot_mode == "private" else "🌍 Public (Everyone)"
     
     has_4gb = bool(getattr(client, "app_4gb", None))
     engine_str = "Active 🟢 (4GB Mode)" if has_4gb else "Inactive 🔴 (2GB Mode)"
     
-    total_users = await db.total_users_count()
-    auth_users = await db.get_auth_users()
-    prem_users = await db.get_premium_users()
-    banned_users = await db.get_banned_users()
-    default_meta = await db.get_default_metadata()
+    total_users = await _safe(db.total_users_count(), default=0)
+    auth_users  = await _safe(db.get_auth_users(),    default=[])
+    prem_users  = await _safe(db.get_premium_users(), default=[])
+    banned_users = await _safe(db.get_banned_users(), default=[])
+    default_meta = await _safe(db.get_default_metadata(), default="Telegram : @Nex_bots")
 
     total_disk, used_disk, free_disk = shutil.disk_usage(".")
     cpu = psutil.cpu_percent(interval=0.1)
@@ -273,9 +284,9 @@ async def owner_panel_cb(client, query: CallbackQuery):
 async def cb_owner_toggle_mode(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    curr = await db.get_bot_mode()
+    curr = await _safe(db.get_bot_mode(), default="private")
     new_mode = "public" if curr == "private" else "private"
-    await db.set_bot_mode(new_mode)
+    await _safe(db.set_bot_mode(new_mode))
     await query.answer(f"Bot Mode switched to {new_mode.upper()}! 🌐", show_alert=True)
     text, markup = await build_owner_panel(client)
     await edit_message_content(query.message, text, reply_markup=markup)
@@ -285,7 +296,7 @@ async def cb_owner_toggle_mode(client, query: CallbackQuery):
 async def cb_owner_auth(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    users = await db.get_auth_users()
+    users = await _safe(db.get_auth_users(), default=[])
     users_preview = ", ".join(map(str, users[:10])) if users else "None"
     if len(users) > 10:
         users_preview += f" (+{len(users)-10} more)"
@@ -309,7 +320,7 @@ async def cb_owner_auth(client, query: CallbackQuery):
 async def cb_owner_prem(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    users = await db.get_premium_users()
+    users = await _safe(db.get_premium_users(), default=[])
     users_preview = ", ".join(map(str, users[:10])) if users else "None"
     if len(users) > 10:
         users_preview += f" (+{len(users)-10} more)"
@@ -334,7 +345,7 @@ async def cb_owner_prem(client, query: CallbackQuery):
 async def cb_owner_banned(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    users = await db.get_banned_users()
+    users = await _safe(db.get_banned_users(), default=[])
     users_preview = ", ".join(map(str, users[:10])) if users else "None"
     if len(users) > 10:
         users_preview += f" (+{len(users)-10} more)"
@@ -357,7 +368,7 @@ async def cb_owner_banned(client, query: CallbackQuery):
 async def cb_owner_meta(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    default_meta = await db.get_default_metadata()
+    default_meta = await _safe(db.get_default_metadata(), default="Telegram : @Nex_bots")
     text = (
         "🏷️ <b><u>Global Bot Metadata Tag</u></b>\n\n"
         f"• <b>Current Global Tag:</b> <code>{default_meta}</code>\n\n"
@@ -376,7 +387,7 @@ async def cb_owner_meta(client, query: CallbackQuery):
 async def cb_owner_channels(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    owner_dump = await db.get_dump_channel(query.from_user.id)
+    owner_dump = await _safe(db.get_dump_channel(query.from_user.id), default=None)
     text = (
         "📦 <b><u>Channels & ForceSub Configuration</u></b>\n\n"
         f"• <b>Log Channel:</b> <code>{Config.LOG_CHANNEL or 'Disabled'}</code>\n"
@@ -396,7 +407,7 @@ async def cb_owner_stats(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
     uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - client.uptime))
-    total_users = await db.total_users_count()
+    total_users = await _safe(db.total_users_count(), default=0)
     total_disk, used_disk, free_disk = shutil.disk_usage(".")
     cpu = psutil.cpu_percent(interval=0.2)
     ram = psutil.virtual_memory().percent
@@ -463,7 +474,7 @@ async def get_stats(bot, message):
     st = await message.reply('⏳ <b>Calculating System Statistics...</b>')
     start_t = time.time()
     
-    total_users = await db.total_users_count()
+    total_users = await _safe(db.total_users_count(), default=0)
     uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - bot.uptime))
     end_t = time.time()
     ping_ms = (end_t - start_t) * 1000
@@ -516,7 +527,7 @@ async def broadcast_handler(bot: Client, m: Message):
     failed = 0
     success = 0
     start_time = time.time()
-    total_users = await db.total_users_count()
+    total_users = await _safe(db.total_users_count(), default=0)
 
     async for user in all_users:
         sts = await send_msg(user['_id'], broadcast_msg)
