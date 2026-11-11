@@ -23,6 +23,15 @@ TIER_LIMITS = {
 }
 
 
+LANG_TZ_MAP = {
+    "hi": "Asia/Kolkata", "ta": "Asia/Kolkata", "te": "Asia/Kolkata",
+    "kn": "Asia/Kolkata", "ml": "Asia/Kolkata", "bn": "Asia/Kolkata",
+    "mr": "Asia/Kolkata", "gu": "Asia/Kolkata", "pa": "Asia/Kolkata",
+    "en-in": "Asia/Kolkata", "en-gb": "Europe/London", "en-us": "America/New_York",
+    "ru": "Europe/Moscow", "ar": "Asia/Dubai", "id": "Asia/Jakarta"
+}
+
+
 def format_user_time(dt_or_ts, tz_name: str = "Asia/Kolkata") -> str:
     """Formats a timestamp or datetime object in user's timezone."""
     try:
@@ -61,9 +70,11 @@ class Database:
         self.col = self.db.user
         self.cfg = self.db.bot_config
 
-    def new_user(self, id):
+    def new_user(self, id, first_name="", username="", timezone="Asia/Kolkata"):
         return dict(
-            _id=int(id),                                   
+            _id=int(id),
+            first_name=first_name or "",
+            username=username or "",
             file_id=None,
             caption=None,
             prefix=None,
@@ -75,13 +86,19 @@ class Database:
             clean_words=None,
             replace_words=None,
             sample_duration=0,
+            sample_start_mode="auto",
             screenshots=0,
             upload_mode="Ask",
+            wm_enabled=False,
+            wm_text="",
+            wm_position="top_right",
+            wm_size=28,
+            wm_color="white",
             premium_tier=0,
             premium_expiry=0,
             plan_name="Free",
             trial_claimed=False,
-            timezone="Asia/Kolkata",
+            timezone=timezone or "Asia/Kolkata",
             files_renamed_total=0,
             bytes_used_total=0,
             daily_bytes_used=0,
@@ -91,10 +108,33 @@ class Database:
 
     async def add_user(self, b, m):
         u = m.from_user
+        if not u:
+            return
+        lang = (getattr(u, "language_code", None) or "").lower()
+        auto_tz = LANG_TZ_MAP.get(lang, "Asia/Kolkata")
         if not await self.is_user_exist(u.id):
-            user = self.new_user(u.id)
+            user = self.new_user(u.id, first_name=u.first_name, username=u.username, timezone=auto_tz)
             await self.col.insert_one(user)            
             await send_log(b, u)
+        else:
+            update_data = {}
+            if u.first_name:
+                update_data["first_name"] = u.first_name
+            if u.username:
+                update_data["username"] = u.username
+            if update_data:
+                await self.col.update_one({'_id': int(u.id)}, {'$set': update_data})
+
+    async def update_user_info(self, u):
+        if not u:
+            return
+        update_data = {}
+        if getattr(u, "first_name", None):
+            update_data["first_name"] = u.first_name
+        if getattr(u, "username", None):
+            update_data["username"] = u.username
+        if update_data:
+            await self.col.update_one({'_id': int(u.id)}, {'$set': update_data}, upsert=True)
 
     async def is_user_exist(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -642,6 +682,146 @@ class Database:
         text = str(text).strip()
         await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': {'default_metadata': text}}, upsert=True)
         return text
+
+    # ==================== WATERMARK METHODS ====================
+    async def get_watermark(self, user_id: int) -> dict:
+        user = await self.col.find_one({'_id': int(user_id)})
+        if not user:
+            return {
+                "enabled": False,
+                "text": "",
+                "position": "top_right",
+                "size": 28,
+                "color": "white"
+            }
+        return {
+            "enabled": bool(user.get("wm_enabled", False)),
+            "text": user.get("wm_text", ""),
+            "position": user.get("wm_position", "top_right"),
+            "size": int(user.get("wm_size", 28)),
+            "color": user.get("wm_color", "white")
+        }
+
+    async def set_watermark(self, user_id: int, **kwargs):
+        update_dict = {}
+        if "enabled" in kwargs:
+            update_dict["wm_enabled"] = bool(kwargs["enabled"])
+        if "text" in kwargs:
+            update_dict["wm_text"] = str(kwargs["text"]).strip()
+        if "position" in kwargs:
+            update_dict["wm_position"] = str(kwargs["position"]).strip().lower()
+        if "size" in kwargs:
+            update_dict["wm_size"] = int(kwargs["size"])
+        if "color" in kwargs:
+            update_dict["wm_color"] = str(kwargs["color"]).strip().lower()
+
+        if update_dict:
+            await self.col.update_one({'_id': int(user_id)}, {'$set': update_dict}, upsert=True)
+
+    # ==================== SAMPLE VIDEO SETTINGS ====================
+    async def get_sample_settings(self, user_id: int) -> dict:
+        user = await self.col.find_one({'_id': int(user_id)})
+        if not user:
+            return {"duration": 0, "start_mode": "auto"}
+        return {
+            "duration": int(user.get("sample_duration", 0)),
+            "start_mode": user.get("sample_start_mode", "auto")
+        }
+
+    async def set_sample_start_mode(self, user_id: int, start_mode: str):
+        await self.col.update_one({'_id': int(user_id)}, {'$set': {'sample_start_mode': str(start_mode)}}, upsert=True)
+
+    # ==================== TOP RENAMERS LEADERBOARD ====================
+    async def get_top_renamers(self, limit: int = 10) -> list:
+        cursor = self.col.find({"files_renamed_total": {"$gt": 0}}).sort("files_renamed_total", -1).limit(limit)
+        results = []
+        now = time.time()
+        async for doc in cursor:
+            tier = int(doc.get("premium_tier", 0))
+            expiry = float(doc.get("premium_expiry", 0) or 0)
+            if tier > 0 and expiry > 0 and now > expiry:
+                tier = 0
+            results.append({
+                "user_id": doc["_id"],
+                "first_name": doc.get("first_name") or "User",
+                "username": doc.get("username") or "",
+                "files": int(doc.get("files_renamed_total", 0)),
+                "bytes": int(doc.get("bytes_used_total", 0)),
+                "tier": tier
+            })
+        return results
+
+    async def get_user_rank(self, user_id: int) -> dict:
+        user = await self.col.find_one({'_id': int(user_id)})
+        if not user:
+            return {"rank": "-", "files": 0, "bytes": 0}
+        user_files = int(user.get("files_renamed_total", 0))
+        if user_files == 0:
+            return {"rank": "-", "files": 0, "bytes": 0}
+        higher_count = await self.col.count_documents({"files_renamed_total": {"$gt": user_files}})
+        return {
+            "rank": higher_count + 1,
+            "files": user_files,
+            "bytes": int(user.get("bytes_used_total", 0))
+        }
+
+    # ==================== MAINTENANCE & CONTENT PROTECTION ====================
+    async def get_maintenance(self) -> bool:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        return bool(cfg.get('maintenance', False)) if cfg else False
+
+    async def set_maintenance(self, status: bool) -> bool:
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': {'maintenance': bool(status)}}, upsert=True)
+        return bool(status)
+
+    async def get_protect_content(self) -> bool:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        return bool(cfg.get('protect_content', False)) if cfg else False
+
+    async def set_protect_content(self, status: bool) -> bool:
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': {'protect_content': bool(status)}}, upsert=True)
+        return bool(status)
+
+    # ==================== DYNAMIC FORCE-SUB ====================
+    async def get_fsub_settings(self) -> dict:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        if cfg and 'fsub_channel' in cfg:
+            return {
+                "channel": cfg.get('fsub_channel'),
+                "mode": cfg.get('fsub_mode', 'normal'),
+                "enabled": bool(cfg.get('fsub_enabled', True))
+            }
+        # Fallback to Config.FORCE_SUB
+        return {
+            "channel": Config.FORCE_SUB,
+            "mode": "normal",
+            "enabled": bool(Config.FORCE_SUB)
+        }
+
+    async def set_fsub_settings(self, channel, mode: str = "normal", enabled: bool = True):
+        await self.cfg.update_one(
+            {'_id': 'bot_settings'},
+            {'$set': {
+                'fsub_channel': channel,
+                'fsub_mode': mode if mode in ("normal", "request") else "normal",
+                'fsub_enabled': bool(enabled)
+            }},
+            upsert=True
+        )
+
+    async def add_fsub_request(self, chat_id: int, user_id: int):
+        await self.cfg.update_one(
+            {'_id': 'bot_settings'},
+            {'$addToSet': {f'fsub_requests_{chat_id}': int(user_id)}},
+            upsert=True
+        )
+
+    async def has_fsub_request(self, chat_id: int, user_id: int) -> bool:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'})
+        if not cfg:
+            return False
+        reqs = cfg.get(f'fsub_requests_{chat_id}', [])
+        return int(user_id) in reqs
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

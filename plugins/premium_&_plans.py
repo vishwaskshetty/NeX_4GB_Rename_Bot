@@ -39,19 +39,15 @@ async def build_plans_panel(user_id: int):
     trial_status = "Claimed ✅" if has_trial else "Available 🎁"
 
     text = (
-        "💎 <b><u>NeX 4GB Premium & Plans Hub</u></b> ⚡\n\n"
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   💎 <b>NeX 4GB Premium Hub</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>Your Status :</b> <b>{current_plan}</b>\n"
         f"◈ <b>3-Day Trial :</b> <code>{trial_status}</code>\n\n"
-        "<b>Available Premium Levels:</b>\n\n"
-        "🥈 <b>Level 1: Silver (30 Days)</b>\n"
-        "• 4GB Uploads | 25 GB/Day | 2 Concurrency\n"
-        "• Price: ⭐ 50 Stars | ₹49 UPI\n\n"
-        "🥇 <b>Level 2: Gold (30 Days)</b>\n"
-        "• 4GB Uploads | 75 GB/Day | 3 Concurrency + Video Tools\n"
-        "• Price: ⭐ 100 Stars | ₹99 UPI\n\n"
-        "💎 <b>Level 3: Diamond (30 Days)</b>\n"
-        "• 4GB Uploads | <b>UNLIMITED</b> | 5 Concurrency + VIP Queue\n"
-        "• Price: ⭐ 200 Stars | ₹199 UPI\n\n"
+        "<b>Available Premium Levels:</b>\n"
+        "🥈 <b>Silver (30 Days) :</b> 4GB | 25 GB/Day | ₹49 / 50 ⭐\n"
+        "🥇 <b>Gold (30 Days) :</b> 4GB | 75 GB/Day | ₹99 / 100 ⭐\n"
+        "💎 <b>Diamond VIP :</b> 4GB | <b>UNLIMITED</b> | ₹199 / 200 ⭐\n\n"
         "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
 
@@ -73,7 +69,10 @@ async def build_plans_panel(user_id: int):
         ],
         [
             InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot"),
-            InlineKeyboardButton("🔙 Back to Start", callback_data="start")
+            InlineKeyboardButton("⬅️ Back", callback_data="start")
+        ],
+        [
+            InlineKeyboardButton("❌ Close", callback_data="close")
         ]
     ])
 
@@ -207,7 +206,9 @@ async def build_usage_card(user_id: int):
     bar = "■" * blocks + "□" * (10 - blocks)
 
     text = (
-        f"📊 <b><u>My Plan & Usage Dashboard</u></b> ⚡\n\n"
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   📊 <b>My Plan & Usage Dashboard</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>User ID :</b> <code>{user_id}</code>\n"
         f"◈ <b>Current Tier :</b> <b>{prem_info['plan_name']}</b>\n"
         f"◈ <b>Plan Expiry :</b> <code>{expiry_str}</code> ({countdown_str})\n"
@@ -225,7 +226,8 @@ async def build_usage_card(user_id: int):
         [InlineKeyboardButton("💎 Upgrade / Extend Plan", callback_data="open_plans")],
         [InlineKeyboardButton("🌍 Change Timezone", callback_data="open_timezone_menu"),
          InlineKeyboardButton("🔄 Refresh", callback_data="my_plan_cb")],
-        [InlineKeyboardButton("🔙 Back to Settings", callback_data="open_settings")]
+        [InlineKeyboardButton("⬅️ Back to Settings", callback_data="open_settings"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
     return text, keyboard
 
@@ -234,11 +236,13 @@ async def build_timezone_menu(user_id: int):
     current_tz = await db.get_timezone(user_id)
     now_str = format_user_time(time.time(), current_tz)
     text = (
-        "🌍 <b><u>Timezone Configuration</u></b> ⚡\n\n"
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🌍 <b>Timezone Configuration</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>Active Timezone :</b> <code>{current_tz}</code>\n"
         f"◈ <b>Current Local Time :</b> <code>{now_str}</code>\n\n"
         "<i>Select a region below or type <code>/timezone Region/City</code>:</i>\n\n"
-        "⚡ @Nex_bots"
+        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
 
     keyboard = InlineKeyboardMarkup([
@@ -258,7 +262,8 @@ async def build_timezone_menu(user_id: int):
             InlineKeyboardButton("🇦🇺 Sydney (AEST)", callback_data="select_tz_Australia/Sydney")
         ],
         [
-            InlineKeyboardButton("🔙 Back to Usage", callback_data="my_plan_cb")
+            InlineKeyboardButton("⬅️ Back to Settings", callback_data="open_settings"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
         ]
     ])
     return text, keyboard
@@ -347,7 +352,8 @@ async def plan_details_cb(client, query: CallbackQuery):
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton(f"⭐ Pay with Stars ({p['stars']} XTR)", callback_data=f"pay_stars_{tier}")],
         [InlineKeyboardButton(f"🇮🇳 Pay via UPI (₹{p['inr']})", callback_data=f"pay_upi_{tier}")],
-        [InlineKeyboardButton("🔙 Back to Plans", callback_data="open_plans")]
+        [InlineKeyboardButton("⬅️ Back to Plans", callback_data="open_plans"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
@@ -376,7 +382,8 @@ async def pay_upi_cb(client, query: CallbackQuery):
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("📤 Send Screenshot (@NexCRSupportbot)", url="https://t.me/NexCRSupportbot")],
         [InlineKeyboardButton("🔔 Notify Admin of UPI Transfer", callback_data=f"notify_upi_paid_{tier}")],
-        [InlineKeyboardButton("🔙 Back to Plan", callback_data=f"plan_details_{tier}")]
+        [InlineKeyboardButton("⬅️ Back to Plan", callback_data=f"plan_details_{tier}"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
@@ -511,3 +518,4 @@ async def select_tz_cb(client, query: CallbackQuery):
         await edit_message_content(query.message, text, reply_markup=markup)
     else:
         await query.answer("❌ Invalid timezone selected.", show_alert=True)
+

@@ -34,7 +34,8 @@ from helper.ffmpeg_utils import (
     inject_metadata,
     generate_sample_video,
     generate_screenshots,
-    get_video_duration_and_dims
+    get_video_duration_and_dims,
+    apply_video_watermark
 )
 from helper.database import db, TIER_LIMITS
 from config import Config
@@ -106,6 +107,11 @@ async def rename_start(client, message):
     file_extension = ext.replace(".", "") if ext else "unknown"
     mime_type = get_full_mime_type(filename)
     user_id = message.from_user.id
+    try:
+        asyncio.create_task(db.update_user_info(message.from_user))
+    except Exception:
+        pass
+
     username = message.from_user.username or "No Username"
     user_mention = message.from_user.mention
     user_link = f"<a href='tg://openmessage?user_id={user_id}'>Click Here</a>"
@@ -138,6 +144,23 @@ async def rename_start(client, message):
     tier_limits = TIER_LIMITS.get(user_tier, TIER_LIMITS[0])
     max_size = tier_limits["max_file_size"]
     daily_limit = tier_limits["daily_bytes"]
+
+    # 2GB+ File Upsell for Normal Users
+    if file_size > (2 * 1024 * 1024 * 1024) and user_tier == 0 and user_id not in Config.ADMIN:
+        return await message.reply_text(
+            f"💎 <b>4GB+ Premium File Detected!</b>\n\n"
+            f"📦 <b>File Size:</b> <code>{filesize}</code>\n"
+            f"⚠️ Normal users can rename files up to <b>2.0 GB</b>.\n\n"
+            f"🚀 Upgrade to <b>Premium</b> to unlock <b>4GB+ High-Speed Renaming</b>, Custom Watermarks, and Sample Videos!",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("💎 Buy Premium Plan", callback_data="open_plans"),
+                    InlineKeyboardButton("🎁 Claim 3-Day Free Trial", callback_data="claim_trial_cb")
+                ],
+                [InlineKeyboardButton("❌ Close", callback_data="close")]
+            ]),
+            quote=True
+        )
 
     if file_size > max_size and user_id not in Config.ADMIN:
         await message.reply_text(
@@ -432,6 +455,32 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             # 3. Extract accurate duration, width, and height using ffprobe & hachoir
             duration, width, height = await get_video_duration_and_dims(file_path)
 
+            # 3.1 Apply Video Watermark if enabled & user is premium
+            is_video = (upload_type == "video") or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
+            is_prem = (user_tier >= 1) or (user_id in Config.ADMIN)
+            wm_info = await db.get_watermark(user_id)
+
+            if is_video and is_prem and wm_info.get("enabled") and wm_info.get("text"):
+                await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                wm_file = os.path.join(work_dir, f"wm_{new_filename}")
+                wm_ok = await apply_video_watermark(
+                    input_path=file_path,
+                    output_path=wm_file,
+                    text=wm_info.get("text"),
+                    position=wm_info.get("position", "top_right"),
+                    size=wm_info.get("size", 28),
+                    color=wm_info.get("color", "white")
+                )
+                if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except Exception:
+                        pass
+                    file_path = wm_file
+                    actual_file_size = os.path.getsize(file_path)
+                    duration, width, height = await get_video_duration_and_dims(file_path)
+
             # 4. Process Custom Thumbnail with Aspect Ratio Preservation
             c_thumb = await db.get_thumbnail(user_id)
             media = file_msg.document or file_msg.video or file_msg.audio
@@ -454,7 +503,7 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                     print(f"Thumbnail processing error: {e}")
                     ph_path = None
 
-            # 5. Format Custom Caption
+            # 5. Format Clean Caption (NEVER append @Nex_bots to filename or default caption!)
             c_caption = await db.get_caption(user_id)
             if c_caption:
                 try:
@@ -464,9 +513,16 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         duration=convert(duration)
                     )
                 except Exception:
-                    caption = f"<b>{new_filename}</b>\n\n⚡ @Nex_bots"
+                    caption = f"**{new_filename}**"
             else:
-                caption = f"<b>{new_filename}</b>\n\n⚡ @Nex_bots"
+                caption = f"**{new_filename}**"
+
+            # 15-Minute Copyright Auto-Delete notice for user
+            copyright_note = "\n\n⏳ <b>Note:</b> This file will be automatically deleted in <b>15 minutes</b> due to copyright protection. Please forward it to your <b>Saved Messages</b>!"
+            user_caption = caption + copyright_note if len(caption) + len(copyright_note) < 1000 else caption
+
+            # Check Bot Content Protection status
+            protect_content = await db.get_protect_content()
 
             # 6. Determine 4GB Routing & Dump Channel
             user_dump = await db.get_dump_channel(user_id)
@@ -479,6 +535,7 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
 
             await ms.edit(upload_mode_tag)
             upload_start = time.time()
+            user_sent_msgs = []
 
             try:
                 # 4GB Upload Flow (> 1.95GB)
@@ -490,7 +547,8 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                             chat_id=upload_target,
                             document=file_path,
                             thumb=ph_path,
-                            caption=caption,
+                            caption=caption if upload_target != user_id else user_caption,
+                            protect_content=protect_content if upload_target == user_id else False,
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
@@ -498,12 +556,13 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         sent_msg = await uploader.send_video(
                             chat_id=upload_target,
                             video=file_path,
-                            caption=caption,
+                            caption=caption if upload_target != user_id else user_caption,
                             thumb=ph_path,
                             duration=duration,
                             width=width,
                             height=height,
                             supports_streaming=True,
+                            protect_content=protect_content if upload_target == user_id else False,
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
@@ -511,21 +570,26 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         sent_msg = await uploader.send_audio(
                             chat_id=upload_target,
                             audio=file_path,
-                            caption=caption,
+                            caption=caption if upload_target != user_id else user_caption,
                             thumb=ph_path,
                             duration=duration,
+                            protect_content=protect_content if upload_target == user_id else False,
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
 
-                    # Copy to user DM if uploaded via dump channel
-                    if upload_target != user_id:
-                        await client.copy_message(
+                    if upload_target == user_id:
+                        user_sent_msgs.append(sent_msg.id)
+                    else:
+                        # Copy to user DM if uploaded via dump channel
+                        copied = await client.copy_message(
                             chat_id=user_id,
                             from_chat_id=upload_target,
                             message_id=sent_msg.id,
-                            caption=caption
+                            caption=user_caption,
+                            protect_content=protect_content
                         )
+                        user_sent_msgs.append(copied.id)
                 else:
                     # Standard Upload Flow (<= 1.95GB)
                     if upload_type == "document":
@@ -533,7 +597,8 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                             chat_id=user_id,
                             document=file_path,
                             thumb=ph_path,
-                            caption=caption,
+                            caption=user_caption,
+                            protect_content=protect_content,
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
@@ -541,12 +606,13 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         sent_msg = await client.send_video(
                             chat_id=user_id,
                             video=file_path,
-                            caption=caption,
+                            caption=user_caption,
                             thumb=ph_path,
                             duration=duration,
                             width=width,
                             height=height,
                             supports_streaming=True,
+                            protect_content=protect_content,
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
@@ -554,12 +620,15 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         sent_msg = await client.send_audio(
                             chat_id=user_id,
                             audio=file_path,
-                            caption=caption,
+                            caption=user_caption,
                             thumb=ph_path,
                             duration=duration,
+                            protect_content=protect_content,
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
+
+                    user_sent_msgs.append(sent_msg.id)
 
                     # Track usage statistics
                     try:
@@ -579,28 +648,36 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             except Exception as e:
                 return await ms.edit(f"❌ <b>Upload Failed:</b> <code>{e}</code>")
 
-            # 7. Sample Video Generation (if enabled in settings)
-            sample_duration = await db.get_sample_duration(user_id)
-            is_video = (upload_type == "video") or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
+            # 7. Sample Video Generation (No Thumbnail + Custom Timeline Mode)
+            sample_settings = await db.get_sample_settings(user_id)
+            sample_duration = sample_settings.get("duration", 0)
 
             if sample_duration > 0 and is_video:
                 try:
                     await ms.edit("<b>◈ ɢᴇɴᴇʀᴀᴛɪɴɢ ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ... 🎬</b>")
                     sample_path = os.path.join(work_dir, f"sample_{new_filename}")
-                    sample_ok = await generate_sample_video(file_path, sample_path, duration, sample_duration)
+                    sample_ok = await generate_sample_video(
+                        input_path=file_path,
+                        output_path=sample_path,
+                        total_duration=duration,
+                        sample_sec=sample_duration,
+                        start_mode=sample_settings.get("start_mode", "auto")
+                    )
                     if sample_ok:
-                        sample_cap = f"🎬 <b>ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ ({sample_duration}ꜱ)</b>\n\n🏷 <code>{new_filename}</code>\n\n⚡ Powered by @Nex_bots"
+                        sample_cap = f"🎬 <b>ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ ({sample_duration}ꜱ)</b>\n\n🏷 <code>{new_filename}</code>{copyright_note}"
                         sample_dur, s_w, s_h = await get_video_duration_and_dims(sample_path)
-                        await client.send_video(
+                        s_msg = await client.send_video(
                             chat_id=user_id,
                             video=sample_path,
                             caption=sample_cap,
-                            thumb=ph_path,
+                            thumb=None,
                             duration=sample_dur or sample_duration,
                             width=s_w or width,
                             height=s_h or height,
-                            supports_streaming=True
+                            supports_streaming=True,
+                            protect_content=protect_content
                         )
+                        user_sent_msgs.append(s_msg.id)
                 except Exception as e:
                     print(f"Sample video error: {e}")
 
@@ -614,11 +691,22 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                     if ss_list:
                         media_group = []
                         for idx, sp in enumerate(ss_list):
-                            cap = f"📸 Screenshot {idx+1}/{len(ss_list)} - {new_filename}\n⚡ @Nex_bots" if idx == 0 else ""
+                            cap = f"📸 Screenshot {idx+1}/{len(ss_list)} - {new_filename}" if idx == 0 else ""
                             media_group.append(InputMediaPhoto(media=sp, caption=cap))
-                        await client.send_media_group(chat_id=user_id, media=media_group)
+                        ss_msgs = await client.send_media_group(chat_id=user_id, media=media_group, protect_content=protect_content)
+                        user_sent_msgs.extend([m.id for m in ss_msgs])
                 except Exception as e:
                     print(f"Screenshots error: {e}")
+
+            # 8.1 Spawn 15-Minute Copyright Auto-Delete Task (User Private Chat Only)
+            if user_sent_msgs:
+                async def _auto_delete_copyright_media(c_id, msg_ids):
+                    await asyncio.sleep(900)  # 15 minutes = 900 seconds
+                    try:
+                        await client.delete_messages(chat_id=c_id, message_ids=msg_ids)
+                    except Exception:
+                        pass
+                asyncio.create_task(_auto_delete_copyright_media(user_id, user_sent_msgs))
 
         except Exception as e:
             return await ms.edit(f"❌ <b>Error occurred:</b> <code>{e}</code>")

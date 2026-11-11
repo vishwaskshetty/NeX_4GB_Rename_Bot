@@ -34,14 +34,63 @@ async def _safe(coro, default=None):
 BROADCAST_CACHE = {}
 
 
+async def send_security_alert(client: Client, user, action_desc: str):
+    if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
+        try:
+            alert_msg = (
+                "🚨 <b>SECURITY ALERT: Unauthorized Owner Access Attempt!</b>\n\n"
+                f"👤 <b>User :</b> {user.mention} (<code>{user.id}</code>)\n"
+                f"🏷 <b>Username :</b> @{user.username or 'No Username'}\n"
+                f"⚠️ <b>Action :</b> <code>{action_desc}</code>\n"
+                f"⏰ <b>Time :</b> <code>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n"
+                "⚡ @Nex_bots"
+            )
+            await client.send_message(Config.LOG_CHANNEL, alert_msg)
+        except Exception:
+            pass
+
+
+ADMIN_COMMANDS = [
+    "owner", "admin", "mode", "maintenance", "fsub", "set_fsub", "add_user", "rem_user",
+    "auth_list", "add_prem", "rem_prem", "prem_list", "coupons", "add_coupon",
+    "del_coupon", "set_upi", "ban", "unban", "set_global_meta", "restart",
+    "broadcast", "bcast_btn"
+]
+
+
+@Client.on_message(filters.private & filters.command(ADMIN_COMMANDS) & ~filters.user(Config.ADMIN), group=1)
+async def unauthorized_owner_cmd(client, message):
+    user = message.from_user
+    await message.reply_text(
+        "🚨 <b>SECURITY ALERT: Unauthorized Access!</b>\n\n"
+        "This command is strictly restricted to the Bot Owner. Your attempt has been logged."
+    )
+    await send_security_alert(client, user, f"Command: {message.text}")
+
+
+@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_)") & ~filters.user(Config.ADMIN), group=1)
+async def unauthorized_owner_cb(client, query: CallbackQuery):
+    await query.answer("🚨 SECURITY ALERT: Unauthorized Access! This action has been logged.", show_alert=True)
+    await send_security_alert(client, query.from_user, f"Callback: {query.data}")
+
+
 # ==================== LIVE OWNER DASHBOARD BUILDER ====================
 
 async def build_owner_panel(client: Client):
     bot_mode = await _safe(db.get_bot_mode(), default="private" if Config.OWNER_ONLY else "public")
-    mode_str = "🔒 Private (Owner/Auth)" if bot_mode == "private" else "🌍 Public (Everyone)"
+    mode_str = "🔒 Private" if bot_mode == "private" else "🌍 Public"
+    
+    maint_on = await _safe(db.get_maintenance(), default=False)
+    maint_str = "ON 🔴" if maint_on else "OFF 🟢"
+
+    protect_on = await _safe(db.get_protect_content(), default=False)
+    protect_str = "ON 🔒" if protect_on else "OFF 🔓"
+
+    fsub = await _safe(db.get_fsub_settings(), default={"channel": Config.FORCE_SUB, "mode": "normal", "enabled": bool(Config.FORCE_SUB)})
+    fsub_mode_str = "Request 🔒" if fsub.get("mode") == "request" else "Normal 🌐"
     
     has_4gb = bool(getattr(client, "app_4gb", None))
-    engine_str = "Active 🟢 (4GB Mode)" if has_4gb else "Inactive 🔴 (2GB Mode)"
+    engine_str = "Active 🟢 (4GB Session)" if has_4gb else "Inactive 🔴 (2GB Mode)"
     
     total_users = await _safe(db.total_users_count(), default=0)
     auth_users  = await _safe(db.get_auth_users(),    default=[])
@@ -64,34 +113,41 @@ async def build_owner_panel(client: Client):
     tot_bytes  = usage_stats.get("global_bytes", 0)
 
     text = (
-        "👑 <b><u>NeX 4GB Owner Control Panel</u></b> ⚡\n\n"
-        f"◈ <b>🌐 Bot Mode :</b> <code>{mode_str}</code>\n"
-        f"◈ <b>🚀 4GB Engine :</b> <code>{engine_str}</code>\n"
-        f"◈ <b>💳 Active UPI :</b> <code>{upi_id}</code>\n"
-        f"◈ <b>🏷️ Global Meta :</b> <code>{default_meta}</code>\n\n"
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   👑 <b>NeX Owner Control Panel</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>🌐 Mode :</b> <code>{mode_str}</code> | <b>🛠️ Maint :</b> <code>{maint_str}</code>\n"
+        f"◈ <b>🛡️ Lock :</b> <code>{protect_str}</code> | <b>📢 FSub :</b> <code>{fsub_mode_str}</code>\n"
+        f"◈ <b>🚀 4GB Client :</b> <code>{engine_str}</code>\n"
+        f"◈ <b>💳 Active UPI :</b> <code>{upi_id}</code>\n\n"
         f"◈ <b>👥 Total Users :</b> <code>{total_users}</code> | <b>Trials :</b> <code>{trials_cnt}</code>\n"
         f"◈ <b>💎 Premium :</b> <code>{total_prem}</code> (🥈{silver_cnt} 🥇{gold_cnt} 💎{diam_cnt})\n"
         f"◈ <b>🛡️ Auth :</b> <code>{len(auth_users)}</code> | <b>🚫 Banned :</b> <code>{len(banned_users)}</code> | <b>🎟️ Coupons :</b> <code>{len(coupons)}</code>\n\n"
         f"◈ <b>📈 Activity :</b> <code>{tot_files}</code> files ({humanbytes(tot_bytes)})\n"
         f"◈ <b>💾 Free Disk :</b> <code>{get_readable_file_size(free_disk)}</code> / <code>{get_readable_file_size(total_disk)}</code>\n"
         f"◈ <b>🖥️ RAM :</b> <code>{ram}%</code> | <b>CPU :</b> <code>{cpu}%</code>\n\n"
-        "⚡ <b>NeX 4GB Rename Bot</b> | @Nex_bots"
+        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
 
     keyboard = [
         [
-            InlineKeyboardButton(f"🔄 Mode: {'🔒 Private' if bot_mode == 'private' else '🌍 Public'}", callback_data="cb_owner_toggle_mode")
+            InlineKeyboardButton(f"🌐 Mode: {mode_str}", callback_data="cb_owner_toggle_mode"),
+            InlineKeyboardButton(f"🛠️ Maint: {maint_str}", callback_data="cb_owner_toggle_maint")
         ],
         [
-            InlineKeyboardButton(f"💎 Premium Users ({total_prem})", callback_data="cb_prem_page_0"),
-            InlineKeyboardButton(f"🛡️ Auth Users ({len(auth_users)})", callback_data="cb_owner_auth")
+            InlineKeyboardButton(f"🛡️ Lock: {protect_str}", callback_data="cb_owner_toggle_protect"),
+            InlineKeyboardButton(f"📢 FSub: {fsub_mode_str}", callback_data="cb_owner_fsub")
+        ],
+        [
+            InlineKeyboardButton(f"💎 Premium ({total_prem})", callback_data="cb_prem_page_0"),
+            InlineKeyboardButton(f"🛡️ Auth ({len(auth_users)})", callback_data="cb_owner_auth")
         ],
         [
             InlineKeyboardButton(f"🎟️ Coupons ({len(coupons)})", callback_data="cb_owner_coupons"),
-            InlineKeyboardButton("📈 Global Analytics", callback_data="cb_owner_analytics")
+            InlineKeyboardButton("📈 Analytics", callback_data="cb_owner_analytics")
         ],
         [
-            InlineKeyboardButton(f"🚫 Banned Users ({len(banned_users)})", callback_data="cb_owner_banned"),
+            InlineKeyboardButton(f"🚫 Banned ({len(banned_users)})", callback_data="cb_owner_banned"),
             InlineKeyboardButton("🏷️ Global Meta", callback_data="cb_owner_meta")
         ],
         [
@@ -99,7 +155,7 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton("📦 Channels & Dumps", callback_data="cb_owner_channels")
         ],
         [
-            InlineKeyboardButton("⚙️ My Rename Settings", callback_data="open_settings"),
+            InlineKeyboardButton("⚙️ My Settings", callback_data="open_settings"),
             InlineKeyboardButton("📊 Server Stats", callback_data="cb_owner_stats")
         ],
         [
@@ -107,7 +163,8 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton("🔄 Restart Bot", callback_data="cb_owner_restart")
         ],
         [
-            InlineKeyboardButton("🔙 Back to Start", callback_data="start")
+            InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
         ]
     ]
     return text, InlineKeyboardMarkup(keyboard)
@@ -453,8 +510,11 @@ async def cb_prem_page(client, query: CallbackQuery):
         buttons.append(nav_row)
 
     buttons.append([
-        InlineKeyboardButton("➕ Add Premium Help", callback_data="cb_add_prem_help"),
-        InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")
+        InlineKeyboardButton("➕ Add Premium Help", callback_data="cb_add_prem_help")
+    ])
+    buttons.append([
+        InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+        InlineKeyboardButton("❌ Close", callback_data="close")
     ])
 
     await edit_message_content(query.message, text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -531,7 +591,10 @@ async def cb_owner_auth(client, query: CallbackQuery):
     for uid in users[:6]:
         buttons.append([InlineKeyboardButton(f"🗑️ Remove {uid}", callback_data=f"cb_del_auth_{uid}")])
 
-    buttons.append([InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")])
+    buttons.append([
+        InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+        InlineKeyboardButton("❌ Close", callback_data="close")
+    ])
     await edit_message_content(query.message, text, reply_markup=InlineKeyboardMarkup(buttons))
     await query.answer()
 
@@ -571,7 +634,10 @@ async def cb_owner_banned(client, query: CallbackQuery):
     for uid in users[:6]:
         buttons.append([InlineKeyboardButton(f"✅ Unban {uid}", callback_data=f"cb_del_ban_{uid}")])
 
-    buttons.append([InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")])
+    buttons.append([
+        InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+        InlineKeyboardButton("❌ Close", callback_data="close")
+    ])
     await edit_message_content(query.message, text, reply_markup=InlineKeyboardMarkup(buttons))
     await query.answer()
 
@@ -615,7 +681,10 @@ async def cb_owner_coupons(client, query: CallbackQuery):
         buttons.append([InlineKeyboardButton(f"🗑️ Delete {code}", callback_data=f"cb_del_coupon_{code}")])
 
     buttons.append([InlineKeyboardButton("🎲 Generate Quick Coupon", callback_data="cb_gen_quick_coupon")])
-    buttons.append([InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")])
+    buttons.append([
+        InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+        InlineKeyboardButton("❌ Close", callback_data="close")
+    ])
 
     await edit_message_content(query.message, text, reply_markup=InlineKeyboardMarkup(buttons))
     await query.answer()
@@ -662,7 +731,10 @@ async def cb_owner_analytics(client, query: CallbackQuery):
         f"  • 🎁 Trials Claimed  : <code>{stats.get('trials_claimed', 0)}</code>\n\n"
         "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")]])
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
 
@@ -680,7 +752,10 @@ async def cb_owner_set_upi_cb(client, query: CallbackQuery):
         "<i>Example:</i> <code>/set_upi nexbots@okaxis</code>\n\n"
         "⚡ @Nex_bots"
     )
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")]])
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
 
@@ -699,7 +774,10 @@ async def cb_owner_meta(client, query: CallbackQuery):
         "• <code>/toggle_metadata</code> - Toggle your metadata\n\n"
         "⚡ @Nex_bots"
     )
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")]])
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
     await edit_message_content(query.message, text, reply_markup=btn)
     await query.answer()
 
@@ -719,31 +797,174 @@ async def cb_owner_channels(client, query: CallbackQuery):
         "<b>Command:</b> <code>/set_dump &lt;channel_id&gt;</code>\n\n"
         "⚡ @Nex_bots"
     )
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Owner Panel", callback_data="owner_panel")]])
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
     await edit_message_content(query.message, text, reply_markup=btn)
     await query.answer()
 
 
-@Client.on_callback_query(filters.regex(r"^cb_owner_stats$"))
-async def cb_owner_stats(client, query: CallbackQuery):
-    if query.from_user.id not in Config.ADMIN:
-        return await query.answer("❌ Owner only access!", show_alert=True)
-    uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - client.uptime))
-    total_users = await db.total_users_count()
-    total_disk, used_disk, free_disk = shutil.disk_usage(".")
-    cpu = psutil.cpu_percent(interval=0.2)
-    ram = psutil.virtual_memory().percent
-    
-    stats_msg = (
-        f"⚡ NeX Live Stats ⚡\n"
-        f"⏱️ Uptime: {uptime}\n"
-        f"👥 Users: {total_users}\n"
-        f"🖥️ CPU: {cpu}% | ❖ RAM: {ram}%\n"
-        f"💿 Free: {get_readable_file_size(free_disk)}"
-    )
-    await query.answer(stats_msg, show_alert=True)
+@Client.on_callback_query(filters.regex(r"^cb_owner_toggle_maint$") & filters.user(Config.ADMIN))
+async def cb_owner_toggle_maint_cb(client, query: CallbackQuery):
+    current = await db.get_maintenance()
+    new_state = not current
+    await db.set_maintenance(new_state)
+    await query.answer(f"Maintenance Mode {'ENABLED 🔴' if new_state else 'DISABLED 🟢'}", show_alert=True)
     text, markup = await build_owner_panel(client)
     await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_toggle_protect$") & filters.user(Config.ADMIN))
+async def cb_owner_toggle_protect_cb(client, query: CallbackQuery):
+    current = await db.get_protect_content()
+    new_state = not current
+    await db.set_protect_content(new_state)
+    await query.answer(f"Forward Lock {'ENABLED 🔒' if new_state else 'DISABLED 🔓'}", show_alert=True)
+    text, markup = await build_owner_panel(client)
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_message(filters.private & filters.command("maintenance") & filters.user(Config.ADMIN))
+async def maintenance_cmd(client, message):
+    current = await db.get_maintenance()
+    new_state = not current
+    await db.set_maintenance(new_state)
+    await message.reply_text(
+        f"🛠️ <b>Maintenance Mode:</b> {'ENABLED 🔴' if new_state else 'DISABLED 🟢'}\n\n"
+        f"<i>When enabled, only Admins can start tasks or access the bot.</i>\n⚡ @Nex_bots"
+    )
+
+
+# ==================== DYNAMIC FORCE-SUB SUBMENU ====================
+
+async def build_fsub_view():
+    fsub = await db.get_fsub_settings()
+    channel = fsub.get("channel") or "Not Configured"
+    mode = fsub.get("mode", "normal")
+    enabled = fsub.get("enabled", True)
+
+    mode_label = "🔒 Request-to-Join Mode" if mode == "request" else "🌐 Normal Join Mode"
+    status_label = "ENABLED 🟢" if enabled else "DISABLED 🔴"
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   📢 <b>Dynamic Force-Sub Settings</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Channel :</b> <code>{channel}</code>\n"
+        f"◈ <b>Mode :</b> <b>{mode_label}</b>\n"
+        f"◈ <b>Status :</b> <b>{status_label}</b>\n\n"
+        "<b>Commands to manage:</b>\n"
+        "• <code>/set_fsub &lt;channel_id_or_username&gt; [normal|request]</code>\n"
+        "• <code>/set_fsub off</code> (to disable Force-Sub)\n\n"
+        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+    )
+
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"Mode: {'Switch to Normal 🌐' if mode == 'request' else 'Switch to Request 🔒'}", callback_data="cb_owner_fsub_toggle_mode")],
+        [InlineKeyboardButton(f"Status: {'Disable ❌' if enabled else 'Enable ✅'}", callback_data="cb_owner_fsub_toggle_enabled")],
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    return text, markup
+
+
+@Client.on_message(filters.private & filters.command("fsub") & filters.user(Config.ADMIN))
+async def fsub_cmd(client, message):
+    text, markup = await build_fsub_view()
+    await message.reply_text(text, reply_markup=markup)
+
+
+@Client.on_message(filters.private & filters.command("set_fsub") & filters.user(Config.ADMIN))
+async def set_fsub_cmd(client, message):
+    args = message.text.split(maxsplit=2)
+    if len(args) < 2:
+        return await message.reply_text(
+            "⚠️ <b>Usage:</b>\n"
+            "• <code>/set_fsub @ChannelUsername [normal|request]</code>\n"
+            "• <code>/set_fsub -100xxxxxxxxxx [normal|request]</code>\n"
+            "• <code>/set_fsub off</code>"
+        )
+    channel = args[1].strip()
+    if channel.lower() in ("off", "disable", "none"):
+        await db.set_fsub_settings(None, enabled=False)
+        return await message.reply_text("❌ <b>Force-Sub Disabled!</b>\n\n⚡ @Nex_bots")
+    
+    mode = "normal"
+    if len(args) > 2 and args[2].strip().lower() in ("request", "req"):
+        mode = "request"
+
+    await db.set_fsub_settings(channel, mode=mode, enabled=True)
+    await message.reply_text(
+        f"✅ <b>Force-Sub Settings Updated!</b>\n\n"
+        f"📢 <b>Channel:</b> <code>{channel}</code>\n"
+        f"⚙️ <b>Mode:</b> <code>{mode.upper()}</code>\n"
+        f"🟢 <b>Status:</b> ENABLED\n\n⚡ @Nex_bots"
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_fsub$") & filters.user(Config.ADMIN))
+async def cb_owner_fsub_cb(client, query: CallbackQuery):
+    text, markup = await build_fsub_view()
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_fsub_toggle_mode$") & filters.user(Config.ADMIN))
+async def cb_owner_fsub_toggle_mode(client, query: CallbackQuery):
+    fsub = await db.get_fsub_settings()
+    current_mode = fsub.get("mode", "normal")
+    new_mode = "normal" if current_mode == "request" else "request"
+    await db.set_fsub_settings(fsub.get("channel"), mode=new_mode, enabled=fsub.get("enabled", True))
+    await query.answer(f"Switched to {new_mode.upper()} mode! 🔄")
+    text, markup = await build_fsub_view()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_fsub_toggle_enabled$") & filters.user(Config.ADMIN))
+async def cb_owner_fsub_toggle_enabled(client, query: CallbackQuery):
+    fsub = await db.get_fsub_settings()
+    new_state = not fsub.get("enabled", True)
+    await db.set_fsub_settings(fsub.get("channel"), mode=fsub.get("mode", "normal"), enabled=new_state)
+    await query.answer(f"Force-Sub {'ENABLED 🟢' if new_state else 'DISABLED 🔴'}")
+    text, markup = await build_fsub_view()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_stats$") & filters.user(Config.ADMIN))
+async def cb_owner_stats(client, query: CallbackQuery):
+    uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - (Config.BOT_UPTIME or time.time())))
+    total_users = await db.total_users_count()
+    total_disk, used_disk, free_disk = shutil.disk_usage(".")
+    cpu = psutil.cpu_percent(interval=0.1)
+    ram = psutil.virtual_memory().percent
+    sent = get_readable_file_size(psutil.net_io_counters().bytes_sent)
+    recv = get_readable_file_size(psutil.net_io_counters().bytes_recv)
+    has_4gb = "Active 🟢 (4GB Session)" if getattr(client, "app_4gb", None) else "Inactive 🔴 (2GB Mode)"
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   📊 <b>Live Server Diagnostics</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>🚀 4GB Client :</b> <code>{has_4gb}</code>\n"
+        f"◈ <b>⏱️ Bot Uptime :</b> <code>{uptime}</code>\n"
+        f"◈ <b>👥 Registered Users :</b> <code>{total_users}</code>\n"
+        f"◈ <b>🖥️ CPU Load :</b> <code>{cpu}%</code>\n"
+        f"◈ <b>🧠 RAM Used :</b> <code>{ram}%</code>\n"
+        f"◈ <b>💾 Disk Free :</b> <code>{get_readable_file_size(free_disk)}</code> / <code>{get_readable_file_size(total_disk)}</code>\n"
+        f"◈ <b>📡 Net Sent :</b> <code>{sent}</code> | <b>📥 Recv :</b> <code>{recv}</code>\n"
+        f"◈ <b>🐍 Python :</b> <code>v{py_ver}</code>\n\n"
+        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+    )
+
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh", callback_data="cb_owner_stats"),
+         InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel")],
+        [InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
 
 
 @Client.on_callback_query(filters.regex(r"^clear_cache_owner$"))

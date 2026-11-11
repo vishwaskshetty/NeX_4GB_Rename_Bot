@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from pytz import timezone
 from pyrogram import Client, __version__
-from pyrogram.types import BotCommand
+from pyrogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from pyrogram.raw.all import layer
 from config import Config
 from aiohttp import web
@@ -58,61 +58,58 @@ class Bot(Client):
         self.username = me.username  
         self.uptime = Config.BOT_UPTIME     
 
-        # Register Bot Commands Menu in Telegram
+        # Register Bot Commands Menu in Telegram (Strict Scoping)
         try:
-            commands = [
-                BotCommand("start", "⚡ Start the bot & check status"),
-                BotCommand("plan", "💎 View Premium Plans & 4GB upgrades"),
-                BotCommand("trial", "🎁 Claim 1-Time 3-Day Gold Free Trial"),
-                BotCommand("myplan", "📊 View active plan & usage stats"),
-                BotCommand("usage", "📈 Check daily & lifetime bandwidth usage"),
-                BotCommand("redeem", "🎟️ Redeem a Premium coupon code"),
-                BotCommand("timezone", "🌍 Set your local timezone"),
-                BotCommand("settings", "⚙️ Open interactive settings dashboard"),
-                BotCommand("metadata", "🏷️ View current metadata settings"),
-                BotCommand("set_metadata", "✍️ Set custom metadata tag"),
-                BotCommand("toggle_metadata", "🔄 Turn metadata ON or OFF"),
-                BotCommand("set_remove", "🧹 Auto-remove words from filenames"),
-                BotCommand("set_replace", "🔁 Auto-replace words (old:new)"),
-                BotCommand("see_cleaner", "👀 View word cleaner & replacer rules"),
-                BotCommand("del_cleaner", "🗑️ Clear word cleaner & replacer rules"),
-                BotCommand("set_sample", "🎬 Set sample video duration (0-120s)"),
-                BotCommand("set_screenshots", "📸 Set screenshot count (0-10)"),
-                BotCommand("set_dump", "📦 Set private dump channel ID"),
-                BotCommand("set_caption", "📝 Set custom caption"),
-                BotCommand("see_caption", "👀 View custom caption"),
-                BotCommand("del_caption", "🗑️ Delete custom caption"),
-                BotCommand("view_thumb", "🖼️ View current thumbnail"),
-                BotCommand("del_thumb", "🗑️ Delete current thumbnail"),
-                BotCommand("set_prefix", "➕ Set filename prefix"),
-                BotCommand("see_prefix", "👀 View filename prefix"),
-                BotCommand("del_prefix", "🗑️ Delete filename prefix"),
-                BotCommand("set_suffix", "➕ Set filename suffix"),
-                BotCommand("see_suffix", "👀 View filename suffix"),
-                BotCommand("del_suffix", "🗑️ Delete filename suffix"),
-                BotCommand("donate", "☕ Support the bot development"),
-                BotCommand("owner", "👑 Open Owner Control Panel (Admin)"),
-                BotCommand("mode", "🌐 Toggle Public / Private Mode (Admin)"),
-                BotCommand("add_user", "🛡️ Authorize user for Private Mode (Admin)"),
-                BotCommand("rem_user", "🗑️ Revoke authorized user (Admin)"),
-                BotCommand("auth_list", "📋 List all authorized users (Admin)"),
-                BotCommand("add_prem", "💎 Grant 4GB Premium access (Admin)"),
-                BotCommand("rem_prem", "🗑️ Remove 4GB Premium access (Admin)"),
-                BotCommand("prem_list", "💎 List all 4GB Premium users (Admin)"),
-                BotCommand("coupons", "🎟️ View active coupons (Admin)"),
-                BotCommand("add_coupon", "➕ Create a coupon code (Admin)"),
-                BotCommand("del_coupon", "🗑️ Delete a coupon code (Admin)"),
-                BotCommand("set_upi", "💳 Update active UPI ID (Admin)"),
-                BotCommand("ban", "🚫 Ban a user from the bot (Admin)"),
-                BotCommand("unban", "✅ Unban a user (Admin)"),
-                BotCommand("set_global_meta", "🏷️ Set bot default metadata tag (Admin)"),
-                BotCommand("status", "📊 Server & 4GB status (Admin)"),
-                BotCommand("clear_cache", "🧹 Clear temp downloads (Admin)"),
-                BotCommand("restart", "🔄 Restart the bot (Admin)"),
-                BotCommand("broadcast", "📢 Broadcast message (Admin)")
+            # 1. Public Command Menu (Default Scope - Visible to All Users)
+            public_commands = [
+                BotCommand("plan", "💎 Upgrade to 4GB Premium & Plans"),
+                BotCommand("myplan", "📊 My Plan, Quota & Usage"),
+                BotCommand("trial", "🎁 Claim 3-Day Free 4GB Trial"),
+                BotCommand("start", "⚡ Start the Bot"),
+                BotCommand("settings", "⚙️ Configure Rename, Watermark & Sample Settings"),
+                BotCommand("leaderboard", "🏆 Top Renamers Leaderboard"),
+                BotCommand("redeem", "🎟️ Redeem Premium Coupon Code"),
+                BotCommand("metadata", "🏷️ Configure File Metadata"),
+                BotCommand("set_caption", "📝 Set Custom File Caption"),
+                BotCommand("del_caption", "🗑️ Delete Custom Caption"),
+                BotCommand("view_thumb", "🖼️ View Custom Thumbnail"),
+                BotCommand("del_thumb", "🗑️ Delete Custom Thumbnail"),
+                BotCommand("clean_words", "🧹 Manage Filename Word Cleaner"),
+                BotCommand("cancel", "🛑 Cancel Stuck Rename Task")
             ]
-            await self.set_bot_commands(commands)
-            print("Telegram Bot Commands Menu registered successfully! 📋")
+            await self.set_bot_commands(public_commands, scope=BotCommandScopeDefault())
+            print("Telegram Public Bot Commands registered successfully! 📋")
+
+            # 2. Owner / Admin Commands (Scope: Registered ONLY for Admins)
+            admin_commands = public_commands + [
+                BotCommand("owner", "👑 Open Owner Control Panel"),
+                BotCommand("mode", "🌐 Toggle Public / Private Mode"),
+                BotCommand("maintenance", "🛠️ Toggle Maintenance Mode"),
+                BotCommand("fsub", "📢 Force-Sub Settings & Mode"),
+                BotCommand("add_user", "🛡️ Authorize user for Private Mode"),
+                BotCommand("rem_user", "🗑️ Revoke authorized user"),
+                BotCommand("auth_list", "📋 List all authorized users"),
+                BotCommand("add_prem", "💎 Grant 4GB Premium access"),
+                BotCommand("rem_prem", "🗑️ Remove 4GB Premium access"),
+                BotCommand("prem_list", "💎 List all 4GB Premium users"),
+                BotCommand("coupons", "🎟️ View active coupons"),
+                BotCommand("add_coupon", "➕ Create a coupon code"),
+                BotCommand("del_coupon", "🗑️ Delete a coupon code"),
+                BotCommand("set_upi", "💳 Update active UPI ID"),
+                BotCommand("ban", "🚫 Ban a user from the bot"),
+                BotCommand("unban", "✅ Unban a user"),
+                BotCommand("set_global_meta", "🏷️ Set bot default metadata tag"),
+                BotCommand("status", "📊 Server & 4GB status"),
+                BotCommand("clear_cache", "🧹 Clear temp downloads"),
+                BotCommand("restart", "🔄 Restart the bot"),
+                BotCommand("broadcast", "📢 Broadcast message")
+            ]
+            for admin_id in Config.ADMIN:
+                try:
+                    await self.set_bot_commands(admin_commands, scope=BotCommandScopeChat(chat_id=int(admin_id)))
+                except Exception as admin_err:
+                    print(f"Failed to register Admin Commands for {admin_id}: {admin_err}")
+            print("Telegram Owner/Admin Bot Commands registered successfully! 👑")
         except Exception as e:
             print(f"Failed to register Bot Commands Menu: {e}")
 

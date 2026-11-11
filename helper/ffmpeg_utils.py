@@ -45,12 +45,39 @@ async def inject_metadata(input_path: str, output_path: str, meta_text: str) -> 
         return False
 
 
-async def generate_sample_video(input_path: str, output_path: str, total_duration: int, sample_sec: int) -> bool:
+async def generate_sample_video(input_path: str, output_path: str, total_duration: int, sample_sec: int, start_mode: str = "auto") -> bool:
     """
-    Cuts a lossless sample video clip of sample_sec length starting 20% into the video.
+    Cuts a lossless sample video clip of sample_sec length based on timeline start mode:
+    - 'auto': 15% into the video
+    - 'start': 60s (00:01:00)
+    - 'mid': 50% middle of video
+    - 'ten' / '10:00': 600s
+    - or custom MM:SS / numeric seconds
     """
-    if total_duration > (sample_sec + 10):
-        start_sec = int(total_duration * 0.20)
+    start_sec = 0
+    try:
+        mode_lower = str(start_mode).strip().lower()
+        if mode_lower == "auto":
+            start_sec = int(total_duration * 0.15) if total_duration > (sample_sec + 10) else 0
+        elif mode_lower in ("start", "01:00"):
+            start_sec = 60
+        elif mode_lower in ("mid", "50%"):
+            start_sec = int(total_duration * 0.50)
+        elif mode_lower in ("ten", "10:00"):
+            start_sec = 600
+        elif ":" in mode_lower:
+            parts = mode_lower.split(":")
+            if len(parts) == 2:
+                start_sec = int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                start_sec = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        else:
+            start_sec = int(float(mode_lower))
+    except Exception:
+        start_sec = int(total_duration * 0.15) if total_duration > (sample_sec + 10) else 0
+
+    if total_duration > sample_sec:
+        start_sec = max(0, min(start_sec, total_duration - sample_sec))
     else:
         start_sec = 0
 
@@ -72,6 +99,53 @@ async def generate_sample_video(input_path: str, output_path: str, total_duratio
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
     except Exception as e:
         print(f"FFmpeg generate_sample_video error: {e}")
+        return False
+
+
+async def apply_video_watermark(input_path: str, output_path: str, text: str, position: str = "top_right", size: int = 28, color: str = "white") -> bool:
+    """
+    Applies custom text watermark over video using FFmpeg drawtext with ultrafast preset.
+    """
+    pos_coords = {
+        "top_left": "x=25:y=25",
+        "top_right": "x=w-tw-25:y=25",
+        "center": "x=(w-tw)/2:y=(h-th)/2",
+        "bottom_left": "x=25:y=h-th-25",
+        "bottom_right": "x=w-tw-25:y=h-th-25"
+    }
+    coords = pos_coords.get(str(position).lower(), "x=w-tw-25:y=25")
+    
+    # Safe string escaping for FFmpeg drawtext
+    safe_text = str(text).replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:')
+    font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
+    font_size = int(size) if int(size) > 0 else 28
+
+    vf_filter = (
+        f"drawtext=text='{safe_text}':{coords}:fontsize={font_size}:fontcolor={font_color}:"
+        f"box=1:boxcolor=black@0.45:boxborderw=5"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-threads", "0",
+        "-i", input_path,
+        "-vf", vf_filter,
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "26",
+        "-c:a", "copy",
+        output_path
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    except Exception as e:
+        print(f"FFmpeg apply_video_watermark error: {e}")
         return False
 
 
