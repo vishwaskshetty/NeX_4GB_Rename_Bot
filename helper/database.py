@@ -6,7 +6,11 @@ from .utils import send_log
 class Database:
 
     def __init__(self, uri, database_name):
-        self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+        self._client = motor.motor_asyncio.AsyncIOMotorClient(
+            uri,
+            tlsAllowInvalidCertificates=True,
+            serverSelectionTimeoutMS=10000
+        )
         self.db = self._client[database_name]
         self.col = self.db.user
 

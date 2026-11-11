@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from pytz import timezone
 from pyrogram import Client, __version__
@@ -38,6 +39,16 @@ class Bot(Client):
         self.app_4gb = app_4gb
 
     async def start(self):
+        # 1. Immediately bind web server port for Render/Koyeb health checks
+        if Config.WEBHOOK or os.environ.get("RENDER"):
+            try:
+                app = web.AppRunner(await web_server())
+                await app.setup()       
+                await web.TCPSite(app, "0.0.0.0", Config.PORT).start()     
+                print(f"NeX Web Server running on port {Config.PORT} ✨️")
+            except Exception as e:
+                print(f"Error starting web server on port {Config.PORT}: {e}")
+
         await super().start()
         me = await self.get_me()
         self.mention = me.mention
@@ -88,11 +99,7 @@ class Bot(Client):
             except Exception as e:
                 print(f"Error starting 4GB Premium Client: {e}")
 
-        if Config.WEBHOOK:
-            app = web.AppRunner(await web_server())
-            await app.setup()       
-            await web.TCPSite(app, "0.0.0.0", 8080).start()     
-            print("NeX Web Server running on port 8080 ✨️")
+
 
         print(f"{me.first_name} [NeX 4GB Rename Bot] Is Started.....✨️")
         for admin_id in Config.ADMIN:

@@ -33,7 +33,8 @@ class Config(object):
 
     # Bot uptime & web response configuration     
     BOT_UPTIME = time.time()
-    WEBHOOK    = os.environ.get("WEBHOOK", "False").lower() == "true"
+    PORT       = int(os.environ.get("PORT", "8080"))
+    WEBHOOK    = os.environ.get("WEBHOOK", "True").lower() in ("true", "1", "yes")
 
 
 class Txt(object):
