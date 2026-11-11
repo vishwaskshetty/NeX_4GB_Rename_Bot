@@ -12,6 +12,9 @@ async def donate(client, message):
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("⚡ Channel", url="https://t.me/Nex_bots"), 
+            InlineKeyboardButton("💬 Support", url="https://t.me/NexCRSupportbot")
+        ],
+        [
             InlineKeyboardButton("🏠 Home", callback_data="start")
         ]
     ])

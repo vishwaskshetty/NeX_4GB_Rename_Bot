@@ -6,6 +6,12 @@ from typing import Tuple, List
 # NeX 4GB Rename Bot - FFmpeg Engine
 # Developed by @Nex_bots
 
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+except Exception as e:
+    print(f"static_ffmpeg auto-init info: {e}")
+
 
 async def inject_metadata(input_path: str, output_path: str, meta_text: str) -> bool:
     """
@@ -13,6 +19,7 @@ async def inject_metadata(input_path: str, output_path: str, meta_text: str) -> 
     """
     cmd = [
         "ffmpeg", "-y",
+        "-threads", "0",
         "-i", input_path,
         "-map", "0",
         "-c", "copy",

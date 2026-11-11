@@ -73,7 +73,7 @@ async def force_sub_message_interceptor(client, message):
     if is_banned:
         await message.reply_text(
             "🚫 <b>You are banned from using this bot.</b>\n\n"
-            "If you believe this is an error, please contact @Nex_bots.",
+            "If you believe this is an error, please contact @NexCRSupportbot.",
             quote=True
         )
         message.stop_propagation()
@@ -88,9 +88,9 @@ async def force_sub_message_interceptor(client, message):
             await message.reply_text(
                 "🔒 <b>NeX 4GB Rename Bot is in Private Mode!</b>\n\n"
                 "Only the owner and authorized users can access this bot.\n"
-                "Please contact the owner to request access.",
+                "Please contact support to request access.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💬 Contact Owner", url="https://t.me/Nex_bots")],
+                    [InlineKeyboardButton("💬 Contact Support", url="https://t.me/NexCRSupportbot")],
                     [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/Nex_bots")]
                 ]),
                 quote=True

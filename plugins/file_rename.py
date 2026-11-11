@@ -36,7 +36,7 @@ from helper.ffmpeg_utils import (
     generate_screenshots,
     get_video_duration_and_dims
 )
-from helper.database import db
+from helper.database import db, TIER_LIMITS
 from config import Config
 from bot import app_4gb
 
@@ -132,34 +132,55 @@ async def rename_start(client, message):
         except Exception:
             pass
 
-    # Check 2GB threshold vs Premium access & 4GB Session configuration
-    client_4gb = getattr(client, "app_4gb", None) or app_4gb
-    if file_size > (2 * 1024 * 1024 * 1024):
-        is_admin = user_id in Config.ADMIN
-        is_premium = await db.is_premium_user(user_id)
-        if not (is_admin or is_premium):
-            await message.reply_text(
-                "⭐ <b>4GB+ File Detected!</b>\n\n"
-                "Files over 2GB require <b>Premium Access</b>.\n"
-                "Contact the owner to upgrade!",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💬 Contact Owner", url="https://t.me/Nex_bots")],
-                    [InlineKeyboardButton("⚡ Support Channel", url="https://t.me/Nex_bots")]
-                ]),
-                quote=True
-            )
-            return
+    # Check 3-Tier Limits (Max File Size & Daily Bandwidth)
+    prem_info = await db.get_premium_info(user_id)
+    user_tier = prem_info.get("tier", 0)
+    tier_limits = TIER_LIMITS.get(user_tier, TIER_LIMITS[0])
+    max_size = tier_limits["max_file_size"]
+    daily_limit = tier_limits["daily_bytes"]
 
-        if not client_4gb:
-            await message.reply_text(
-                "🚫 <b>Files larger than 2GB require 4GB Premium Mode!</b>\n\n"
-                "<i>Telegram restricts standard bot tokens to 2GB uploads.\n"
-                "To enable 4GB uploads, configure <code>STRING_SESSION</code> with a Telegram Premium account.\n"
-                "Need help? Contact @Nex_bots.</i>",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Support Channel", url="https://t.me/Nex_bots")]]),
-                quote=True
-            )
-            return
+    if file_size > max_size and user_id not in Config.ADMIN:
+        await message.reply_text(
+            f"⭐ <b>File Size Limit Exceeded!</b>\n\n"
+            f"Your plan (<b>{prem_info['plan_name']}</b>) allows files up to <b>{humanbytes(max_size)}</b>.\n"
+            f"Upgrade to Premium for full 4GB files!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans")],
+                [InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot")]
+            ]),
+            quote=True
+        )
+        return
+
+    # Check daily bandwidth
+    user_usage = await db.get_user_usage(user_id)
+    daily_used = user_usage.get("daily_bytes", 0)
+    if (daily_used + file_size) > daily_limit and user_id not in Config.ADMIN:
+        await message.reply_text(
+            f"⚠️ <b>Daily Bandwidth Limit Exceeded!</b>\n\n"
+            f"Plan: <b>{prem_info['plan_name']}</b>\n"
+            f"Used Today: <b>{humanbytes(daily_used)}</b> / <b>{humanbytes(daily_limit)}</b>\n\n"
+            f"Upgrade your plan for higher daily limits or unlimited transfers!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans")],
+                [InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot")]
+            ]),
+            quote=True
+        )
+        return
+
+    # Check 4GB Secondary Client
+    client_4gb = getattr(client, "app_4gb", None) or app_4gb
+    if file_size > (2 * 1024 * 1024 * 1024) and not client_4gb:
+        await message.reply_text(
+            "🚫 <b>Files larger than 2GB require 4GB Premium Mode!</b>\n\n"
+            "<i>Telegram restricts standard bot tokens to 2GB uploads.\n"
+            "To enable 4GB uploads, configure <code>STRING_SESSION</code> with a Telegram Premium account.\n"
+            "Need help? Contact @NexCRSupportbot.</i>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot")]]),
+            quote=True
+        )
+        return
 
     media_info_text = (
         f"🗂️ <b><u>NeX 4GB Media Information</u></b>\n\n"
@@ -323,19 +344,38 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
     user_id = update.from_user.id
     ms = update.message if hasattr(update, 'message') else update
 
-    # Verify 4GB Premium permission before entering semaphore
+    # Verify 3-Tier Limits before entering semaphore
     file = file_msg.document or file_msg.video or file_msg.audio
     file_size = getattr(file, "file_size", 0) if file else 0
-    if file_size > (2 * 1024 * 1024 * 1024):
-        is_admin = user_id in Config.ADMIN
-        is_premium = await db.is_premium_user(user_id)
-        if not (is_admin or is_premium):
-            return await ms.edit(
-                "⭐ <b>4GB+ File Detected!</b>\n\n"
-                "Files over 2GB require <b>Premium Access</b>.\n"
-                "Contact the owner to upgrade!",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 Contact Owner", url="https://t.me/Nex_bots")]])
-            )
+    prem_info = await db.get_premium_info(user_id)
+    user_tier = prem_info.get("tier", 0)
+    tier_limits = TIER_LIMITS.get(user_tier, TIER_LIMITS[0])
+    max_size = tier_limits["max_file_size"]
+    daily_limit = tier_limits["daily_bytes"]
+
+    if file_size > max_size and user_id not in Config.ADMIN:
+        return await ms.edit(
+            f"⭐ <b>File Size Limit Exceeded!</b>\n\n"
+            f"Your plan allows files up to <b>{humanbytes(max_size)}</b>.\n"
+            f"Upgrade to Premium for full 4GB files!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans")],
+                [InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot")]
+            ])
+        )
+
+    user_usage = await db.get_user_usage(user_id)
+    daily_used = user_usage.get("daily_bytes", 0)
+    if (daily_used + file_size) > daily_limit and user_id not in Config.ADMIN:
+        return await ms.edit(
+            f"⚠️ <b>Daily Bandwidth Limit Exceeded!</b>\n\n"
+            f"Used today: <b>{humanbytes(daily_used)}</b> / <b>{humanbytes(daily_limit)}</b>\n"
+            f"Upgrade your plan for higher daily limits or unlimited transfers!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans")],
+                [InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot")]
+            ])
+        )
 
     # Ensure queue concurrency limit
     await ms.edit("⏳ <b>Adding to processing queue... Please wait.</b>")
@@ -520,6 +560,12 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                             progress=progress_for_pyrogram,
                             progress_args=(upload_mode_tag, ms, upload_start, client)
                         )
+
+                    # Track usage statistics
+                    try:
+                        await db.add_usage(user_id, file_size)
+                    except Exception as e:
+                        print(f"Usage tracking error: {e}")
 
                     # Backup copy to dump channel if configured
                     if dump_channel and int(dump_channel) != 0 and int(dump_channel) != user_id:

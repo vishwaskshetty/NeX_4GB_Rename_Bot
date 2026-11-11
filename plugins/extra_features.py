@@ -56,6 +56,10 @@ async def build_settings_panel(user_id: int):
         ],
         [
             InlineKeyboardButton("🧹 Cleaner Info", callback_data="set_view_cleaner"),
+            InlineKeyboardButton("📊 My Usage", callback_data="my_plan_cb"),
+            InlineKeyboardButton("🌍 Timezone", callback_data="open_timezone_menu")
+        ],
+        [
             InlineKeyboardButton("🔄 Refresh", callback_data="open_settings"),
             InlineKeyboardButton("✖️ Close", callback_data="close")
         ]

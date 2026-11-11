@@ -36,6 +36,10 @@ class Config(object):
     PORT       = int(os.environ.get("PORT", "8080"))
     WEBHOOK    = os.environ.get("WEBHOOK", "True").lower() in ("true", "1", "yes")
 
+    # Support & Payment Configuration
+    SUPPORT_CHAT = os.environ.get("SUPPORT_CHAT", "NexCRSupportbot")
+    UPI_ID       = os.environ.get("UPI_ID", "nexbots@upi")
+
 
 class Txt(object):
     START_TXT = """Hello {} 👋 
@@ -61,7 +65,7 @@ class Txt(object):
 • <b>Metadata Engine:</b> Lossless Stream Tagging
 
 📢 <b>Channel:</b> @Nex_bots
-💬 <b>Support:</b> @Nex_bots
+💬 <b>Support:</b> @NexCRSupportbot
 👨‍💻 <b>Developer:</b> @Nex_bots"""
 
     HELP_TXT = """📖 <b><u>NeX 4GB Rename Bot - Help</u></b> ⚡
@@ -141,11 +145,13 @@ class Txt(object):
 
 If you enjoy using our bots and services, feel free to support us!
 
-📢 <b>Updates & Support:</b> @Nex_bots"""
+📢 <b>Updates:</b> @Nex_bots
+💬 <b>Support:</b> @NexCRSupportbot"""
 
     DON_TXT = """Hey {} 👋
 ❤️ <b>Thanks For Supporting Us!</b>
 
 If you like our bots and services, feel free to support our development:
 
-📢 <b>Channel & Support:</b> @Nex_bots"""
+📢 <b>Channel:</b> @Nex_bots
+💬 <b>Support:</b> @NexCRSupportbot"""

@@ -26,7 +26,10 @@ async def start(client, message):
     rows = [
         [
             InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇꜱ', url='https://t.me/Nex_bots'),
-            InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/Nex_bots')
+            InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/NexCRSupportbot')
+        ],
+        [
+            InlineKeyboardButton('💎 ᴘʀᴇᴍɪᴜᴍ / ꜰʀᴇᴇ ᴛʀɪᴀʟ', callback_data='open_plans')
         ],
         [
             InlineKeyboardButton('⚙️ ꜱᴇᴛᴛɪɴɢꜱ', callback_data='open_settings'),
@@ -54,7 +57,10 @@ async def cb_handler(client, query: CallbackQuery):
         rows = [
             [
                 InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇꜱ', url='https://t.me/Nex_bots'),
-                InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/Nex_bots')
+                InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/NexCRSupportbot')
+            ],
+            [
+                InlineKeyboardButton('💎 ᴘʀᴇᴍɪᴜᴍ / ꜰʀᴇᴇ ᴛʀɪᴀʟ', callback_data='open_plans')
             ],
             [
                 InlineKeyboardButton('⚙️ ꜱᴇᴛᴛɪɴɢꜱ', callback_data='open_settings'),
@@ -110,7 +116,10 @@ async def cb_handler(client, query: CallbackQuery):
         )
     elif data == "donation":
         buttons = [
-            [InlineKeyboardButton('⚡ Support Channel', url='https://t.me/Nex_bots')],
+            [
+                InlineKeyboardButton('⚡ Updates Channel', url='https://t.me/Nex_bots'),
+                InlineKeyboardButton('💬 Support Bot', url='https://t.me/NexCRSupportbot')
+            ],
             [InlineKeyboardButton('🏠 Home', callback_data='start'),
              InlineKeyboardButton('✖️ Close', callback_data='close')]
         ]
@@ -126,7 +135,7 @@ async def cb_handler(client, query: CallbackQuery):
             text=Txt.ABOUT_TXT.format(client.mention),
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots"),
-                 InlineKeyboardButton("💬 ꜱᴜᴘᴘᴏʀᴛ", url="https://t.me/Nex_bots")],
+                 InlineKeyboardButton("💬 ꜱᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot")],
                 [InlineKeyboardButton("🖥️ ꜱᴇʀᴠᴇʀ ɪɴꜰᴏ", callback_data="render")],
                 [InlineKeyboardButton("✖️ ᴄʟᴏꜱᴇ", callback_data="close"),
                  InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="start")]

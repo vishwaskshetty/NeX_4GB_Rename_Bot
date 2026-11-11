@@ -13,6 +13,8 @@ SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
 # Global set to track active operations marked for cancellation
 CANCEL_REQUESTS = set()
+# Global dict to track progress edit timestamps for strictly 4.0s throttling
+PROGRESS_TIMESTAMPS = {}
 
 
 def get_readable_file_size(size_in_bytes) -> str:
@@ -45,14 +47,18 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     # Check if this task has been requested to cancel
     msg_id = getattr(message, 'id', None)
     chat_id = getattr(message.chat, 'id', None) if getattr(message, 'chat', None) else None
+    key = f"{chat_id}_{msg_id}" if (chat_id and msg_id) else (msg_id or id(message))
 
     if msg_id in CANCEL_REQUESTS or (chat_id and f"{chat_id}_{msg_id}" in CANCEL_REQUESTS):
+        PROGRESS_TIMESTAMPS.pop(key, None)
         raise StopTransmission("Operation Cancelled by User")
 
     now = time.time()
-    diff = max(now - start, 0.001)
-    # Update UI every 5 seconds or when download/upload is complete
-    if round(diff % 5.0) == 0 or current == total:
+    last_update = PROGRESS_TIMESTAMPS.get(key, 0)
+    # Strictly throttle UI progress edits to once every 4.0 seconds or upon completion
+    if (now - last_update >= 4.0) or (current == total):
+        PROGRESS_TIMESTAMPS[key] = now
+        diff = max(now - start, 0.001)
         percentage = (current * 100 / total) if (total and total > 0) else 0
         speed = (current / diff) if diff > 0 else 0
         elapsed_time = round(diff) * 1000
@@ -81,6 +87,9 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
             )
         except Exception:
             pass
+
+        if current == total:
+            PROGRESS_TIMESTAMPS.pop(key, None)
 
 
 def humanbytes(size):    

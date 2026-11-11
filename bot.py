@@ -20,6 +20,8 @@ if Config.STRING_SESSION:
         api_id=Config.API_ID,
         api_hash=Config.API_HASH,
         session_string=Config.STRING_SESSION,
+        workers=16,
+        max_concurrent_transmissions=8,
         no_updates=True
     )
 
@@ -32,7 +34,8 @@ class Bot(Client):
             api_id=Config.API_ID,
             api_hash=Config.API_HASH,
             bot_token=Config.BOT_TOKEN,
-            workers=200,
+            workers=16,
+            max_concurrent_transmissions=8,
             plugins={"root": "plugins"},
             sleep_threshold=15,
         )
@@ -59,6 +62,12 @@ class Bot(Client):
         try:
             commands = [
                 BotCommand("start", "⚡ Start the bot & check status"),
+                BotCommand("plan", "💎 View Premium Plans & 4GB upgrades"),
+                BotCommand("trial", "🎁 Claim 1-Time 3-Day Gold Free Trial"),
+                BotCommand("myplan", "📊 View active plan & usage stats"),
+                BotCommand("usage", "📈 Check daily & lifetime bandwidth usage"),
+                BotCommand("redeem", "🎟️ Redeem a Premium coupon code"),
+                BotCommand("timezone", "🌍 Set your local timezone"),
                 BotCommand("settings", "⚙️ Open interactive settings dashboard"),
                 BotCommand("metadata", "🏷️ View current metadata settings"),
                 BotCommand("set_metadata", "✍️ Set custom metadata tag"),
@@ -81,6 +90,7 @@ class Bot(Client):
                 BotCommand("set_suffix", "➕ Set filename suffix"),
                 BotCommand("see_suffix", "👀 View filename suffix"),
                 BotCommand("del_suffix", "🗑️ Delete filename suffix"),
+                BotCommand("donate", "☕ Support the bot development"),
                 BotCommand("owner", "👑 Open Owner Control Panel (Admin)"),
                 BotCommand("mode", "🌐 Toggle Public / Private Mode (Admin)"),
                 BotCommand("add_user", "🛡️ Authorize user for Private Mode (Admin)"),
@@ -89,6 +99,10 @@ class Bot(Client):
                 BotCommand("add_prem", "💎 Grant 4GB Premium access (Admin)"),
                 BotCommand("rem_prem", "🗑️ Remove 4GB Premium access (Admin)"),
                 BotCommand("prem_list", "💎 List all 4GB Premium users (Admin)"),
+                BotCommand("coupons", "🎟️ View active coupons (Admin)"),
+                BotCommand("add_coupon", "➕ Create a coupon code (Admin)"),
+                BotCommand("del_coupon", "🗑️ Delete a coupon code (Admin)"),
+                BotCommand("set_upi", "💳 Update active UPI ID (Admin)"),
                 BotCommand("ban", "🚫 Ban a user from the bot (Admin)"),
                 BotCommand("unban", "✅ Unban a user (Admin)"),
                 BotCommand("set_global_meta", "🏷️ Set bot default metadata tag (Admin)"),
