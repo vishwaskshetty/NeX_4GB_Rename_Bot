@@ -16,6 +16,7 @@ pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 # 1. Public User Commands (Default Scope - 32 Commands with /start strictly #1)
 USER_COMMANDS = [
     BotCommand("start", "⚡ Start the Bot & Main Menu"),
+    BotCommand("profile", "👤 View Profile, Plan & Usage Stats"),
     BotCommand("plan", "💎 Upgrade to 4GB Premium & Plans"),
     BotCommand("myplan", "📊 My Plan, Quota & Usage Stats"),
     BotCommand("trial", "🎁 Claim 3-Day Free 4GB Trial"),
@@ -74,6 +75,7 @@ OWNER_EXTRA_COMMANDS = [
     BotCommand("set_fsub", "📢 Set Force-Sub Channel & Mode"),
     BotCommand("set_global_meta", "🏷️ Set Global Default Metadata Tag"),
     BotCommand("set_upi", "🇮🇳 Update UPI ID for Payments"),
+    BotCommand("logs", "📜 View Latest Activity Logs"),
     BotCommand("restart", "🔄 Restart the Bot Server")
 ]
 
@@ -88,8 +90,8 @@ if Config.STRING_SESSION:
         api_id=Config.API_ID,
         api_hash=Config.API_HASH,
         session_string=Config.STRING_SESSION,
-        workers=16,
-        max_concurrent_transmissions=8,
+        workers=32,
+        max_concurrent_transmissions=10,
         no_updates=True
     )
 
@@ -102,8 +104,8 @@ class Bot(Client):
             api_id=Config.API_ID,
             api_hash=Config.API_HASH,
             bot_token=Config.BOT_TOKEN,
-            workers=16,
-            max_concurrent_transmissions=8,
+            workers=32,
+            max_concurrent_transmissions=10,
             plugins={"root": "plugins"},
             sleep_threshold=15,
         )

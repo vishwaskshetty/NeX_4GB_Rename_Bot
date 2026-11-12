@@ -44,17 +44,20 @@ class Config(object):
 class Txt(object):
     START_TXT = """Hello {} 👋 
 
-🚀 <b>NeX 4GB Rename Bot</b> ⚡
-<i>Ultra-fast 4GB File & Video Renamer</i>
+🚀 <b><u>NeX 4GB Rename Bot</u></b> ⚡
+<i>Commercial-grade, ultra-fast 4GB file renamer!</i>
 
-<b>Key Features:</b>
-• <b>4GB Uploads:</b> Rename files up to 4GB via Premium Session
-• <b>FFmpeg Metadata:</b> Custom Title, Author & Stream tags
-• <b>Auto Clean:</b> One-click word stripping & replacements
-• <b>Video Tools:</b> 30s sample clips & screenshot albums
-• <b>Dashboard:</b> Interactive controls via <code>/settings</code>
+✨ <b>Core Capabilities:</b>
+◈ ⚡ <b>4GB+ Cloud Transfers :</b> Full 4GB files via Telegram Premium
+◈ 🏷️ <b>100% Clean Output :</b> No prefixes, custom metadata, prefix/suffix & cleaner
+◈ 💧 <b>Video Watermark :</b> Burn your channel tag directly into frames
+◈ 🎬 <b>Sample Video & Shots :</b> Custom timeline clips & photo albums
+◈ 📦 <b>Personal Dump Channel :</b> Auto-forward renamed files securely
+◈ 🚀 <b>High-Speed Engine :</b> Multi-worker 24/7 cloud bandwidth
 
-📢 <b>Updates & Support:</b> @Nex_bots"""
+<i>Send any document, video, or audio to start renaming!</i>
+
+📢 <b>Updates:</b> @Nex_bots | 💬 <b>Support:</b> @NexCRSupportbot"""
 
     ABOUT_TXT = """🤖 <b><u>About NeX 4GB Rename Bot</u></b> ⚡
 

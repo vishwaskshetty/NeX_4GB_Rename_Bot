@@ -16,10 +16,56 @@ TIER_NAMES = {
 }
 
 TIER_LIMITS = {
-    0: {"max_file_size": 2 * 1024 * 1024 * 1024, "daily_bytes": 5 * 1024 * 1024 * 1024, "concurrency": 1},
-    1: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 25 * 1024 * 1024 * 1024, "concurrency": 2},
-    2: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 75 * 1024 * 1024 * 1024, "concurrency": 3},
-    3: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 1024 * 1024 * 1024 * 1024 * 100, "concurrency": 5},
+    0: {"max_file_size": 2 * 1024 * 1024 * 1024, "daily_bytes": 5 * 1024 * 1024 * 1024, "concurrency": 1, "max_speed": 3.5 * 1024 * 1024},
+    1: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 25 * 1024 * 1024 * 1024, "concurrency": 2, "max_speed": 12 * 1024 * 1024},
+    2: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 100 * 1024 * 1024 * 1024, "concurrency": 3, "max_speed": 25 * 1024 * 1024},
+    3: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 1024 * 1024 * 1024 * 1024 * 100, "concurrency": 5, "max_speed": 0},
+}
+
+PLAN_DURATIONS = {
+    30: {"name": "1 Month (30 Days)", "short": "1 Month", "days": 30},
+    90: {"name": "3 Months (90 Days)", "short": "3 Months", "days": 90},
+    180: {"name": "6 Months (180 Days)", "short": "6 Months", "days": 180},
+    365: {"name": "1 Year (365 Days)", "short": "1 Year", "days": 365},
+}
+
+PLAN_PRICING = {
+    1: {
+        "name": "Silver Plan",
+        "badge": "🥈",
+        "speed": "12 MB/s",
+        "quota": "25 GB/Day",
+        "concurrency": 2,
+        "features": "4GB Support • 12 MB/s Speed • 25 GB/Day • Watermark & Meta • 2 Tasks",
+        30: {"inr": 79, "stars": 70},
+        90: {"inr": 199, "stars": 175},
+        180: {"inr": 349, "stars": 300},
+        365: {"inr": 599, "stars": 520},
+    },
+    2: {
+        "name": "Gold Plan",
+        "badge": "🥇",
+        "speed": "25 MB/s",
+        "quota": "100 GB/Day",
+        "concurrency": 3,
+        "features": "4GB Support • 25 MB/s Speed • 100 GB/Day • Watermark, Sample & Priority • 3 Tasks",
+        30: {"inr": 129, "stars": 110},
+        90: {"inr": 329, "stars": 280},
+        180: {"inr": 599, "stars": 520},
+        365: {"inr": 999, "stars": 850},
+    },
+    3: {
+        "name": "Diamond VIP Plan",
+        "badge": "💎",
+        "speed": "Unlimited Max Speed",
+        "quota": "Unlimited Daily Quota",
+        "concurrency": 5,
+        "features": "4GB Support • UNLIMITED Speed • UNLIMITED Daily Quota • All Features • 5 Tasks",
+        30: {"inr": 199, "stars": 175},
+        90: {"inr": 499, "stars": 430},
+        180: {"inr": 899, "stars": 780},
+        365: {"inr": 1499, "stars": 1250},
+    }
 }
 
 
@@ -69,6 +115,7 @@ class Database:
         self.db = self._client[database_name]
         self.col = self.db.user
         self.cfg = self.db.bot_config
+        self.logs = self.db.activity_logs
 
     def new_user(self, id, first_name="", username="", timezone="Asia/Kolkata"):
         return dict(
@@ -822,6 +869,66 @@ class Database:
             return False
         reqs = cfg.get(f'fsub_requests_{chat_id}', [])
         return int(user_id) in reqs
+
+    # ==================== ACTIVITY LOGS TRACKER ====================
+    async def log_activity(self, user_id: int, name: str, action: str, details: str = ""):
+        """Stores real-time activity log and caps at 200 items."""
+        try:
+            entry = {
+                "user_id": int(user_id),
+                "name": str(name or "User"),
+                "action": str(action),
+                "details": str(details),
+                "timestamp": time.time()
+            }
+            await self.logs.insert_one(entry)
+            # Cap at 200 documents
+            count = await self.logs.count_documents({})
+            if count > 200:
+                oldest = await self.logs.find().sort("timestamp", 1).limit(count - 200).to_list(length=count - 200)
+                if oldest:
+                    old_ids = [d["_id"] for d in oldest]
+                    await self.logs.delete_many({"_id": {"$in": old_ids}})
+        except Exception:
+            pass
+
+    async def get_activity_logs(self, limit: int = 15) -> list:
+        try:
+            return await self.logs.find().sort("timestamp", -1).limit(limit).to_list(length=limit)
+        except Exception:
+            return []
+
+    async def clear_activity_logs(self) -> bool:
+        try:
+            await self.logs.delete_many({})
+            return True
+        except Exception:
+            return False
+
+    # ==================== QUICK OWNER EXTENSIONS ====================
+    async def extend_premium_days(self, user_id: int, extra_days: int) -> dict:
+        user = await self.col.find_one({'_id': int(user_id)})
+        now = time.time()
+        current_exp = float(user.get("premium_expiry", 0) or 0) if user else 0
+        base_time = max(now, current_exp)
+        new_expiry = base_time + (extra_days * 86400)
+        await self.col.update_one(
+            {'_id': int(user_id)},
+            {'$set': {'premium_expiry': new_expiry, 'is_premium': True}},
+            upsert=True
+        )
+        return {"new_expiry": new_expiry}
+
+    async def upgrade_user_tier(self, user_id: int) -> int:
+        user = await self.col.find_one({'_id': int(user_id)})
+        curr_tier = int(user.get("premium_tier", 1)) if user else 1
+        next_tier = 1 if curr_tier >= 3 else (curr_tier + 1)
+        await self.col.update_one(
+            {'_id': int(user_id)},
+            {'$set': {'premium_tier': next_tier}},
+            upsert=True
+        )
+        return next_tier
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

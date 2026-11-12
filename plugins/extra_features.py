@@ -66,11 +66,14 @@ async def build_settings_panel(user_id: int):
             InlineKeyboardButton("📦 Dump Channel", callback_data="set_view_dump")
         ],
         [
-            InlineKeyboardButton("📊 My Usage & Plan", callback_data="my_plan_cb"),
+            InlineKeyboardButton("👤 My Profile & Plan", callback_data="cb_user_profile"),
             InlineKeyboardButton("🌍 Timezone", callback_data="open_timezone_menu")
         ],
         [
             InlineKeyboardButton("🔄 Refresh", callback_data="open_settings"),
+            InlineKeyboardButton("⬅️ Back to Start", callback_data="start")
+        ],
+        [
             InlineKeyboardButton("❌ Close", callback_data="close")
         ]
     ]

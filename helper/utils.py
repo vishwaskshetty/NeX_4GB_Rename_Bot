@@ -1,5 +1,6 @@
 import math
 import time
+import asyncio
 from datetime import datetime
 from pytz import timezone
 from config import Config, Txt 
@@ -43,7 +44,15 @@ def get_readable_time(seconds: int) -> str:
     return result.strip()
 
 
-async def progress_for_pyrogram(current, total, ud_type, message, start, client=None):
+TIER_SPEED_LIMITS = {
+    0: 3.5 * 1024 * 1024,   # 3.5 MB/s Free
+    1: 12.0 * 1024 * 1024,  # 12 MB/s Silver
+    2: 25.0 * 1024 * 1024,  # 25 MB/s Gold
+    3: 0                    # Unlimited Diamond / Owner
+}
+
+
+async def progress_for_pyrogram(current, total, ud_type, message, start, client=None, tier=0):
     # Check if this task has been requested to cancel
     msg_id = getattr(message, 'id', None)
     chat_id = getattr(message.chat, 'id', None) if getattr(message, 'chat', None) else None
@@ -52,6 +61,16 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     if msg_id in CANCEL_REQUESTS or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS)):
         PROGRESS_TIMESTAMPS.pop(key, None)
         raise StopTransmission("Operation Cancelled by User")
+
+    # Tier-based speed throttling
+    max_speed = TIER_SPEED_LIMITS.get(tier, 3.5 * 1024 * 1024)
+    if max_speed > 0 and current > 0:
+        elapsed = time.time() - start
+        expected_min_time = current / max_speed
+        if elapsed < expected_min_time:
+            delay = min(expected_min_time - elapsed, 1.5)
+            if delay > 0.05:
+                await asyncio.sleep(delay)
 
     now = time.time()
     last_update = PROGRESS_TIMESTAMPS.get(key, 0)
@@ -71,11 +90,16 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
         completed_blocks = math.floor(percentage / 5)
         progress = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
 
+        if tier == 0:
+            speed_txt = f"{humanbytes(speed)}/s (🆓 Free Limit: 3.5 MB/s — Upgrade for Max Speed!)"
+        else:
+            speed_txt = f"{humanbytes(speed)}/s"
+
         status_text = (
             f"<b>{ud_type}</b>\n\n"
             f"{progress} <b>{round(percentage, 2)}%</b>\n\n"
             f"🔗 <b>Size :</b> {humanbytes(current)} / {humanbytes(total)}\n"
-            f"🚀 <b>Speed :</b> {humanbytes(speed)}/s\n"
+            f"🚀 <b>Speed :</b> {speed_txt}\n"
             f"⏰ <b>ETA :</b> {eta_str}\n\n"
             f"⚡ <b>NeX 4GB Rename Bot</b> | @Nex_bots"
         )

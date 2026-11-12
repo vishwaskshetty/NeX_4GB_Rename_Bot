@@ -22,32 +22,43 @@ async def _safe(coro, default=None):
 def build_start_keyboard(user_id: int) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton('💎 ᴜᴘɢʀᴀᴅᴇ ᴛᴏ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ', callback_data='open_plans')
+            InlineKeyboardButton('💎 Upgrade to Premium', callback_data='open_plans'),
+            InlineKeyboardButton('🎁 Claim Free Trial', callback_data='claim_trial_cb')
         ],
         [
-            InlineKeyboardButton('⚙️ ꜱᴇᴛᴛɪɴɢꜱ', callback_data='open_settings'),
-            InlineKeyboardButton('🏆 ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ', callback_data='cb_leaderboard')
+            InlineKeyboardButton('👤 My Profile & Plan', callback_data='cb_user_profile'),
+            InlineKeyboardButton('🏆 Leaderboard', callback_data='cb_leaderboard')
         ],
         [
-            InlineKeyboardButton('📖 ʜᴇʟᴘ', callback_data='help'),
-            InlineKeyboardButton('ℹ️ ᴀʙᴏᴜᴛ', callback_data='about')
+            InlineKeyboardButton('⚙️ Bot Settings', callback_data='open_settings'),
+            InlineKeyboardButton('❤️ Donate / Support', callback_data='cb_donate')
         ],
         [
-            InlineKeyboardButton('📢 ᴜᴘᴅᴀᴛᴇꜱ', url='https://t.me/Nex_bots'),
-            InlineKeyboardButton('💬 ꜱᴜᴘᴘᴏʀᴛ', url='https://t.me/NexCRSupportbot')
+            InlineKeyboardButton('📖 Help & Guide', callback_data='help'),
+            InlineKeyboardButton('ℹ️ About Bot', callback_data='about')
+        ],
+        [
+            InlineKeyboardButton('📢 Updates Channel', url='https://t.me/Nex_bots'),
+            InlineKeyboardButton('💬 Support Bot', url='https://t.me/NexCRSupportbot')
         ]
     ]
     if user_id in Config.ADMIN:
-        rows.append([InlineKeyboardButton('👑 ᴏᴡɴᴇʀ ᴄᴏɴᴛʀᴏʟ ᴘᴀɴᴇʟ', callback_data='owner_panel')])
+        rows.append([InlineKeyboardButton('👑 Owner Control Panel', callback_data='owner_panel')])
     return InlineKeyboardMarkup(rows)
 
 
 async def build_leaderboard_view(viewer_id: int):
     top_users = await _safe(db.get_top_renamers(10), default=[])
     my_rank_info = await _safe(db.get_user_rank(viewer_id), default={"rank": "-", "files": 0, "bytes": 0})
+    my_prem = await _safe(db.get_premium_info(viewer_id), default={})
     
-    tier_badges = {3: "💎", 2: "🥇", 1: "🥈", 0: "🆓"}
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    tier_badges = {
+        3: "[💎 PRO - Diamond]",
+        2: "[🥇 PRO - Gold]",
+        1: "[🥈 PRO - Silver]",
+        0: "[🆓 Free]"
+    }
+    medals = {1: "🥇 1.", 2: "🥈 2.", 3: "🥉 3."}
 
     lines = [
         "╭━━━━━━━━━━━━━━━━━━━╮",
@@ -59,25 +70,27 @@ async def build_leaderboard_view(viewer_id: int):
         lines.append("<i>No active renaming records yet! Be the first to rename a file.</i>\n")
     else:
         for idx, u in enumerate(top_users, start=1):
-            badge = tier_badges.get(u.get("tier", 0), "🆓")
+            badge = tier_badges.get(u.get("tier", 0), "[🆓 Free]")
             rank_icon = medals.get(idx, f"<b>{idx}.</b>")
-            name = (u.get("first_name") or "User")[:14]
+            name = (u.get("first_name") or "User")[:12]
             files = u.get("files", 0)
             vol = humanbytes(u.get("bytes", 0))
-            lines.append(f"{rank_icon} {badge} <b>{name}</b> — <code>{files}</code> files ({vol})")
+            lines.append(f"{rank_icon} <b>{name}</b> <code>{badge}</code> — {files} files ({vol})")
 
     lines.append("\n" + "─" * 26)
     r = my_rank_info.get("rank", "-")
     f = my_rank_info.get("files", 0)
     v = humanbytes(my_rank_info.get("bytes", 0))
-    lines.append(f"👤 <b>Your Rank :</b> #{r} | <code>{f}</code> files ({v})\n")
+    my_badge = tier_badges.get(my_prem.get("tier", 0), "[🆓 Free]")
+    lines.append(f"👤 <b>Your Rank :</b> #{r} <code>{my_badge}</code> | <code>{f}</code> files ({v})\n")
     lines.append("⚡ @Nex_bots | 💬 Support: @NexCRSupportbot")
 
     text = "\n".join(lines)
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans")],
+        [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans"),
+         InlineKeyboardButton("👤 My Profile", callback_data="cb_user_profile")],
         [InlineKeyboardButton("🔄 Refresh", callback_data="cb_leaderboard"),
-         InlineKeyboardButton("⬅️ Back", callback_data="start")],
+         InlineKeyboardButton("⬅️ Back to Start", callback_data="start")],
         [InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
     return text, markup
@@ -141,7 +154,7 @@ async def leaderboard_cmd(client, message):
     await message.reply_text(text, reply_markup=markup)
 
 
-@Client.on_callback_query(filters.regex(r"^(start|render|help|donation|about|close|cb_leaderboard)$"))
+@Client.on_callback_query(filters.regex(r"^(start|render|help|about|close|cb_leaderboard)$"))
 async def cb_handler(client, query: CallbackQuery):
     data = query.data 
     if data == "start":
@@ -164,37 +177,22 @@ async def cb_handler(client, query: CallbackQuery):
             query.message,
             text=Txt.HELP_TXT,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🖥️ ꜱᴇʀᴠᴇʀ ɪɴꜰᴏ", callback_data="render"),
-                 InlineKeyboardButton("⚙️ ꜱᴇᴛᴛɪɴɢꜱ", callback_data="open_settings")],
-                [InlineKeyboardButton("⬅️ ʙᴀᴄᴋ", callback_data="start"),
-                 InlineKeyboardButton("❌ ᴄʟᴏꜱᴇ", callback_data="close")]
+                [InlineKeyboardButton("🖥️ Server Info", callback_data="render"),
+                 InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")],
+                [InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
+                 InlineKeyboardButton("❌ Close", callback_data="close")]
             ])
-        )
-    elif data == "donation":
-        buttons = [
-            [
-                InlineKeyboardButton('📢 Updates Channel', url='https://t.me/Nex_bots'),
-                InlineKeyboardButton('💬 Support Bot', url='https://t.me/NexCRSupportbot')
-            ],
-            [InlineKeyboardButton('⬅️ Back', callback_data='start'),
-             InlineKeyboardButton('❌ Close', callback_data='close')]
-        ]
-        await edit_message_content(
-            query.message,
-            text=Txt.DON_TXT.format(query.from_user.mention),
-            reply_markup=InlineKeyboardMarkup(buttons),
-            parse_mode=enums.ParseMode.HTML
         )
     elif data == "about":
         await edit_message_content(
             query.message,
             text=Txt.ABOUT_TXT.format(client.mention),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots"),
-                 InlineKeyboardButton("💬 ꜱᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot")],
-                [InlineKeyboardButton("🖥️ ꜱᴇʀᴠᴇʀ ɪɴꜰᴏ", callback_data="render")],
-                [InlineKeyboardButton("⬅️ ʙᴀᴄᴋ", callback_data="start"),
-                 InlineKeyboardButton("❌ ᴄʟᴏꜱᴇ", callback_data="close")]
+                [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/Nex_bots"),
+                 InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot")],
+                [InlineKeyboardButton("🖥️ Server Info", callback_data="render")],
+                [InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
+                 InlineKeyboardButton("❌ Close", callback_data="close")]
             ])
         )
     elif data == "close":
