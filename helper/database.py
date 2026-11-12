@@ -111,11 +111,24 @@ class Database:
             serverSelectionTimeoutMS=5000,
             connectTimeoutMS=5000,
             socketTimeoutMS=10000,
+            maxPoolSize=50,
+            minPoolSize=5,
+            maxIdleTimeMS=30000,
+            heartbeatFrequencyMS=10000,
         )
         self.db = self._client[database_name]
         self.col = self.db.user
         self.cfg = self.db.bot_config
         self.logs = self.db.activity_logs
+
+    @property
+    def client(self):
+        """Exposes the underlying Motor client for direct commands like admin ping."""
+        return self._client
+
+    async def ping(self):
+        """Pings the MongoDB cluster admin command."""
+        return await self._client.admin.command("ping")
 
     def new_user(self, id, first_name="", username="", timezone="Asia/Kolkata"):
         return dict(

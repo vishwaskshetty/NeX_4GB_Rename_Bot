@@ -47,6 +47,19 @@ RENAME_SEMAPHORE = asyncio.Semaphore(10)
 # Per-user active task tracking & pre-rename extras cache
 ACTIVE_USER_TASKS = {}
 PENDING_MEDIA_EXTRAS = {}
+ACTIVE_WORK_DIRS = set()
+
+
+def is_active_task_path(target_path: str) -> bool:
+    """Checks whether a given file or directory is part of an ongoing rename task."""
+    try:
+        abs_target = os.path.abspath(target_path)
+        for active_dir in list(ACTIVE_WORK_DIRS):
+            if abs_target == active_dir or abs_target.startswith(active_dir + os.sep):
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def get_full_mime_type(f: str) -> str:
@@ -530,6 +543,8 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
     async with RENAME_SEMAPHORE:
         work_dir = f"downloads/{user_id}_{int(time.time())}_{os.getpid()}"
         os.makedirs(work_dir, exist_ok=True)
+        abs_work_dir = os.path.abspath(work_dir)
+        ACTIVE_WORK_DIRS.add(abs_work_dir)
         file_path = os.path.join(work_dir, new_filename)
         ph_path = None
         sample_path = None
@@ -908,6 +923,10 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
 
         finally:
             # 9. Strict Cleanup of Temporary Files, Concurrency Counter & Cancellation Set
+            try:
+                ACTIVE_WORK_DIRS.discard(abs_work_dir)
+            except Exception:
+                pass
             ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
             CANCEL_REQUESTS.discard(ms.id)
             CANCEL_REQUESTS.discard(user_id)
