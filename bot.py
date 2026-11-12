@@ -17,6 +17,7 @@ pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 USER_COMMANDS = [
     BotCommand("start", "⚡ Start the Bot & Main Menu"),
     BotCommand("profile", "👤 View Profile, Plan & Usage Stats"),
+    BotCommand("refer", "🎁 Refer Friends & Earn Free Gold Plan"),
     BotCommand("plan", "💎 Upgrade to 4GB Premium & Plans"),
     BotCommand("myplan", "📊 My Plan, Quota & Usage Stats"),
     BotCommand("trial", "🎁 Claim 3-Day Free 4GB Trial"),

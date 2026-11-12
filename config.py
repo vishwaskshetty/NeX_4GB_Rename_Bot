@@ -42,97 +42,88 @@ class Config(object):
 
 
 class Txt(object):
-    START_TXT = """Hello {} 👋 
+    START_TXT = """👋 <b>Hello {0}!</b>
 
-🚀 <b><u>NeX 4GB Rename Bot</u></b> ⚡
-<i>Commercial-grade, ultra-fast 4GB file renamer!</i>
+Welcome to <b>NeX 4GB Rename Bot</b> ⚡
+A fast, clean cloud media processor for Telegram files up to <b>4GB+</b>.
 
-✨ <b>Core Capabilities:</b>
-◈ ⚡ <b>4GB+ Cloud Transfers :</b> Full 4GB files via Telegram Premium
-◈ 🏷️ <b>100% Clean Output :</b> No prefixes, custom metadata, prefix/suffix & cleaner
-◈ 💧 <b>Video Watermark :</b> Burn your channel tag directly into frames
-◈ 🎬 <b>Sample Video & Shots :</b> Custom timeline clips & photo albums
-◈ 📦 <b>Personal Dump Channel :</b> Auto-forward renamed files securely
-◈ 🚀 <b>High-Speed Engine :</b> Multi-worker 24/7 cloud bandwidth
+╭━━━〔 ✨ <b>Key Highlights</b> 〕━━━╮
+┃ ⚡ <b>4GB+ High-Speed Renaming</b>
+┃ 🏷️ <b>Clean Output & Metadata</b>
+┃ 🎬 <b>Sample Video & Screen</b>
+┃ 💧 <b>Custom Video Watermark</b>
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
 
-<i>Send any document, video, or audio to start renaming!</i>
-
-📢 <b>Updates:</b> @Nex_bots | 💬 <b>Support:</b> @NexCRSupportbot"""
+📤 <i>Send any video, document, or audio file to begin!</i>"""
 
     ABOUT_TXT = """🤖 <b><u>About NeX 4GB Rename Bot</u></b> ⚡
 
-• <b>Framework:</b> Pyrotgfork & FFmpeg
-• <b>Speed:</b> Multi-Worker High Speed
-• <b>Max File Size:</b> Up to 4GB (Telegram Premium)
-• <b>Database:</b> MongoDB Atlas
-• <b>Metadata Engine:</b> Lossless Stream Tagging
+• <b>Framework :</b> Pyrogram & FFmpeg
+• <b>Max File Size :</b> Up to 4GB+
+• <b>Speed :</b> Cloud High-Speed
+• <b>Engine :</b> Clean Lossless Stream
+• <b>Database :</b> MongoDB Atlas
 
-📢 <b>Channel:</b> @Nex_bots
-💬 <b>Support:</b> @NexCRSupportbot
-👨‍💻 <b>Developer:</b> @Nex_bots"""
+📢 <b>Updates :</b> @Nex_bots
+💬 <b>Support :</b> @NexCRSupportbot"""
 
     HELP_TXT = """📖 <b><u>NeX 4GB Rename Bot - Help</u></b> ⚡
 
-⚙️ <b><u>Settings & Controls:</u></b>
-• <code>/settings</code> - Interactive visual dashboard
-• <code>/commands</code> - Full list of bot commands
-
 ✏️ <b><u>How To Rename:</u></b>
-1. Send any document, video, or audio up to 4GB.
-2. Tap <b>⚡ Auto Clean</b> or <b>📝 Type Name</b>.
-3. Choose: [<b>📁 Doc</b> | <b>🎥 Video</b> | <b>🎵 Audio</b>].
+1. Send any file up to 4GB.
+2. Tap <b>Auto Clean</b> or type name.
+3. Select Doc, Video, or Audio.
 
-🏷️ <b><u>Key Commands:</u></b>
-• <code>/metadata</code> | <code>/set_metadata &lt;tag&gt;</code>
-• <code>/set_remove &lt;words&gt;</code> | <code>/set_replace &lt;old:new&gt;</code>
-• <code>/set_sample &lt;sec&gt;</code> | <code>/set_screenshots &lt;1-10&gt;</code>
-• <code>/set_caption &lt;text&gt;</code> | <code>/view_thumb</code> | <code>/del_thumb</code>
-• <code>/set_prefix &lt;text&gt;</code> | <code>/set_suffix &lt;text&gt;</code>
+⚙️ <b><u>Settings & Tools:</u></b>
+• <code>/settings</code> - Custom Setup
+• <code>/refer</code> - Refer & Earn Free VIP
+• <code>/profile</code> - View Your Stats
+• <code>/plan</code> - Upgrade to 4GB VIP
 
-📢 <b>Updates:</b> @Nex_bots"""
+📢 <b>Updates :</b> @Nex_bots
+💬 <b>Support :</b> @NexCRSupportbot"""
 
     CAPTION_TXT = """📑 <b><u>Custom Caption Guide</u></b> ⚡
 
-• <code>/set_caption &lt;text&gt;</code> - Save your custom caption
-• <code>/see_caption</code> - View your current caption
-• <code>/del_caption</code> - Reset to default filename
+• <code>/set_caption &lt;text&gt;</code> - Save
+• <code>/see_caption</code> - View active
+• <code>/del_caption</code> - Reset
 
 <b>Available Tags:</b>
-• <code>{filename}</code> - Renamed file name
-• <code>{filesize}</code> - Human-readable size
-• <code>{duration}</code> - Video or audio duration
+• <code>{filename}</code> - File name
+• <code>{filesize}</code> - File size
+• <code>{duration}</code> - Video length
 
 <b>Example:</b>
-<code>/set_caption 📕 <b>Name:</b> {filename}
-🔗 <b>Size:</b> {filesize}
-⏰ <b>Duration:</b> {duration}
+<code>/set_caption 📕 {filename}
+🔗 Size: {filesize}</code>
 
-⚡ @Nex_bots</code>"""
+⚡ @Nex_bots"""
 
-    THUMBNAIL_TXT = """🖼️ <b><u>Custom Thumbnail Guide</u></b> ⚡
+    THUMBNAIL_TXT = """🖼️ <b><u>Thumbnail Guide</u></b> ⚡
 
-• Send any photo to set it as your thumbnail.
-• <code>/view_thumb</code> - View your current thumbnail
-• <code>/del_thumb</code> - Delete your thumbnail
+• Send any photo to set thumbnail.
+• <code>/view_thumb</code> - View thumbnail
+• <code>/del_thumb</code> - Delete thumbnail
 
-<i>💡 16:9 widescreen movie thumbnails keep their proper aspect ratio without stretching!</i>
+💡 <i>16:9 movie thumbnails maintain true aspect ratio!</i>
 
 ⚡ @Nex_bots"""
 
     PREFIX = """➕ <b><u>Prefix Guide</u></b> ⚡
 
-• <code>/set_prefix &lt;text&gt;</code> - Add text before filename
-• <code>/see_prefix</code> - View your active prefix
-• <code>/del_prefix</code> - Delete your active prefix
+• <code>/set_prefix &lt;text&gt;</code> - Add text
+• <code>/see_prefix</code> - View prefix
+• <code>/del_prefix</code> - Remove prefix
 
 <b>Example:</b>
 <code>/set_prefix @Nex_bots</code>"""
 
     SUFFIX = """➕ <b><u>Suffix Guide</u></b> ⚡
 
-• <code>/set_suffix &lt;text&gt;</code> - Add text before file extension
-• <code>/see_suffix</code> - View your active suffix
-• <code>/del_suffix</code> - Delete your active suffix
+• <code>/set_suffix &lt;text&gt;</code> - Add text
+• <code>/see_suffix</code> - View suffix
+• <code>/del_suffix</code> - Remove suffix
 
 <b>Example:</b>
 <code>/set_suffix @Nex_bots</code>"""

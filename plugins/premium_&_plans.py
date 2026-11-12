@@ -82,12 +82,12 @@ async def build_plans_panel(user_id: int):
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>Your Status :</b> <b>{current_plan}</b>\n"
         f"◈ <b>3-Day Trial :</b> <code>{trial_status}</code>\n\n"
-        "<b>Choose Your Premium Tier:</b>\n"
-        "🥈 <b>Silver :</b> 4GB | 25 GB/Day | 12 MB/s | from ₹79 / 70 ⭐\n"
-        "🥇 <b>Gold :</b> 4GB | 100 GB/Day | 25 MB/s | from ₹129 / 110 ⭐\n"
-        "💎 <b>Diamond VIP :</b> 4GB | <b>UNLIMITED</b> | Max Speed | from ₹199 / 175 ⭐\n\n"
-        "<i>All tiers available for 1M, 3M, 6M, or 1 Year (Min 1 Month).</i>\n\n"
-        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+        "<b>Available Premium Tiers:</b>\n"
+        "• 🥈 <b>Silver :</b> 25 GB/D (from ₹79)\n"
+        "• 🥇 <b>Gold :</b> 100 GB/D (from ₹129)\n"
+        "• 💎 <b>Diamond :</b> Unlimited (₹199)\n\n"
+        "<i>All tiers: 1M, 3M, 6M, 1 Year.</i>\n\n"
+        "⚡ @Nex_bots | 💬 @NexCRSupportbot"
     )
 
     buttons = []
@@ -100,14 +100,14 @@ async def build_plans_panel(user_id: int):
             InlineKeyboardButton("🥇 Gold Tier", callback_data="plan_tier_2")
         ],
         [
-            InlineKeyboardButton("💎 Diamond VIP Tier", callback_data="plan_tier_3")
+            InlineKeyboardButton("💎 Diamond VIP", callback_data="plan_tier_3")
         ],
         [
-            InlineKeyboardButton("👤 My Profile & Plan", callback_data="cb_user_profile"),
+            InlineKeyboardButton("👤 My Profile", callback_data="cb_user_profile"),
             InlineKeyboardButton("🎟️ Redeem Coupon", callback_data="redeem_coupon_btn")
         ],
         [
-            InlineKeyboardButton("💬 Support Bot", url="https://t.me/NexCRSupportbot"),
+            InlineKeyboardButton("💬 Support", url="https://t.me/NexCRSupportbot"),
             InlineKeyboardButton("⬅️ Back", callback_data="start")
         ],
         [
@@ -192,9 +192,8 @@ async def build_profile_card(user_id: int):
     prem_info = await db.get_premium_info(user_id)
     usage = await db.get_user_usage(user_id)
     tz_name = await db.get_timezone(user_id)
-    settings = await db.get_user_settings(user_id)
-    wm = await db.get_watermark(user_id)
-    sample_set = await db.get_sample_settings(user_id)
+    g_stats = await db.get_user_granular_stats(user_id)
+    ref_settings = await db.get_referral_settings()
 
     tier = prem_info.get("tier", 0)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS[0])
@@ -204,60 +203,54 @@ async def build_profile_card(user_id: int):
     used_gb = used_bytes / (1024 ** 3)
     limit_gb = daily_limit / (1024 ** 3)
 
-    tier_badges = {3: "💎 PRO - Diamond", 2: "🥇 PRO - Gold", 1: "🥈 PRO - Silver", 0: "🆓 Free User"}
+    tier_badges = {3: "💎 Diamond VIP", 2: "🥇 Gold Plan", 1: "🥈 Silver Plan", 0: "🆓 Free User"}
     badge = tier_badges.get(tier, "🆓 Free User")
 
     if prem_info.get("is_owner"):
-        badge = "👑 Bot Owner (VIP)"
-        countdown_str = "Permanent Lifetime"
-        expiry_str = "Never Expires"
-        limit_str = "Unlimited"
-        speed_str = "⚡ Unlimited VIP Speed"
-        pct = 0
+        badge = "👑 Bot Owner"
+        expiry_str = "Lifetime VIP"
+        speed_str = "Unlimited"
     elif tier > 0:
         d = prem_info.get("days_left", 0)
         h = prem_info.get("hours_left", 0)
-        countdown_str = f"{d}d {h}h remaining"
-        expiry_str = format_user_time(prem_info.get("expiry", 0), tz_name)
-        limit_str = f"{limit_gb:.0f} GB" if tier < 3 else "Unlimited"
-        speed_str = TIER_INFO.get(tier, {}).get("speed", "High Speed")
-        pct = min(100, int((used_bytes / daily_limit) * 100)) if tier < 3 else 0
+        expiry_str = f"{d}d {h}h left"
+        speed_str = TIER_INFO.get(tier, {}).get("speed", "Fast")
     else:
-        countdown_str = "Free Tier"
-        expiry_str = "None"
-        limit_str = f"{limit_gb:.0f} GB"
-        speed_str = "3.5 MB/s (Free Limit)"
-        pct = min(100, int((used_bytes / daily_limit) * 100))
+        expiry_str = "Free Tier"
+        speed_str = "3.5 MB/s Cap"
 
+    pct = min(100, int((used_bytes / daily_limit) * 100)) if (tier < 3 and not prem_info.get("is_owner")) else 0
     blocks = min(10, pct // 10)
     bar = "■" * blocks + "□" * (10 - blocks)
 
-    file_mode = "Video 🎬" if settings.get("as_file") is False else "Document 📁"
-    thumb_str = "Custom Set ✅" if settings.get("thumbnail") else "Default ❌"
-    wm_str = f"Active ({wm.get('text')[:8]}..)" if wm.get("enabled") and tier >= 1 else "None ❌"
+    req_ref = ref_settings.get("required", 3)
+    pts_ref = g_stats.get("referral_points", 0)
+    tot_ref = g_stats.get("referrals", 0)
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   👤 <b>NeX User Profile & Stats</b>\n"
+        "┃   👤 <b>NeX User Profile</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>User ID :</b> <code>{user_id}</code>\n"
-        f"◈ <b>Membership :</b> <b>[{badge}]</b>\n"
-        f"◈ <b>Speed Cap :</b> <code>{speed_str}</code>\n"
-        f"◈ <b>Expiry :</b> <code>{expiry_str}</code> ({countdown_str})\n"
-        f"◈ <b>Timezone :</b> <code>{tz_name}</code>\n\n"
+        f"◈ <b>Plan :</b> <b>{badge}</b>\n"
+        f"◈ <b>Expiry :</b> <code>{expiry_str}</code>\n"
+        f"◈ <b>Speed Cap :</b> <code>{speed_str}</code>\n\n"
         f"◈ <b>Today's Bandwidth :</b>\n"
-        f"  <code>[{bar}]</code> {used_gb:.2f} GB / {limit_str} ({pct}%)\n"
-        f"  <i>Files renamed today: {usage.get('daily_files', 0)}</i>\n\n"
-        f"◈ <b>Lifetime Activity :</b>\n"
-        f"  • Files: <code>{usage.get('total_files', 0)}</code> | Bandwidth: <code>{humanbytes(usage.get('total_bytes', 0))}</code>\n\n"
-        f"◈ <b>Active Setup :</b> Mode: <code>{file_mode}</code> | Thumb: <code>{thumb_str}</code> | WM: <code>{wm_str}</code>\n\n"
-        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+        f"  <code>[{bar}]</code> {used_gb:.1f} / {limit_gb:.0f} GB\n\n"
+        "◈ <b>Your Activity Stats :</b>\n"
+        f"  • 📁 Renamed : <code>{g_stats['files_renamed']}</code> files\n"
+        f"  • 💾 Data : <code>{humanbytes(g_stats['bytes_processed'])}</code>\n"
+        f"  • 🎬 Samples : <code>{g_stats['samples_generated']}</code>\n"
+        f"  • 📸 Shots : <code>{g_stats['screenshots_generated']}</code>\n"
+        f"  • 💧 Watermarks : <code>{g_stats['watermarks_applied']}</code>\n"
+        f"  • 🎁 Invites : <code>{tot_ref}</code> ({pts_ref}/{req_ref})\n\n"
+        "⚡ @Nex_bots | 💬 @NexCRSupportbot"
     )
 
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 Upgrade / Extend Plan", callback_data="open_plans"),
-         InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")],
-        [InlineKeyboardButton("🏆 Leaderboard", callback_data="cb_leaderboard"),
+        [InlineKeyboardButton("💎 Premium Plans", callback_data="open_plans"),
+         InlineKeyboardButton("🎁 Refer & Earn", callback_data="cb_referral")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
          InlineKeyboardButton("🔄 Refresh", callback_data="cb_user_profile")],
         [InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
          InlineKeyboardButton("❌ Close", callback_data="close")]

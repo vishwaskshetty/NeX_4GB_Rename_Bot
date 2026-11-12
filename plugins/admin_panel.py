@@ -71,7 +71,7 @@ async def unauthorized_owner_cmd(client, message):
     await send_security_alert(client, user, f"Command: {message.text}")
 
 
-@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_|cb_pwiz_|cb_cwiz_)") & ~filters.user(Config.ADMIN), group=1)
+@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_|cb_pwiz_|cb_cwiz_|cb_oref_)") & ~filters.user(Config.ADMIN), group=1)
 async def unauthorized_owner_cb(client, query: CallbackQuery):
     await query.answer("🚨 SECURITY ALERT: Unauthorized Access! This action has been logged.", show_alert=True)
     await send_security_alert(client, query.from_user, f"Callback: {query.data}")
@@ -150,8 +150,12 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton(f"🚫 Banned ({len(banned_users)})", callback_data="cb_owner_banned")
         ],
         [
-            InlineKeyboardButton("📜 Activity Logs", callback_data="cb_owner_logs"),
-            InlineKeyboardButton("📈 Analytics", callback_data="cb_owner_analytics")
+            InlineKeyboardButton("🎁 Referrals", callback_data="cb_owner_referral"),
+            InlineKeyboardButton("📜 Activity Logs", callback_data="cb_owner_logs")
+        ],
+        [
+            InlineKeyboardButton("📈 Analytics", callback_data="cb_owner_analytics"),
+            InlineKeyboardButton("📊 Server Stats", callback_data="cb_owner_stats")
         ],
         [
             InlineKeyboardButton("💳 Update UPI ID", callback_data="cb_owner_upi_wiz"),
@@ -159,14 +163,13 @@ async def build_owner_panel(client: Client):
         ],
         [
             InlineKeyboardButton("📦 Channels & Dumps", callback_data="cb_owner_channels"),
-            InlineKeyboardButton("📊 Server Stats", callback_data="cb_owner_stats")
+            InlineKeyboardButton("⚙️ My Settings", callback_data="open_settings")
         ],
         [
-            InlineKeyboardButton("⚙️ My Settings", callback_data="open_settings"),
-            InlineKeyboardButton("🧹 Clear Cache", callback_data="clear_cache_owner")
+            InlineKeyboardButton("🧹 Clear Cache", callback_data="clear_cache_owner"),
+            InlineKeyboardButton("🔄 Restart Bot", callback_data="cb_owner_restart")
         ],
         [
-            InlineKeyboardButton("🔄 Restart Bot", callback_data="cb_owner_restart"),
             InlineKeyboardButton("📋 Commands List", callback_data="cb_owner_cmds")
         ],
         [
@@ -1427,40 +1430,150 @@ async def cb_owner_channels(client, query: CallbackQuery):
     await query.answer()
 
 
-@Client.on_callback_query(filters.regex(r"^cb_owner_stats$") & filters.user(Config.ADMIN))
-async def cb_owner_stats(client, query: CallbackQuery):
+# ==================== COMPREHENSIVE BOT & SERVER STATS ====================
+
+async def build_admin_stats_view(client: Client):
     uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - (Config.BOT_UPTIME or time.time())))
-    total_users = await db.total_users_count()
+    total_users = await _safe(db.total_users_count(), default=0)
+    usage = await _safe(db.get_global_usage(), default={})
+    banned = await _safe(db.get_banned_users(), default=[])
+    
     total_disk, used_disk, free_disk = shutil.disk_usage(".")
     cpu = psutil.cpu_percent(interval=0.1)
     ram = psutil.virtual_memory().percent
-    sent = get_readable_file_size(psutil.net_io_counters().bytes_sent)
-    recv = get_readable_file_size(psutil.net_io_counters().bytes_recv)
-    has_4gb = "Active 🟢 (4GB Session)" if getattr(client, "app_4gb", None) else "Inactive 🔴 (2GB Mode)"
-    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    has_4gb = "Connected 🟢" if getattr(client, "app_4gb", None) else "Disabled 🔴"
+
+    from plugins.file_rename import ACTIVE_USER_TASKS
+    active_tasks = sum(ACTIVE_USER_TASKS.values()) if ACTIVE_USER_TASKS else 0
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   📊 <b>Live Server Diagnostics</b>\n"
+        "┃   📊 <b>Server & Bot Statistics</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>🚀 4GB Client :</b> <code>{has_4gb}</code>\n"
-        f"◈ <b>⏱️ Bot Uptime :</b> <code>{uptime}</code>\n"
-        f"◈ <b>👥 Registered Users :</b> <code>{total_users}</code>\n"
-        f"◈ <b>🖥️ CPU Load :</b> <code>{cpu}%</code>\n"
-        f"◈ <b>🧠 RAM Used :</b> <code>{ram}%</code>\n"
-        f"◈ <b>💾 Disk Free :</b> <code>{get_readable_file_size(free_disk)}</code> / <code>{get_readable_file_size(total_disk)}</code>\n"
-        f"◈ <b>📡 Net Sent :</b> <code>{sent}</code> | <b>📥 Recv :</b> <code>{recv}</code>\n"
-        f"◈ <b>🐍 Python :</b> <code>v{py_ver}</code>\n\n"
-        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+        f"◈ <b>Total Users :</b> <code>{total_users}</code>\n"
+        f"◈ <b>VIP Users :</b> <code>{usage.get('total_premium', 0)}</code> "
+        f"(🥈{usage.get('silver_users', 0)} 🥇{usage.get('gold_users', 0)} 💎{usage.get('diamond_users', 0)})\n"
+        f"◈ <b>Banned :</b> <code>{len(banned)}</code> | <b>Tasks :</b> <code>{active_tasks}</code>\n\n"
+        "📈 <b>Bot Activity Stats:</b>\n"
+        f"  • 📁 Renamed : <code>{usage.get('global_files', 0)}</code> ({humanbytes(usage.get('global_bytes', 0))})\n"
+        f"  • 🎬 Samples : <code>{usage.get('global_samples', 0)}</code>\n"
+        f"  • 📸 Shots : <code>{usage.get('global_screenshots', 0)}</code>\n"
+        f"  • 💧 Watermarks : <code>{usage.get('global_watermarks', 0)}</code>\n"
+        f"  • 🏷️ Metadata : <code>{usage.get('global_metadata', 0)}</code>\n"
+        f"  • 🎁 Referrals : <code>{usage.get('global_referrals', 0)}</code>\n\n"
+        "🖥️ <b>Server Health:</b>\n"
+        f"  • CPU : <code>{cpu}%</code> | RAM : <code>{ram}%</code>\n"
+        f"  • Free Disk : <code>{get_readable_file_size(free_disk)}</code>\n"
+        f"  • Uptime : <code>{uptime}</code>\n"
+        f"  • 4GB Client : <code>{has_4gb}</code>\n\n"
+        "⚡ @Nex_bots | 💬 @NexCRSupportbot"
     )
 
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Refresh", callback_data="cb_owner_stats"),
-         InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel")],
-        [InlineKeyboardButton("❌ Close", callback_data="close")]
+        [InlineKeyboardButton("🔄 Refresh Stats", callback_data="cb_owner_stats"),
+         InlineKeyboardButton("📜 Activity Logs", callback_data="cb_owner_logs")],
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_stats$") & filters.user(Config.ADMIN))
+async def cb_owner_stats(client, query: CallbackQuery):
+    text, markup = await build_admin_stats_view(client)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Stats Refreshed! 📊")
+
+
+# ==================== OWNER REFERRAL SYSTEM PANEL ====================
+
+async def build_owner_referral_panel():
+    settings = await db.get_referral_settings()
+    status_str = "Enabled 🟢" if settings["enabled"] else "Disabled 🔴"
+    req = settings["required"]
+    days = settings["reward_days"]
+    tier_name = TIER_NAMES.get(settings["reward_tier"], "Gold")
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🎁 <b>Referral System Control</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Status :</b> <code>{status_str}</code>\n"
+        f"◈ <b>Target :</b> <code>{req} Invites</code>\n"
+        f"◈ <b>Reward :</b> <b>{days} Days {tier_name}</b>\n\n"
+        "<i>Tap buttons below to change settings:</i>\n\n"
+        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+    )
+
+    status_btn_text = "🔴 Disable Referrals" if settings["enabled"] else "🟢 Enable Referrals"
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton(status_btn_text, callback_data="cb_oref_toggle_status")],
+        [
+            InlineKeyboardButton("1 Inv" + (" ✅" if req == 1 else ""), callback_data="cb_oref_req_1"),
+            InlineKeyboardButton("3 Inv" + (" ✅" if req == 3 else ""), callback_data="cb_oref_req_3"),
+            InlineKeyboardButton("5 Inv" + (" ✅" if req == 5 else ""), callback_data="cb_oref_req_5"),
+            InlineKeyboardButton("10 Inv" + (" ✅" if req == 10 else ""), callback_data="cb_oref_req_10")
+        ],
+        [
+            InlineKeyboardButton("1D" + (" ✅" if days == 1 else ""), callback_data="cb_oref_days_1"),
+            InlineKeyboardButton("3D" + (" ✅" if days == 3 else ""), callback_data="cb_oref_days_3"),
+            InlineKeyboardButton("7D" + (" ✅" if days == 7 else ""), callback_data="cb_oref_days_7"),
+            InlineKeyboardButton("15D" + (" ✅" if days == 15 else ""), callback_data="cb_oref_days_15"),
+            InlineKeyboardButton("30D" + (" ✅" if days == 30 else ""), callback_data="cb_oref_days_30")
+        ],
+        [
+            InlineKeyboardButton("🥈 Silver" + (" ✅" if settings["reward_tier"] == 1 else ""), callback_data="cb_oref_tier_1"),
+            InlineKeyboardButton("🥇 Gold" + (" ✅" if settings["reward_tier"] == 2 else ""), callback_data="cb_oref_tier_2"),
+            InlineKeyboardButton("💎 Diamond" + (" ✅" if settings["reward_tier"] == 3 else ""), callback_data="cb_oref_tier_3")
+        ],
+        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_referral$") & filters.user(Config.ADMIN))
+async def cb_owner_referral_cb(client, query: CallbackQuery):
+    text, markup = await build_owner_referral_panel()
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oref_toggle_status$") & filters.user(Config.ADMIN))
+async def cb_oref_toggle_status_cb(client, query: CallbackQuery):
+    settings = await db.get_referral_settings()
+    new_state = not settings["enabled"]
+    await db.set_referral_settings(enabled=new_state)
+    await query.answer(f"Referrals {'Enabled 🟢' if new_state else 'Disabled 🔴'}")
+    text, markup = await build_owner_referral_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oref_req_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oref_req_cb(client, query: CallbackQuery):
+    req = int(query.matches[0].group(1))
+    await db.set_referral_settings(required=req)
+    await query.answer(f"Target set to {req} Invites!")
+    text, markup = await build_owner_referral_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oref_days_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oref_days_cb(client, query: CallbackQuery):
+    days = int(query.matches[0].group(1))
+    await db.set_referral_settings(reward_days=days)
+    await query.answer(f"Reward set to {days} Days!")
+    text, markup = await build_owner_referral_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oref_tier_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oref_tier_cb(client, query: CallbackQuery):
+    tier = int(query.matches[0].group(1))
+    await db.set_referral_settings(reward_tier=tier)
+    await query.answer(f"Reward Tier set to {TIER_NAMES.get(tier, 'Tier ' + str(tier))}!")
+    text, markup = await build_owner_referral_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
 
 
 @Client.on_callback_query(filters.regex(r"^clear_cache_owner$"))
@@ -1526,7 +1639,7 @@ async def cb_owner_cmds_view(client, query: CallbackQuery):
         "• <code>/set_fsub &lt;channel&gt;</code> | <code>/set_global_meta &lt;tag&gt;</code>\n"
         "• <code>/set_upi &lt;id&gt;</code> | <code>/restart</code>\n\n"
         "⚡ <b>Key User Commands:</b>\n"
-        "• <code>/start</code> | <code>/profile</code> | <code>/plan</code> | <code>/trial</code>\n"
+        "• <code>/start</code> | <code>/profile</code> | <code>/refer</code> | <code>/plan</code>\n"
         "• <code>/settings</code> | <code>/leaderboard</code> | <code>/usage</code> | <code>/timezone</code>\n"
         "• <code>/metadata</code> | <code>/set_metadata</code> | <code>/set_watermark</code>\n"
         "• <code>/set_sample</code> | <code>/set_sample_time</code> | <code>/set_shots</code>\n"
@@ -1778,33 +1891,8 @@ async def send_msg(user_id, message: Message, reply_markup=None):
 
 @Client.on_message(filters.command(["stats", "status"]) & filters.user(Config.ADMIN))
 async def get_stats(bot, message):
-    st = await message.reply('⏳ <b>Calculating System Statistics...</b>')
-    start_t = time.time()
-    
-    total_users = await db.total_users_count()
-    uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - bot.uptime))
-    end_t = time.time()
-    ping_ms = (end_t - start_t) * 1000
-    
-    has_4gb = bool(getattr(bot, "app_4gb", None))
-    client_4gb_status = "Connected 🟢 (4GB Mode)" if has_4gb else "Disabled 🔴 (2GB Mode)"
-
-    total_disk, used_disk, free_disk = shutil.disk_usage(".")
-    cpu_usage = psutil.cpu_percent(interval=0.2)
-    ram_usage = psutil.virtual_memory().percent
-
-    stats_text = (
-        f"⚡ <b><u>NeX 4GB Rename Bot Status</u></b> ⚡\n\n"
-        f"⏱️ <b>Bot Uptime :</b> <code>{uptime}</code>\n"
-        f"📶 <b>Current Ping :</b> <code>{ping_ms:.2f} ms</code>\n"
-        f"👥 <b>Total Bot Users :</b> <code>{total_users}</code>\n"
-        f"🚀 <b>4GB Premium Engine :</b> <code>{client_4gb_status}</code>\n\n"
-        f"💾 <b>RAM Usage :</b> <code>{ram_usage}%</code>\n"
-        f"🖥️ <b>CPU Load :</b> <code>{cpu_usage}%</code>\n"
-        f"💿 <b>Free Storage :</b> <code>{get_readable_file_size(free_disk)}</code> / <code>{get_readable_file_size(total_disk)}</code>\n\n"
-        f"⚡ <b>Powered by :</b> @Nex_bots | 💬 Support: @NexCRSupportbot"
-    )
-    await st.edit(text=stats_text)
+    text, markup = await build_admin_stats_view(bot)
+    await message.reply_text(text, reply_markup=markup)
 
 
 @Client.on_message(filters.private & filters.command("restart") & filters.user(Config.ADMIN))

@@ -5,6 +5,7 @@ from datetime import datetime
 from pytz import timezone
 from config import Config, Txt 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.errors import FloodWait, MessageNotModified
 try:
     from pyrogram import StopTransmission
 except ImportError:
@@ -91,7 +92,7 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
         progress = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
 
         if tier == 0:
-            speed_txt = f"{humanbytes(speed)}/s (🆓 Free Limit: 3.5 MB/s — Upgrade for Max Speed!)"
+            speed_txt = f"{humanbytes(speed)}/s (Free: 3.5M/s)"
         else:
             speed_txt = f"{humanbytes(speed)}/s"
 
@@ -107,8 +108,10 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
             cancel_data = f"cancel_{msg_id}" if msg_id else "cancel_action"
             await message.edit(
                 text=status_text,               
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancel Process", callback_data=cancel_data)]])                                               
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancel", callback_data=cancel_data)]])                                               
             )
+        except FloodWait as f_err:
+            await asyncio.sleep(f_err.value + 1)
         except Exception:
             pass
 
@@ -176,29 +179,46 @@ async def send_log(b, u):
 async def edit_message_content(message, text, reply_markup=None, parse_mode=None):
     """
     Safely edits a message's content whether it is a regular text message
-    or a media message (e.g. photo from START_PIC), avoiding caption/text mismatch errors.
+    or a media message (e.g. photo from START_PIC), avoiding caption/text mismatch errors,
+    FloodWait, and MessageNotModified.
     """
+    if not message:
+        return None
     is_media = bool(getattr(message, "photo", None) or getattr(message, "media", None))
-    if is_media:
-        kwargs = {"caption": text, "reply_markup": reply_markup}
-        if parse_mode:
-            kwargs["parse_mode"] = parse_mode
+    for attempt in range(2):
         try:
-            return await message.edit_caption(**kwargs)
+            if is_media:
+                kwargs = {"caption": text, "reply_markup": reply_markup}
+                if parse_mode:
+                    kwargs["parse_mode"] = parse_mode
+                return await message.edit_caption(**kwargs)
+            else:
+                kwargs = {"text": text, "reply_markup": reply_markup}
+                if parse_mode:
+                    kwargs["parse_mode"] = parse_mode
+                return await message.edit_text(**kwargs)
+        except MessageNotModified:
+            return message
+        except FloodWait as e:
+            await asyncio.sleep(e.value + 1)
         except Exception:
-            kwargs_fallback = {"text": text, "reply_markup": reply_markup}
-            if parse_mode:
-                kwargs_fallback["parse_mode"] = parse_mode
-            return await message.edit_text(**kwargs_fallback)
-    else:
-        kwargs = {"text": text, "reply_markup": reply_markup}
-        if parse_mode:
-            kwargs["parse_mode"] = parse_mode
-        try:
-            return await message.edit_text(**kwargs)
-        except Exception:
-            kwargs_fallback = {"caption": text, "reply_markup": reply_markup}
-            if parse_mode:
-                kwargs_fallback["parse_mode"] = parse_mode
-            return await message.edit_caption(**kwargs_fallback)
+            # Swap media / text on mismatch
+            try:
+                if is_media:
+                    kwargs = {"text": text, "reply_markup": reply_markup}
+                    if parse_mode:
+                        kwargs["parse_mode"] = parse_mode
+                    return await message.edit_text(**kwargs)
+                else:
+                    kwargs = {"caption": text, "reply_markup": reply_markup}
+                    if parse_mode:
+                        kwargs["parse_mode"] = parse_mode
+                    return await message.edit_caption(**kwargs)
+            except MessageNotModified:
+                return message
+            except FloodWait as e:
+                await asyncio.sleep(e.value + 1)
+            except Exception:
+                return None
+    return None
 

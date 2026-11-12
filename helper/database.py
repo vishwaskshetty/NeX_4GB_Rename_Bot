@@ -150,7 +150,15 @@ class Database:
             bytes_used_total=0,
             daily_bytes_used=0,
             daily_files_used=0,
-            last_reset_date=""
+            last_reset_date="",
+            total_samples_generated=0,
+            total_screenshots_generated=0,
+            total_watermarks_applied=0,
+            total_metadata_applied=0,
+            referral_points=0,
+            total_referrals=0,
+            referral_rewards_claimed=0,
+            referred_by=None
         )
 
     async def add_user(self, b, m):
@@ -679,6 +687,11 @@ class Database:
         return {
             "global_files": int(cfg.get("global_files_renamed", 0)) if cfg else 0,
             "global_bytes": int(cfg.get("global_bytes_used", 0)) if cfg else 0,
+            "global_samples": int(cfg.get("global_total_samples_generated", 0)) if cfg else 0,
+            "global_screenshots": int(cfg.get("global_total_screenshots_generated", 0)) if cfg else 0,
+            "global_watermarks": int(cfg.get("global_total_watermarks_applied", 0)) if cfg else 0,
+            "global_metadata": int(cfg.get("global_total_metadata_applied", 0)) if cfg else 0,
+            "global_referrals": int(cfg.get("global_total_referrals_completed", 0)) if cfg else 0,
             "silver_users": silver_count,
             "gold_users": gold_count,
             "diamond_users": diamond_count,
@@ -906,29 +919,167 @@ class Database:
             return False
 
     # ==================== QUICK OWNER EXTENSIONS ====================
-    async def extend_premium_days(self, user_id: int, extra_days: int) -> dict:
+    async def extend_premium_days(self, user_id: int, extra_days: int, tier: int = None) -> dict:
         user = await self.col.find_one({'_id': int(user_id)})
         now = time.time()
         current_exp = float(user.get("premium_expiry", 0) or 0) if user else 0
+        current_tier = int(user.get("premium_tier", 0) or 0) if user else 0
         base_time = max(now, current_exp)
         new_expiry = base_time + (extra_days * 86400)
+
+        target_tier = tier if tier is not None else (current_tier if current_tier > 0 else 2)
+        plan_name = TIER_NAMES.get(target_tier, "Premium")
+
         await self.col.update_one(
             {'_id': int(user_id)},
-            {'$set': {'premium_expiry': new_expiry, 'is_premium': True}},
+            {'$set': {
+                'premium_expiry': new_expiry,
+                'premium_tier': target_tier,
+                'plan_name': plan_name,
+                'is_premium': True
+            }},
             upsert=True
         )
-        return {"new_expiry": new_expiry}
+        return {"new_expiry": new_expiry, "tier": target_tier, "plan_name": plan_name}
 
     async def upgrade_user_tier(self, user_id: int) -> int:
         user = await self.col.find_one({'_id': int(user_id)})
         curr_tier = int(user.get("premium_tier", 1)) if user else 1
         next_tier = 1 if curr_tier >= 3 else (curr_tier + 1)
+        plan_name = TIER_NAMES.get(next_tier, "Premium")
         await self.col.update_one(
             {'_id': int(user_id)},
-            {'$set': {'premium_tier': next_tier}},
+            {'$set': {'premium_tier': next_tier, 'plan_name': plan_name}},
             upsert=True
         )
         return next_tier
+
+    # ==================== GRANULAR ACTION STATS ====================
+    async def increment_stat(self, user_id: int, stat_name: str, count: int = 1):
+        """Increments a granular activity counter both on user document and globally."""
+        try:
+            await self.col.update_one(
+                {'_id': int(user_id)},
+                {'$inc': {stat_name: count}},
+                upsert=True
+            )
+            await self.cfg.update_one(
+                {'_id': 'bot_settings'},
+                {'$inc': {f'global_{stat_name}': count}},
+                upsert=True
+            )
+        except Exception:
+            pass
+
+    async def get_user_granular_stats(self, user_id: int) -> dict:
+        user = await self.col.find_one({'_id': int(user_id)}) or {}
+        return {
+            "files_renamed": int(user.get("files_renamed_total", 0) or 0),
+            "bytes_processed": int(user.get("bytes_used_total", 0) or 0),
+            "samples_generated": int(user.get("total_samples_generated", 0) or 0),
+            "screenshots_generated": int(user.get("total_screenshots_generated", 0) or 0),
+            "watermarks_applied": int(user.get("total_watermarks_applied", 0) or 0),
+            "metadata_applied": int(user.get("total_metadata_applied", 0) or 0),
+            "referrals": int(user.get("total_referrals", 0) or 0),
+            "referral_points": int(user.get("referral_points", 0) or 0),
+            "referral_rewards_claimed": int(user.get("referral_rewards_claimed", 0) or 0)
+        }
+
+    # ==================== REFER & EARN ENGINE ====================
+    async def get_referral_settings(self) -> dict:
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
+        return {
+            "enabled": bool(cfg.get("referral_enabled", True)),
+            "required": int(cfg.get("referrals_required", 3)),
+            "reward_days": int(cfg.get("referral_reward_days", 3)),
+            "reward_tier": int(cfg.get("referral_reward_tier", 2))
+        }
+
+    async def set_referral_settings(self, **kwargs) -> dict:
+        update = {}
+        if "enabled" in kwargs and kwargs["enabled"] is not None:
+            update["referral_enabled"] = bool(kwargs["enabled"])
+        if "required" in kwargs and kwargs["required"] is not None:
+            update["referrals_required"] = max(1, int(kwargs["required"]))
+        if "reward_days" in kwargs and kwargs["reward_days"] is not None:
+            update["referral_reward_days"] = max(1, int(kwargs["reward_days"]))
+        if "reward_tier" in kwargs and kwargs["reward_tier"] is not None:
+            update["referral_reward_tier"] = max(1, min(3, int(kwargs["reward_tier"])))
+        if update:
+            await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': update}, upsert=True)
+        return await self.get_referral_settings()
+
+    async def get_user_referral_info(self, user_id: int) -> dict:
+        user = await self.col.find_one({'_id': int(user_id)}) or {}
+        return {
+            "points": int(user.get("referral_points", 0) or 0),
+            "total": int(user.get("total_referrals", 0) or 0),
+            "claimed": int(user.get("referral_rewards_claimed", 0) or 0),
+            "referred_by": user.get("referred_by")
+        }
+
+    async def process_referral(self, inviter_id: int, new_user_id: int) -> tuple:
+        if int(inviter_id) == int(new_user_id):
+            return False, {"reason": "self"}
+        settings = await self.get_referral_settings()
+        if not settings["enabled"]:
+            return False, {"reason": "disabled"}
+
+        new_u = await self.col.find_one({'_id': int(new_user_id)})
+        if new_u and new_u.get("referred_by"):
+            return False, {"reason": "already_referred"}
+
+        inviter = await self.col.find_one({'_id': int(inviter_id)})
+        if not inviter:
+            return False, {"reason": "invalid_inviter"}
+
+        # Link referred_by to new user
+        await self.col.update_one({'_id': int(new_user_id)}, {'$set': {'referred_by': int(inviter_id)}}, upsert=True)
+        # Increment inviter points & count
+        await self.col.update_one(
+            {'_id': int(inviter_id)},
+            {'$inc': {'referral_points': 1, 'total_referrals': 1}},
+            upsert=True
+        )
+        # Increment global counter
+        await self.cfg.update_one(
+            {'_id': 'bot_settings'},
+            {'$inc': {'global_total_referrals_completed': 1}},
+            upsert=True
+        )
+
+        # Check reward threshold
+        updated_inviter = await self.col.find_one({'_id': int(inviter_id)})
+        pts = int(updated_inviter.get("referral_points", 0) or 0)
+        req = settings["required"]
+        reward_triggered = False
+        reward_days = settings["reward_days"]
+        reward_tier = settings["reward_tier"]
+
+        if pts >= req:
+            reward_triggered = True
+            rem_points = pts - req
+            await self.col.update_one(
+                {'_id': int(inviter_id)},
+                {'$set': {'referral_points': rem_points}, '$inc': {'referral_rewards_claimed': 1}},
+                upsert=True
+            )
+            await self.extend_premium_days(inviter_id, reward_days, tier=reward_tier)
+            await self.log_activity(
+                inviter_id,
+                updated_inviter.get("first_name", "User"),
+                "referral_reward",
+                f"Earned {reward_days}D Tier {reward_tier}"
+            )
+
+        return True, {
+            "reward_triggered": reward_triggered,
+            "reward_days": reward_days,
+            "reward_tier": reward_tier,
+            "req": req,
+            "pts": pts,
+            "inviter_name": updated_inviter.get("first_name", "User")
+        }
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

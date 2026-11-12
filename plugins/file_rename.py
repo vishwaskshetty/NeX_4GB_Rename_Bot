@@ -577,6 +577,10 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                     os.replace(meta_file, clean_target)
                     file_path = clean_target
                     actual_file_size = os.path.getsize(file_path)
+                    try:
+                        await db.increment_stat(user_id, "total_metadata_applied", 1)
+                    except Exception:
+                        pass
 
             # 3. Extract accurate duration, width, and height using ffprobe & hachoir
             duration, width, height = await get_video_duration_and_dims(file_path)
@@ -608,6 +612,10 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                     file_path = clean_target
                     actual_file_size = os.path.getsize(file_path)
                     duration, width, height = await get_video_duration_and_dims(file_path)
+                    try:
+                        await db.increment_stat(user_id, "total_watermarks_applied", 1)
+                    except Exception:
+                        pass
 
             # 4. Process Custom Thumbnail with Aspect Ratio Preservation
             c_thumb = await db.get_thumbnail(user_id)
@@ -788,7 +796,7 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
 
                     # Track usage statistics
                     try:
-                        await db.add_usage(user_id, file_size)
+                        await db.add_usage(user_id, actual_file_size)
                     except Exception as e:
                         print(f"Usage tracking error: {e}")
 
@@ -803,6 +811,13 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                 return await ms.edit("❌ <b>Upload Cancelled by User!</b>\n\n⚡ @Nex_bots")
             except Exception as e:
                 return await ms.edit(f"❌ <b>Upload Failed:</b> <code>{e}</code>")
+
+            # Record usage for 4GB uploads if not tracked inside standard block
+            if is_4gb:
+                try:
+                    await db.add_usage(user_id, actual_file_size)
+                except Exception:
+                    pass
 
             # 7. Sample Video Generation (No Thumbnail + Custom Timeline Mode)
             sample_settings = await db.get_sample_settings(user_id)
@@ -821,6 +836,10 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         start_mode=sample_settings.get("start_mode", "auto")
                     )
                     if sample_ok:
+                        try:
+                            await db.increment_stat(user_id, "total_samples_generated", 1)
+                        except Exception:
+                            pass
                         sample_cap = f"🎬 <b>ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ ({sample_duration}ꜱ)</b>\n\n🏷 <code>{new_filename}</code>"
                         sample_dur, s_w, s_h = await get_video_duration_and_dims(sample_path)
                         s_msg = await client.send_video(
@@ -849,6 +868,10 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                     ss_dir = os.path.join(work_dir, "screenshots")
                     ss_list = await generate_screenshots(file_path, ss_dir, duration, screenshots_count)
                     if ss_list:
+                        try:
+                            await db.increment_stat(user_id, "total_screenshots_generated", 1)
+                        except Exception:
+                            pass
                         media_group = []
                         for idx, sp in enumerate(ss_list):
                             cap = f"📸 Screenshot {idx+1}/{len(ss_list)} - {new_filename}" if idx == 0 else ""
