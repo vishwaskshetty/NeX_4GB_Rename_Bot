@@ -66,21 +66,22 @@ jobs:
 
       - name: Generate .env Configuration
         env:
-          API_ID: ${{ secrets.API_ID || '26154211' }}
-          API_HASH: ${{ secrets.API_HASH || '89baf3e48959d2f0584a0071f0d5dfc4' }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           STRING_SESSION: ${{ secrets.STRING_SESSION }}
           DB_URL: ${{ secrets.DB_URL }}
           DB_NAME: ${{ secrets.DB_NAME || 'NeX_4GB_Rename_Bot' }}
-          ADMIN: ${{ secrets.ADMIN || '6059191947' }}
-          LOG_CHANNEL: ${{ secrets.LOG_CHANNEL || '-1002216632939' }}
-          FILES_CHANNEL: ${{ secrets.FILES_CHANNEL || '-1002216632939' }}
+          ADMIN: ${{ secrets.ADMIN }}
+          LOG_CHANNEL: ${{ secrets.LOG_CHANNEL }}
+          FILES_CHANNEL: ${{ secrets.FILES_CHANNEL }}
           START_PIC: ${{ secrets.START_PIC || 'https://graph.org/file/8ce9f483c987c2635d3da-8d76ae56d500a868e7.jpg' }}
           FORCE_SUB: ${{ secrets.FORCE_SUB || 'Nex_bots' }}
           OWNER_ONLY: ${{ secrets.OWNER_ONLY || 'True' }}
           WEBHOOK: "False"
           PORT: "8090"
         run: |
+          set +x
           python3 -c "
           import os
           keys = [
@@ -191,7 +192,7 @@ jobs:
           done
 
       - name: Send Handoff Alert & Auto-Trigger Next 24/7 Runner
-        if: always()
+        if: success() || failure()
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           LOG_CHANNEL: ${{ secrets.LOG_CHANNEL || '-1002216632939' }}

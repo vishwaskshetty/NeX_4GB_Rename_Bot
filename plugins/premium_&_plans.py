@@ -15,9 +15,9 @@ from pyrogram.types import (
 
 from config import Config
 from helper.database import db, TIER_NAMES, TIER_LIMITS, PLAN_DURATIONS, PLAN_PRICING, format_user_time
-from helper.utils import get_readable_file_size, humanbytes, edit_message_content
+from helper.utils import get_readable_file_size, humanbytes, edit_message_content, sanitize_secrets
 
-# NeX 4GB Rename Bot - Multi-Duration Premium Plans, Stars/UPI Payments, Profiles & Timezones
+# NeX 4GB Rename Bot - Dynamic Month Stepper Premium Plans, Stars/UPI/USD Payments & Profiles
 # Developed by @Nex_bots
 
 _DB_TIMEOUT = 5
@@ -29,170 +29,148 @@ async def _safe(coro, default=None):
         return default
 
 
-DURATION_LABELS = {
-    30: "1 Month (30 Days)",
-    90: "3 Months (90 Days)",
-    180: "6 Months (180 Days)",
-    365: "1 Year (365 Days)"
-}
-
-TIER_INFO = {
-    1: {
-        "icon": "🥈",
-        "name": "Silver Tier",
-        "size": "4GB Max File Size",
-        "daily": "50 GB / Day",
-        "speed": "Turbo (40-80 MB/s)",
-        "conc": "4 Tasks Concurrency",
-        "features": "4GB Uploads + Custom Metadata + Cleaner"
-    },
-    2: {
-        "icon": "🥇",
-        "name": "Gold Tier",
-        "size": "4GB Max File Size",
-        "daily": "150 GB / Day",
-        "speed": "Turbo (40-80 MB/s)",
-        "conc": "4 Tasks Concurrency",
-        "features": "4GB Uploads + Sample Video + Screenshots + Watermark"
-    },
-    3: {
-        "icon": "💎",
-        "name": "Diamond VIP",
-        "size": "4GB Max File Size",
-        "daily": "UNLIMITED Bandwidth",
-        "speed": "⚡ Unthrottled VIP Speed",
-        "conc": "4 Tasks Concurrency",
-        "features": "4GB Uploads + Priority Queue + All Video Tools"
-    }
-}
+def calc_plan_prices(months: int, base_inr: int = 139):
+    """
+    Internal Pricing Formula:
+    - Base 1-Month INR Price: configurable (default ₹139)
+    - Multi-month fair discount applied (5% for 3-5M, 10% for 6-11M, 15% for 12+M)
+    - Telegram Stars: stars_price = round((inr_price * 100) / 199)
+    - USD Price: usd_price = round(inr_price / 84.0, 2)
+    Conversion formula is 100% internal and NEVER shown in the UI.
+    """
+    months = max(1, min(24, int(months)))
+    discount = 0.0
+    if months >= 12:
+        discount = 0.15
+    elif months >= 6:
+        discount = 0.10
+    elif months >= 3:
+        discount = 0.05
+    inr_price = max(1, round(base_inr * months * (1.0 - discount)))
+    stars_price = max(1, round((inr_price * 100) / 199))
+    usd_price = round(inr_price / 84.0, 2)
+    return inr_price, stars_price, usd_price
 
 
-# ==================== PLANS HUB BUILDER ====================
+# ==================== DYNAMIC PLANS HUB BUILDER (MONTH STEPPER) ====================
 
-async def build_plans_panel(user_id: int):
+async def build_plans_panel(user_id: int, months: int = 1):
+    months = max(1, min(24, int(months)))
+    days = months * 30
     prem_info = await db.get_premium_info(user_id)
     has_trial = await db.has_claimed_trial(user_id)
-    pricing = await db.get_premium_pricing()
     bot_settings = await db.get_bot_settings()
-
-    current_plan = prem_info.get("plan_name", "Free")
-    tier = prem_info.get("tier", 0)
-    is_prem = (tier > 0) or prem_info.get("is_owner", False)
-    trial_status = "Claimed ✅" if has_trial else ("Active 🟢" if is_prem else "Available 🎁")
+    base_inr = bot_settings.get("base_month_price_inr", 139)
     trial_enabled = bot_settings.get("trial_enabled", True)
 
-    p_silv = pricing.get(1, {}).get(30, {}).get("inr", 103)
-    p_gold = pricing.get(2, {}).get(30, {}).get("inr", 168)
-    p_diam = pricing.get(3, {}).get(30, {}).get("inr", 259)
+    tier = prem_info.get("tier", 0)
+    is_prem = (tier > 0) or prem_info.get("is_owner", False)
+
+    inr_price, stars_price, usd_price = calc_plan_prices(months, base_inr)
+    month_str = "1 Month" if months == 1 else f"{months} Months"
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   💎 <b>NeX 4GB Premium Hub</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>Your Status :</b> <b>{current_plan}</b>\n"
-        f"◈ <b>3-Day Trial :</b> <code>{trial_status}</code>\n\n"
-        "<b>Available Premium Tiers (1:1 ₹ / ⭐):</b>\n"
-        f"• 🥈 <b>Silver :</b> 50 GB/D (from ₹{p_silv} / {p_silv} ⭐)\n"
-        f"• 🥇 <b>Gold :</b> 150 GB/D (from ₹{p_gold} / {p_gold} ⭐)\n"
-        f"• 💎 <b>Diamond :</b> Unlimited (₹{p_diam} / {p_diam} ⭐)\n\n"
-        "<i>All tiers: 1M, 3M, 6M, 1 Year.</i>\n\n"
-        "⚡ @Nex_bots | 💬 @NexCRSupportbot"
+        "╭━━━〔 💎 𝗡𝗲𝗫 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗣𝗟𝗔𝗡 〕━━━╮\n"
+        f"┃ 📅 Duration   : {month_str} ({days} Days)\n"
+        f"┃ 🇮🇳 Price (INR) : ₹{inr_price}\n"
+        f"┃ ⭐ Stars      : {stars_price} ⭐\n"
+        f"┃ 💵 Price (USD) : ${usd_price:.2f}\n"
+        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"
+        "┃ ✅ 4GB File Renaming (Top Speed)\n"
+        "┃ ✅ 4x Parallel Tasks (15 Queued)\n"
+        "┃ ✅ Unlimited Daily Bandwidth\n"
+        "┃ ✅ Audio/Sub Remover & Batch Mode\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
     )
 
     buttons = []
-    # Hide Free Trial button if claimed or user is already Premium or trial disabled globally
-    if not has_trial and not is_prem and trial_enabled:
-        buttons.append([InlineKeyboardButton("🎁 Claim 3-Day Free Gold Trial", callback_data="claim_trial_cb")])
+    # Stepper row
+    dec_target = max(1, months - 1)
+    inc_target = min(24, months + 1)
+    buttons.append([
+        InlineKeyboardButton("➖", callback_data=f"plan_step_{dec_target}"),
+        InlineKeyboardButton(f"📅 {month_str}", callback_data=f"plan_step_curr_{months}"),
+        InlineKeyboardButton("➕", callback_data=f"plan_step_{inc_target}")
+    ])
 
-    buttons.extend([
-        [
-            InlineKeyboardButton("🥈 Silver Tier", callback_data="plan_tier_1"),
-            InlineKeyboardButton("🥇 Gold Tier", callback_data="plan_tier_2")
-        ],
-        [
-            InlineKeyboardButton("💎 Diamond VIP", callback_data="plan_tier_3")
-        ],
-        [
-            InlineKeyboardButton("👤 My Profile", callback_data="cb_user_profile"),
-            InlineKeyboardButton("🎟️ Redeem Coupon", callback_data="redeem_coupon_btn")
-        ],
-        [
-            InlineKeyboardButton("💬 Support", url="https://t.me/NexCRSupportbot"),
-            InlineKeyboardButton("⬅️ Back", callback_data="start")
-        ],
-        [
-            InlineKeyboardButton("❌ Close", callback_data="close")
-        ]
+    # Payment action buttons
+    buttons.append([
+        InlineKeyboardButton(f"⭐ Pay {stars_price} Stars", callback_data=f"pay_stars_m_{months}"),
+        InlineKeyboardButton(f"🇮🇳 Pay ₹{inr_price} (UPI)", callback_data=f"pay_upi_m_{months}")
+    ])
+    buttons.append([
+        InlineKeyboardButton(f"💵 Pay ${usd_price:.2f} (USD)", callback_data=f"pay_usd_m_{months}")
+    ])
+
+    # Free trial button if not claimed, not premium, and trial is enabled
+    if not has_trial and not is_prem and trial_enabled:
+        buttons.append([InlineKeyboardButton("🎁 Claim 3-Day Free 4GB Trial", callback_data="claim_trial_cb")])
+
+    # Navigation buttons
+    buttons.append([
+        InlineKeyboardButton("👤 My Profile", callback_data="cb_user_profile"),
+        InlineKeyboardButton("🎟️ Redeem Coupon", callback_data="redeem_coupon_btn")
+    ])
+    buttons.append([
+        InlineKeyboardButton("💬 Support", url="https://t.me/NexCRSupportbot"),
+        InlineKeyboardButton("⬅️ Back", callback_data="start")
+    ])
+    buttons.append([
+        InlineKeyboardButton("❌ Close", callback_data="close")
     ])
 
     return text, InlineKeyboardMarkup(buttons)
 
 
-async def build_tier_durations_view(tier: int):
-    info = TIER_INFO.get(tier, TIER_INFO[1])
-    pricing = await db.get_premium_pricing()
-    prices = pricing.get(tier, PLAN_PRICING.get(tier, PLAN_PRICING[1]))
+async def build_upi_payment_view(months: int, base_inr: int = 139):
+    months = max(1, min(24, int(months)))
+    days = months * 30
+    inr_price, _, _ = calc_plan_prices(months, base_inr)
+    upi_id = await db.get_upi_id()
+    month_str = "1 Month" if months == 1 else f"{months} Months"
 
     text = (
-        f"╭━━━━━━━━━━━━━━━━━━━╮\n"
-        f"┃   {info['icon']} <b>{info['name']} Plans</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>Max File Size :</b> {info['size']}\n"
-        f"◈ <b>Daily Bandwidth :</b> {info['daily']}\n"
-        f"◈ <b>Max Transfer Speed :</b> {info['speed']}\n"
-        f"◈ <b>Concurrency :</b> {info['conc']}\n"
-        f"◈ <b>Features :</b> {info['features']}\n\n"
-        "<b>Available Durations & Pricing (1:1 ₹ / ⭐):</b>\n"
-        f"• <b>1 Month (30D) :</b> ₹{prices[30]['inr']} INR / {prices[30]['stars']} ⭐\n"
-        f"• <b>3 Months (90D) :</b> ₹{prices[90]['inr']} INR / {prices[90]['stars']} ⭐\n"
-        f"• <b>6 Months (180D) :</b> ₹{prices[180]['inr']} INR / {prices[180]['stars']} ⭐\n"
-        f"• <b>1 Year (365D) :</b> ₹{prices[365]['inr']} INR / {prices[365]['stars']} ⭐\n\n"
-        "<i>Select duration below to proceed to checkout:</i>\n\n"
-        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+        "╭━━━〔 🇮🇳 𝗨𝗣𝗜 𝗣𝗔𝗬𝗠𝗘𝗡𝗧 〕━━━╮\n"
+        f"┃ 📅 Duration   : {month_str} ({days} Days)\n"
+        f"┃ 💵 Amount     : ₹{inr_price} INR\n"
+        f"┃ 💳 UPI ID     : <code>{upi_id}</code>\n"
+        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"
+        f"┃ 1. Send ₹{inr_price} to <code>{upi_id}</code>\n"
+        "┃    via GPay / PhonePe / Paytm / BHIM\n"
+        "┃ 2. Take a screenshot showing UTR/Ref\n"
+        "┃ 3. Send screenshot to @NexCRSupportbot\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<i>⚡ Active in 5-15 mins upon verification!</i>"
     )
-
     markup = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(f"📅 1M (₹{prices[30]['inr']} / {prices[30]['stars']}⭐)", callback_data=f"buy_{tier}_30"),
-            InlineKeyboardButton(f"📅 3M (₹{prices[90]['inr']} / {prices[90]['stars']}⭐)", callback_data=f"buy_{tier}_90")
-        ],
-        [
-            InlineKeyboardButton(f"📅 6M (₹{prices[180]['inr']} / {prices[180]['stars']}⭐)", callback_data=f"buy_{tier}_180"),
-            InlineKeyboardButton(f"📅 1Y (₹{prices[365]['inr']} / {prices[365]['stars']}⭐)", callback_data=f"buy_{tier}_365")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Back to Tiers", callback_data="open_plans"),
-            InlineKeyboardButton("❌ Close", callback_data="close")
-        ]
+        [InlineKeyboardButton("📤 Send Screenshot (@NexCRSupportbot)", url="https://t.me/NexCRSupportbot")],
+        [InlineKeyboardButton("🔔 Notify Admin of Transfer", callback_data=f"notify_upi_paid_m_{months}")],
+        [InlineKeyboardButton("⬅️ Back to Plan", callback_data=f"plan_step_{months}"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
     return text, markup
 
 
-async def build_checkout_view(tier: int, days: int):
-    info = TIER_INFO.get(tier, TIER_INFO[1])
-    pricing = await db.get_premium_pricing()
-    prices = pricing.get(tier, {}).get(days, PLAN_PRICING.get(tier, {}).get(days, {"inr": 103, "stars": 103}))
-    dur_label = DURATION_LABELS.get(days, f"{days} Days")
+async def build_usd_payment_view(months: int, base_inr: int = 139):
+    months = max(1, min(24, int(months)))
+    days = months * 30
+    _, _, usd_price = calc_plan_prices(months, base_inr)
+    month_str = "1 Month" if months == 1 else f"{months} Months"
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   💳 <b>NeX Plan Checkout</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>Selected Plan :</b> {info['icon']} <b>{info['name']}</b>\n"
-        f"◈ <b>Duration :</b> <code>{dur_label}</code>\n"
-        f"◈ <b>Max File Size :</b> 4GB Mode\n"
-        f"◈ <b>Daily Limit :</b> {info['daily']}\n"
-        f"◈ <b>Speed Cap :</b> {info['speed']}\n\n"
-        f"◈ <b>Price (Stars) :</b> <code>{prices['stars']} ⭐</code> (1-Tap Native)\n"
-        f"◈ <b>Price (INR) :</b> <code>₹{prices['inr']} INR</code> (GPay/PhonePe/UPI)\n\n"
-        "<i>Choose your preferred payment method below:</i>\n\n"
-        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+        "╭━━━〔 💵 𝗨𝗦𝗗 𝗣𝗔𝗬𝗠𝗘𝗡𝗧 〕━━━╮\n"
+        f"┃ 📅 Duration   : {month_str} ({days} Days)\n"
+        f"┃ 💵 Price (USD): ${usd_price:.2f}\n"
+        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"
+        "┃ For international payments via:\n"
+        "┃ • Crypto (USDT TRC20 / TON / BTC)\n"
+        "┃ • PayPal / International Cards\n"
+        "┃ Contact @NexCRSupportbot to pay!\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
     )
-
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"⭐ Pay with Stars ({prices['stars']} XTR)", callback_data=f"pay_stars_{tier}_{days}")],
-        [InlineKeyboardButton(f"🇮🇳 Pay via UPI (₹{prices['inr']})", callback_data=f"pay_upi_{tier}_{days}")],
-        [InlineKeyboardButton("⬅️ Back to Durations", callback_data=f"plan_tier_{tier}"),
+        [InlineKeyboardButton("💬 Contact Support to Pay", url="https://t.me/NexCRSupportbot")],
+        [InlineKeyboardButton("⬅️ Back to Plan", callback_data=f"plan_step_{months}"),
          InlineKeyboardButton("❌ Close", callback_data="close")]
     ])
     return text, markup
@@ -410,6 +388,89 @@ async def open_plans_cb(client, query: CallbackQuery):
     await query.answer()
 
 
+@Client.on_callback_query(filters.regex(r"^plan_step_(\d+)$"))
+async def plan_step_cb(client, query: CallbackQuery):
+    months = int(query.matches[0].group(1))
+    text, markup = await build_plans_panel(query.from_user.id, months=months)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^plan_step_curr_(\d+)$"))
+async def plan_step_curr_cb(client, query: CallbackQuery):
+    months = int(query.matches[0].group(1))
+    month_str = "1 Month" if months == 1 else f"{months} Months"
+    await query.answer(f"Selected: {month_str} ({months*30} Days) 💎")
+
+
+@Client.on_callback_query(filters.regex(r"^pay_stars_m_(\d+)$"))
+async def pay_stars_month_cb(client, query: CallbackQuery):
+    months = int(query.matches[0].group(1))
+    days = months * 30
+    bot_settings = await db.get_bot_settings()
+    base_inr = bot_settings.get("base_month_price_inr", 139)
+    inr_price, stars_price, _ = calc_plan_prices(months, base_inr)
+    month_str = "1 Month" if months == 1 else f"{months} Months"
+
+    try:
+        await client.send_invoice(
+            chat_id=query.message.chat.id,
+            title=f"NeX 4GB Premium - {month_str}",
+            description=f"{days} Days of NeX 4GB High-Speed Premium VIP Access",
+            payload=f"premium_months_{months}",
+            currency="XTR",
+            prices=[LabeledPrice(label=f"NeX VIP ({days} Days)", amount=stars_price)],
+            provider_token=""
+        )
+        await query.answer("⭐ Invoice sent! Tap 'Pay' on the invoice above.", show_alert=False)
+    except Exception as e:
+        await query.answer(f"❌ Error creating Stars invoice: {e}", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^pay_upi_m_(\d+)$"))
+async def pay_upi_month_cb(client, query: CallbackQuery):
+    months = int(query.matches[0].group(1))
+    bot_settings = await db.get_bot_settings()
+    base_inr = bot_settings.get("base_month_price_inr", 139)
+    text, markup = await build_upi_payment_view(months, base_inr)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^notify_upi_paid_m_(\d+)$"))
+async def notify_upi_paid_month_cb(client, query: CallbackQuery):
+    months = int(query.matches[0].group(1))
+    days = months * 30
+    user = query.from_user
+    month_str = "1 Month" if months == 1 else f"{months} Months"
+
+    if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
+        try:
+            alert = (
+                "🔔 <b>UPI Payment Claimed!</b>\n\n"
+                f"👤 <b>User:</b> {user.mention} (<code>{user.id}</code>)\n"
+                f"💎 <b>Requested Plan:</b> {month_str} ({days} Days VIP)\n"
+                f"⏰ <b>Time:</b> <code>{format_user_time(time.time())}</code>\n\n"
+                f"<i>Please verify screenshot at @NexCRSupportbot and approve via <code>/add_prem {user.id} 3 {days}</code>.</i>\n\n"
+                "⚡ @Nex_bots"
+            )
+            await client.send_message(Config.LOG_CHANNEL, sanitize_secrets(alert))
+        except Exception:
+            pass
+
+    await query.answer("🔔 Support & Admin notified! Please make sure to forward your payment screenshot to @NexCRSupportbot.", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^pay_usd_m_(\d+)$"))
+async def pay_usd_month_cb(client, query: CallbackQuery):
+    months = int(query.matches[0].group(1))
+    bot_settings = await db.get_bot_settings()
+    base_inr = bot_settings.get("base_month_price_inr", 139)
+    text, markup = await build_usd_payment_view(months, base_inr)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
 @Client.on_callback_query(filters.regex(r"^(cb_user_profile|my_plan_cb)$"))
 async def user_profile_cb(client, query: CallbackQuery):
     text, markup = await build_profile_card(query.from_user.id)
@@ -574,13 +635,52 @@ async def successful_payment_handler(client, message: Message):
         )
         if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
             try:
-                await client.send_message(
-                    Config.LOG_CHANNEL,
-                    f"❤️ <b>New Stars Donation!</b>\n\n"
+                alert = (
+                    "❤️ <b>New Stars Donation!</b>\n\n"
                     f"👤 <b>Donor:</b> {message.from_user.mention} (<code>{user_id}</code>)\n"
                     f"⭐ <b>Amount:</b> {don_amount} Stars\n\n"
-                    f"⚡ @Nex_bots"
+                    "⚡ @Nex_bots"
                 )
+                await client.send_message(Config.LOG_CHANNEL, sanitize_secrets(alert))
+            except Exception:
+                pass
+        return
+
+    # Dynamic Month Stepper Payment check
+    if payload.startswith("premium_months_"):
+        try:
+            months = int(payload.split("_")[-1])
+        except Exception:
+            months = 1
+        days = months * 30
+        await db.set_user_premium(user_id, tier=3, days=days, plan_name="Diamond VIP")
+        tz_name = await db.get_timezone(user_id)
+        prem_info = await db.get_premium_info(user_id)
+        expiry_str = format_user_time(prem_info.get("expiry", 0), tz_name)
+        stars_paid = message.successful_payment.total_amount
+
+        await db.log_activity(user_id, user_name, "buy_premium", f"{months}M VIP ({days}D) for {stars_paid} Stars")
+
+        month_str = "1 Month" if months == 1 else f"{months} Months"
+        await message.reply_text(
+            f"🎉 <b>Payment Successful!</b>\n\n"
+            f"Your <b>4GB Diamond VIP Access</b> is active for <b>{month_str} ({days} days)</b>!\n"
+            f"◈ <b>Expires :</b> <code>{expiry_str}</code>\n\n"
+            f"⚡ Thank you for supporting @Nex_bots!",
+            quote=True
+        )
+
+        if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
+            try:
+                alert = (
+                    "⭐ <b>Telegram Stars Payment!</b>\n\n"
+                    f"👤 <b>User:</b> {message.from_user.mention} (<code>{user_id}</code>)\n"
+                    f"💎 <b>Plan:</b> {month_str} ({days} Days 4GB VIP)\n"
+                    f"💰 <b>Stars:</b> {stars_paid} XTR\n"
+                    f"📅 <b>Expiry:</b> <code>{expiry_str}</code>\n\n"
+                    "⚡ @Nex_bots"
+                )
+                await client.send_message(Config.LOG_CHANNEL, sanitize_secrets(alert))
             except Exception:
                 pass
         return
@@ -609,15 +709,15 @@ async def successful_payment_handler(client, message: Message):
 
         if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
             try:
-                await client.send_message(
-                    Config.LOG_CHANNEL,
-                    f"⭐ <b>Telegram Stars Payment!</b>\n\n"
+                alert = (
+                    "⭐ <b>Telegram Stars Payment!</b>\n\n"
                     f"👤 <b>User:</b> {message.from_user.mention} (<code>{user_id}</code>)\n"
                     f"💎 <b>Tier:</b> {tier_title} ({days} Days)\n"
                     f"💰 <b>Stars:</b> {stars_paid} XTR\n"
                     f"📅 <b>Expiry:</b> <code>{expiry_str}</code>\n\n"
-                    f"⚡ @Nex_bots"
+                    "⚡ @Nex_bots"
                 )
+                await client.send_message(Config.LOG_CHANNEL, sanitize_secrets(alert))
             except Exception:
                 pass
 

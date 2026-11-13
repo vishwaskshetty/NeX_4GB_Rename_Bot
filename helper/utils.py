@@ -28,6 +28,60 @@ def safe_reply_params(message_id: int):
     except (TypeError, ImportError, Exception):
         return {"reply_to_message_id": int(message_id)}
 
+
+def sanitize_secrets(text: str) -> str:
+    """
+    Sanitizes sensitive information (Bot tokens, MongoDB URIs, API hashes,
+    Pyrogram session strings) from text and error tracebacks.
+    """
+    if not text:
+        return ""
+    clean = str(text)
+    for secret in [
+        getattr(Config, "BOT_TOKEN", None),
+        getattr(Config, "DB_URL", None),
+        getattr(Config, "STRING_SESSION", None),
+        getattr(Config, "API_HASH", None)
+    ]:
+        if secret and len(str(secret)) > 4:
+            clean = clean.replace(str(secret), "***REDACTED***")
+    # Redact MongoDB URIs
+    clean = re.sub(r'mongodb(?:\+srv)?://[^\s\'\"<>]+', 'mongodb+srv://***REDACTED***', clean)
+    # Redact Bot Tokens
+    clean = re.sub(r'\b\d{8,12}:[A-Za-z0-9_-]{30,45}\b', '***REDACTED_TOKEN***', clean)
+    # Redact Long Pyrogram Session strings
+    clean = re.sub(r'\b[A-Za-z0-9+/=]{100,}\b', '***REDACTED_SESSION***', clean)
+    return clean
+
+
+def calc_plan_prices(months: int, base_inr: int = 139):
+    """
+    Calculates dynamic plan pricing with volume discounts:
+    - 1 Month: 0% discount
+    - 2-3 Months: 5% discount
+    - 4-6 Months: 10% discount
+    - 7-12 Months: 15% discount
+    - >12 Months: 20% discount
+    Stars: 100 ⭐ = ₹199
+    USD: 1 USD = ₹84
+    """
+    months = max(1, min(24, int(months)))
+    if months == 1:
+        discount = 0.0
+    elif months <= 3:
+        discount = 0.05
+    elif months <= 6:
+        discount = 0.10
+    elif months <= 12:
+        discount = 0.15
+    else:
+        discount = 0.20
+    
+    inr = max(1, round(base_inr * months * (1.0 - discount)))
+    stars = max(1, round((inr * 100) / 199))
+    usd = round(inr / 84.0, 2)
+    return inr, stars, usd
+
 # Global set to track active operations marked for cancellation
 CANCEL_REQUESTS = set()
 # Global dicts to track progress edit timestamps and percentages for strictly 5.0s (min 2%) throttling

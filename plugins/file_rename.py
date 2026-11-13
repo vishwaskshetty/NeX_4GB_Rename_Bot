@@ -36,7 +36,9 @@ from helper.utils import (
     convert,
     humanbytes,
     CANCEL_REQUESTS,
-    safe_reply_params
+    safe_reply_params,
+    edit_message_content,
+    sanitize_secrets
 )
 from helper.ffmpeg_utils import (
     inject_metadata,
@@ -205,18 +207,19 @@ async def rename_start(client, message):
         "file_id": file_id
     }
 
-    # 2GB+ File Upsell for Normal Users
+    # 2GB+ File Cap for Free Users
     if file_size > (2 * 1024 * 1024 * 1024) and user_tier == 0 and user_id not in Config.ADMIN:
         has_trial = await db.has_claimed_trial(user_id)
         bot_settings = await db.get_bot_settings()
-        row = [InlineKeyboardButton("💎 Buy Premium Plan", callback_data="open_plans")]
+        row = [InlineKeyboardButton("💎 View Premium Plans", callback_data="open_plans")]
         if not has_trial and bot_settings.get("trial_enabled", True):
-            row.append(InlineKeyboardButton("🎁 Claim 3-Day Free Trial", callback_data="claim_trial_cb"))
+            row.insert(0, InlineKeyboardButton("🎁 Claim 3-Day Free 4GB Trial", callback_data="claim_trial_cb"))
         return await message.reply_text(
-            f"💎 <b>4GB+ Premium File Detected!</b>\n\n"
-            f"📦 <b>File Size:</b> <code>{filesize}</code>\n"
-            f"⚠️ Normal users can rename files up to <b>2.0 GB</b>.\n\n"
-            f"🚀 Upgrade to <b>Premium</b> to unlock <b>4GB+ High-Speed Renaming</b>, Custom Watermarks, and Sample Videos!",
+            f"⚠️ <b>2GB Free Tier Limit!</b>\n\n"
+            f"📦 <b>Your File:</b> <code>{humanbytes(file_size)}</code>\n"
+            f"🆓 <b>Free Limit:</b> <code>2.00 GB max per file</code>\n"
+            f"💎 <b>Premium Limit:</b> <code>4.00 GB max per file</code>\n\n"
+            f"<i>Upgrade to Premium to rename files up to 4GB!</i>",
             reply_markup=InlineKeyboardMarkup([
                 row,
                 [InlineKeyboardButton("❌ Close", callback_data="close")]
@@ -267,26 +270,52 @@ async def rename_start(client, message):
         )
         return
 
-    media_info_text = (
-        f"🗂️ <b><u>NeX 4GB Media Information</u></b>\n\n"
-        f"◈ <b>ꜰɪʟᴇ ɴᴀᴍᴇ :</b> <code>{filename}</code>\n"
-        f"◈ <b>ꜰɪʟᴇ ꜱɪᴢᴇ :</b> <code>{filesize}</code>\n"
-        f"◈ <b>ꜰɪʟᴇ ᴇxᴛᴇɴꜱɪᴏɴ :</b> <code>.{file_extension}</code>\n"
-        f"◈ <b>ᴍɪᴍᴇ ᴛʏᴘᴇ :</b> <code>{mime_type}</code>\n"
-        f"◈ <b>ᴅᴄ ɪᴅ :</b> <code>{dcid}</code>\n\n"
-        f"<b>ᴘʟᴇᴀꜱᴇ ᴄʜᴏᴏꜱᴇ ᴀɴ ᴀᴄᴛɪᴏɴ ʙᴇʟᴏᴡ:</b>"
+    is_video = bool(
+        message.video
+        or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/"))
+        or (filename.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v')))
     )
 
-    buttons = [
-        [
-            InlineKeyboardButton("⚡ Auto Clean & Rename", callback_data="auto_rename"),
-            InlineKeyboardButton("📝 Custom Rename", callback_data="rename")
-        ],
-        [
-            InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
-            InlineKeyboardButton("✖️ Cancel", callback_data="close")
+    media_info_text = (
+        "╭━━━〔 🗂️ 𝗡𝗲𝗫 𝗠𝗘𝗗𝗜𝗔 𝗜𝗡𝗙𝗢 〕━━━╮\n"
+        f"┃ 📁 Filename : <code>{filename}</code>\n"
+        f"┃ 📦 Size     : <code>{filesize}</code>\n"
+        f"┃ 🏷️ Type     : <code>.{file_extension}</code> ({mime_type})\n"
+        f"┃ 🌐 DC ID    : <code>{dcid}</code>\n"
+        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"
+        "┃ ⚡ Select an action below:\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
+    )
+
+    if is_video:
+        buttons = [
+            [
+                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{message.id}"),
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
+            ],
+            [
+                InlineKeyboardButton("🎬 Sample Video Only", callback_data=f"extract_sample_only_{message.id}"),
+                InlineKeyboardButton("📸 Screenshots Only", callback_data=f"extract_ss_only_{message.id}")
+            ],
+            [
+                InlineKeyboardButton("🎵 Audio / Sub Streams", callback_data=f"extract_streams_{message.id}"),
+                InlineKeyboardButton("🔄 MKV ⇄ MP4 Remux", callback_data=f"remux_action_{message.id}")
+            ],
+            [
+                InlineKeyboardButton("❌ Cancel", callback_data="close")
+            ]
         ]
-    ]
+    else:
+        buttons = [
+            [
+                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{message.id}"),
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
+            ],
+            [
+                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
+                InlineKeyboardButton("❌ Cancel", callback_data="close")
+            ]
+        ]
 
     reply_kwargs = safe_reply_params(message.id)
     await message.reply_text(
@@ -296,18 +325,19 @@ async def rename_start(client, message):
     )
 
 
-@Client.on_callback_query(filters.regex('^auto_rename$'))
+@Client.on_callback_query(filters.regex(r'^auto_rename(?:_(\d+))?$'))
 async def auto_rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
     target_id = (
-        update.message.reply_to_message_id
+        (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
+        or update.message.reply_to_message_id
         or getattr(update.message.reply_to_message, "id", None)
         or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
     )
     reply_msg = None
     if target_id:
         try:
-            reply_msg = await client.get_messages(update.message.chat.id, target_id)
+            reply_msg = await client.get_messages(update.message.chat.id, int(target_id))
         except Exception:
             pass
     if not reply_msg or not (reply_msg.document or reply_msg.video or reply_msg.audio):
@@ -343,11 +373,12 @@ async def auto_rename_handler(client, update: CallbackQuery):
     )
 
 
-@Client.on_callback_query(filters.regex('^rename$'))
+@Client.on_callback_query(filters.regex(r'^rename(?:_(\d+))?$'))
 async def rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
     file_msg_id = (
-        update.message.reply_to_message_id
+        (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
+        or update.message.reply_to_message_id
         or getattr(update.message.reply_to_message, "id", None)
         or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
     )
@@ -370,6 +401,237 @@ async def rename_handler(client, update: CallbackQuery):
         ),
         reply_markup=ForceReply(True),
         **reply_kwargs
+    )
+
+
+# ==================== STANDALONE SAMPLE & SCREENSHOTS ONLY ====================
+
+@Client.on_callback_query(filters.regex(r"^extract_sample_only(?:_(\d+))?$"))
+async def extract_sample_only_cb(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    target_id = (
+        (query.matches[0].group(1) if query.matches and query.matches[0].groups() and query.matches[0].group(1) else None)
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+    file_msg = None
+    if target_id:
+        try:
+            file_msg = await client.get_messages(query.message.chat.id, int(target_id))
+        except Exception:
+            pass
+    if not file_msg:
+        file_msg = query.message.reply_to_message
+
+    if not file_msg or not (file_msg.video or file_msg.document):
+        return await query.answer("❌ Media message could not be retrieved!", show_alert=True)
+
+    file = file_msg.video or file_msg.document
+    filename = file.file_name or "video.mp4"
+    file_size = file.file_size or 0
+
+    user_tier = (await db.get_premium_info(user_id)).get("tier", 0)
+    bot_settings = await db.get_bot_settings()
+    max_active = bot_settings.get("prem_concurrency", 4) if (user_tier > 0 or user_id in Config.ADMIN) else bot_settings.get("free_concurrency", 1)
+    if ACTIVE_USER_TASKS.get(user_id, 0) >= max_active:
+        return await query.answer(f"⚠️ You already have {max_active} active task(s)! Please wait for them to finish.", show_alert=True)
+
+    ACTIVE_USER_TASKS[user_id] = ACTIVE_USER_TASKS.get(user_id, 0) + 1
+    ms = await edit_message_content(query.message, "<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴀᴍᴘʟᴇ ᴄʟɪᴘ... 📥</b>")
+    if not ms:
+        ms = await query.message.reply_text("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴀᴍᴘʟᴇ ᴄʟɪᴘ... 📥</b>")
+
+    work_dir = get_optimal_work_dir(user_id, file_size)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    input_path = os.path.join(work_dir, filename)
+    base_name, _ = os.path.splitext(filename)
+    sample_path = os.path.join(work_dir, f"sample_{base_name}.mp4")
+
+    try:
+        start_time = time.time()
+        dl_ok = False
+        try:
+            dl_res = await fast_download(
+                client=client,
+                message_or_file=file_msg,
+                file_path=input_path,
+                progress=progress_for_pyrogram,
+                progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴀᴍᴘʟᴇ... 📥</b>", ms, start_time, client, user_tier)
+            )
+            dl_ok = bool(dl_res and os.path.exists(input_path) and os.path.getsize(input_path) > 0)
+        except Exception:
+            dl_ok = False
+
+        if not dl_ok:
+            await client.download_media(
+                message=file_msg,
+                file_name=input_path,
+                progress=progress_for_pyrogram,
+                progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴀᴍᴘʟᴇ (ꜰᴀʟʟʙᴀᴄᴋ)... 📥</b>", ms, start_time, client, user_tier)
+            )
+
+        if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+            await ms.edit("❌ Download failed. Please try again.")
+            return
+
+        await ms.edit("<b>◈ ɢᴇɴᴇʀᴀᴛɪɴɢ 30ꜱ ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ... 🎬</b>")
+        duration, width, height = await get_video_duration_and_dims(input_path)
+        ok = await generate_sample_video(input_path, sample_path, total_duration=duration or 300, sample_sec=30, start_mode="auto")
+        if not ok or not os.path.exists(sample_path):
+            await ms.edit("❌ Failed to generate sample video.")
+            return
+
+        up_start = time.time()
+        await ms.edit("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ... 🚀</b>")
+        s_dur, s_w, s_h = await get_video_duration_and_dims(sample_path)
+        await client.send_video(
+            chat_id=user_id,
+            video=sample_path,
+            caption=f"🎬 <b>Sample Video (30s)</b>\n📁 <code>{filename}</code>\n\n⚡ @Nex_bots",
+            duration=s_dur or 30,
+            width=s_w or 1280,
+            height=s_h or 720,
+            supports_streaming=True,
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ... 🚀</b>", ms, up_start, client, user_tier)
+        )
+        try:
+            await ms.delete()
+        except Exception:
+            pass
+        try:
+            await db.increment_stat(user_id, "total_samples_generated", 1)
+        except Exception:
+            pass
+    except Exception as e:
+        await ms.edit(f"❌ <b>Error:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_callback_query(filters.regex(r"^extract_ss_only(?:_(\d+))?$"))
+async def extract_ss_only_cb(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    target_id = (
+        (query.matches[0].group(1) if query.matches and query.matches[0].groups() and query.matches[0].group(1) else None)
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+    file_msg = None
+    if target_id:
+        try:
+            file_msg = await client.get_messages(query.message.chat.id, int(target_id))
+        except Exception:
+            pass
+    if not file_msg:
+        file_msg = query.message.reply_to_message
+
+    if not file_msg or not (file_msg.video or file_msg.document):
+        return await query.answer("❌ Media message could not be retrieved!", show_alert=True)
+
+    file = file_msg.video or file_msg.document
+    filename = file.file_name or "video.mp4"
+    file_size = file.file_size or 0
+
+    user_tier = (await db.get_premium_info(user_id)).get("tier", 0)
+    bot_settings = await db.get_bot_settings()
+    max_active = bot_settings.get("prem_concurrency", 4) if (user_tier > 0 or user_id in Config.ADMIN) else bot_settings.get("free_concurrency", 1)
+    if ACTIVE_USER_TASKS.get(user_id, 0) >= max_active:
+        return await query.answer(f"⚠️ You already have {max_active} active task(s)! Please wait for them to finish.", show_alert=True)
+
+    ACTIVE_USER_TASKS[user_id] = ACTIVE_USER_TASKS.get(user_id, 0) + 1
+    ms = await edit_message_content(query.message, "<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ... 📥</b>")
+    if not ms:
+        ms = await query.message.reply_text("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ... 📥</b>")
+
+    work_dir = get_optimal_work_dir(user_id, file_size)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    input_path = os.path.join(work_dir, filename)
+    ss_dir = os.path.join(work_dir, "screenshots")
+
+    try:
+        start_time = time.time()
+        dl_ok = False
+        try:
+            dl_res = await fast_download(
+                client=client,
+                message_or_file=file_msg,
+                file_path=input_path,
+                progress=progress_for_pyrogram,
+                progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ... 📥</b>", ms, start_time, client, user_tier)
+            )
+            dl_ok = bool(dl_res and os.path.exists(input_path) and os.path.getsize(input_path) > 0)
+        except Exception:
+            dl_ok = False
+
+        if not dl_ok:
+            await client.download_media(
+                message=file_msg,
+                file_name=input_path,
+                progress=progress_for_pyrogram,
+                progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ (ꜰᴀʟʟʙᴀᴄᴋ)... 📥</b>", ms, start_time, client, user_tier)
+            )
+
+        if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+            await ms.edit("❌ Download failed. Please try again.")
+            return
+
+        await ms.edit("<b>◈ ᴇxᴛʀᴀᴄᴛɪɴɢ 5 ʜᴅ ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ... 📸</b>")
+        duration, _, _ = await get_video_duration_and_dims(input_path)
+        shots = await generate_screenshots(input_path, ss_dir, total_duration=duration or 300, count=5)
+        if not shots:
+            await ms.edit("❌ Failed to generate screenshots.")
+            return
+
+        await ms.edit("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ... 🚀</b>")
+        media_group = []
+        for i, shot in enumerate(shots):
+            caption = f"📸 <b>HD Screenshots (5 Frames)</b>\n📁 <code>{filename}</code>\n\n⚡ @Nex_bots" if i == 0 else ""
+            media_group.append(InputMediaPhoto(shot, caption=caption))
+
+        await client.send_media_group(chat_id=user_id, media=media_group)
+        try:
+            await ms.delete()
+        except Exception:
+            pass
+        try:
+            await db.increment_stat(user_id, "total_screenshots_generated", len(shots))
+        except Exception:
+            pass
+    except Exception as e:
+        await ms.edit(f"❌ <b>Error:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_callback_query(filters.regex(r"^extract_streams(?:_(\d+))?$"))
+async def extract_streams_cb(client, query: CallbackQuery):
+    await query.answer("Opening Stream Inspector... 🎵")
+    await query.message.reply_text(
+        "╭━━━〔 🎵 𝗦𝗧𝗥𝗘𝗔𝗠 𝗜𝗡𝗦𝗣𝗘𝗖𝗧𝗢𝗥 〕━━━╮\n"
+        "┃ Reply to the video file with:\n"
+        "┃ • <code>/streams</code> : View all audio & subtitle tracks\n"
+        "┃ • <code>/streams strip_subs</code> : Remove all subtitles\n"
+        "┃ • <code>/streams audio 1</code> : Keep only audio stream 1\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^remux_action(?:_(\d+))?$"))
+async def remux_action_cb(client, query: CallbackQuery):
+    await query.answer("Opening Container Remuxer... 🔄")
+    await query.message.reply_text(
+        "╭━━━〔 🔄 𝗟𝗢𝗦𝗦𝗟𝗘𝗦𝗦 𝗥𝗘𝗠𝗨𝗫𝗘𝗥 〕━━━╮\n"
+        "┃ Reply to the video file with:\n"
+        "┃ • <code>/remux</code> : Convert MKV ⇄ MP4 losslessly\n"
+        "┃ (Lossless conversion in seconds with zero re-encoding!)\n"
+        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
     )
 
 

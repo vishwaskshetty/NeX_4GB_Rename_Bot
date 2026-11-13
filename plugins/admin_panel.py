@@ -14,7 +14,7 @@ from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, Peer
 
 from config import Config
 from helper.database import db, TIER_NAMES, format_user_time
-from helper.utils import get_readable_file_size, humanbytes, edit_message_content
+from helper.utils import get_readable_file_size, humanbytes, edit_message_content, sanitize_secrets, calc_plan_prices
 
 # NeX 4GB Rename Bot - 100% Button-Driven Owner Control Panel, Wizards & Broadcast Engine
 # Developed by @Nex_bots
@@ -48,7 +48,7 @@ async def send_security_alert(client: Client, user, action_desc: str):
                 f"⏰ <b>Time :</b> <code>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n"
                 "⚡ @Nex_bots"
             )
-            await client.send_message(Config.LOG_CHANNEL, alert_msg)
+            await client.send_message(Config.LOG_CHANNEL, sanitize_secrets(alert_msg))
         except Exception:
             pass
 
@@ -1289,6 +1289,26 @@ async def owner_state_input_handler(client: Client, message: Message):
         except ValueError:
             return await message.reply_text("❌ <b>Invalid Price!</b> Please send a numeric integer.")
 
+    elif action == "set_base_price":
+        OWNER_STATE.pop(admin_id, None)
+        try:
+            val = int(input_text.replace("₹", "").replace("$", "").replace("⭐", "").strip())
+            if val <= 0:
+                return await message.reply_text("❌ <b>Invalid Price!</b> Price must be greater than 0.")
+            await db.update_bot_settings(base_month_price_inr=val)
+            inr, stars, usd = calc_plan_prices(1, val)
+            return await message.reply_text(
+                f"💎 <b>Base Month Price Updated!</b>\n\n"
+                f"◈ <b>1 Month Base INR :</b> <code>₹{val}</code>\n"
+                f"◈ <b>Calculated Stars :</b> <code>{stars} ⭐</code>\n"
+                f"◈ <b>Calculated USD :</b> <code>${usd:.2f}</code>\n\n"
+                f"<i>All dynamic plans (1–24 months) will now use this base rate.</i>\n\n"
+                f"⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Pricing Panel", callback_data="cb_owner_pricing")]])
+            )
+        except ValueError:
+            return await message.reply_text("❌ <b>Invalid Price!</b> Please send a numeric integer (e.g. <code>139</code>).")
+
     elif action == "reset_user_trial":
         OWNER_STATE.pop(admin_id, None)
         try:
@@ -1668,34 +1688,40 @@ async def cb_owner_reset_stuck(client: Client, query: CallbackQuery):
 # ==================== DYNAMIC PRICING PANEL & CONTROLS ====================
 
 async def build_owner_pricing_panel():
-    pricing = await db.get_premium_pricing()
-    s = pricing.get(1, {})
-    g = pricing.get(2, {})
-    d = pricing.get(3, {})
-    
+    settings = await db.get_bot_settings()
+    base_inr = settings.get("base_month_price_inr", 139)
+    inr_1, stars_1, usd_1 = calc_plan_prices(1, base_inr)
+    inr_3, stars_3, usd_3 = calc_plan_prices(3, base_inr)
+    inr_6, stars_6, usd_6 = calc_plan_prices(6, base_inr)
+    inr_12, stars_12, usd_12 = calc_plan_prices(12, base_inr)
+
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
         "┃   💎 <b>Dynamic Premium Pricing</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        "<i>All prices maintain strict 1:1 parity (₹1 = 1⭐).</i>\n\n"
-        f"🥈 <b>Silver :</b> 30D: ₹{s.get(30, {}).get('inr', 103)} | 90D: ₹{s.get(90, {}).get('inr', 259)}\n"
-        f"               180D: ₹{s.get(180, {}).get('inr', 454)} | 365D: ₹{s.get(365, {}).get('inr', 779)}\n\n"
-        f"🥇 <b>Gold :</b> 30D: ₹{g.get(30, {}).get('inr', 168)} | 90D: ₹{g.get(90, {}).get('inr', 428)}\n"
-        f"             180D: ₹{g.get(180, {}).get('inr', 779)} | 365D: ₹{g.get(365, {}).get('inr', 1299)}\n\n"
-        f"💎 <b>Diamond :</b> 30D: ₹{d.get(30, {}).get('inr', 259)} | 90D: ₹{d.get(90, {}).get('inr', 649)}\n"
-        f"                180D: ₹{d.get(180, {}).get('inr', 1169)} | 365D: ₹{d.get(365, {}).get('inr', 1949)}\n\n"
+        f"◈ <b>Base 1-Month Price :</b> <code>₹{base_inr}</code>\n"
+        f"  (Auto-Calc: <code>{stars_1} ⭐</code> | <code>${usd_1:.2f}</code>)\n\n"
+        "<b>Sample Duration Rates:</b>\n"
+        f"◈ <b>1 Month  :</b> ₹{inr_1} | {stars_1} ⭐ | ${usd_1:.2f}\n"
+        f"◈ <b>3 Months :</b> ₹{inr_3} | {stars_3} ⭐ | ${usd_3:.2f}\n"
+        f"◈ <b>6 Months :</b> ₹{inr_6} | {stars_6} ⭐ | ${usd_6:.2f}\n"
+        f"◈ <b>1 Year   :</b> ₹{inr_12} | {stars_12} ⭐ | ${usd_12:.2f}\n\n"
+        "<i>All dynamic plans (1–24 months) auto-calculate with volume discounts.</i>\n\n"
         "⚡ @Nex_bots"
     )
 
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🚀 +30% Boost All", callback_data="cb_oprice_boost"),
-            InlineKeyboardButton("🔄 Reset Defaults", callback_data="cb_oprice_reset")
+            InlineKeyboardButton("✏️ Edit Base Price", callback_data="cb_oprice_base_wiz")
         ],
         [
-            InlineKeyboardButton("🥈 Edit Silver", callback_data="cb_oprice_tier_1"),
-            InlineKeyboardButton("🥇 Edit Gold", callback_data="cb_oprice_tier_2"),
-            InlineKeyboardButton("💎 Edit Diamond", callback_data="cb_oprice_tier_3")
+            InlineKeyboardButton("🚀 +30% Boost Base", callback_data="cb_oprice_boost"),
+            InlineKeyboardButton("🔄 Reset Default (₹139)", callback_data="cb_oprice_reset")
+        ],
+        [
+            InlineKeyboardButton("🥈 Silver", callback_data="cb_oprice_tier_1"),
+            InlineKeyboardButton("🥇 Gold", callback_data="cb_oprice_tier_2"),
+            InlineKeyboardButton("💎 Diamond", callback_data="cb_oprice_tier_3")
         ],
         [
             InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
@@ -1744,18 +1770,39 @@ async def cb_owner_pricing_handler(client, query: CallbackQuery):
     await query.answer()
 
 
+@Client.on_callback_query(filters.regex(r"^cb_oprice_base_wiz$") & filters.user(Config.ADMIN))
+async def cb_oprice_base_wiz_handler(client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_base_price"}
+    settings = await db.get_bot_settings()
+    curr_base = settings.get("base_month_price_inr", 139)
+    text = (
+        "💎 <b><u>Set Base 1-Month INR Price</u></b>\n\n"
+        f"◈ <b>Current Base Price :</b> <code>₹{curr_base}</code>\n\n"
+        "Please send the new 1-month base price in INR as an integer (e.g. <code>149</code>):\n\n"
+        "<i>Stars and USD will automatically recalculate for all durations. Send /cancel to abort.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_pricing")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
 @Client.on_callback_query(filters.regex(r"^cb_oprice_boost$") & filters.user(Config.ADMIN))
 async def cb_oprice_boost_handler(client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    curr_base = settings.get("base_month_price_inr", 139)
+    new_base = max(1, round(curr_base * 1.30))
+    await db.update_bot_settings(base_month_price_inr=new_base)
     await db.boost_all_prices_percent(30.0)
-    await query.answer("All plans boosted by +30% (1:1 Stars parity enforced)! 🚀", show_alert=True)
+    await query.answer(f"Base price boosted to ₹{new_base} (+30%)! 🚀", show_alert=True)
     text, markup = await build_owner_pricing_panel()
     await edit_message_content(query.message, text, reply_markup=markup)
 
 
 @Client.on_callback_query(filters.regex(r"^cb_oprice_reset$") & filters.user(Config.ADMIN))
 async def cb_oprice_reset_handler(client, query: CallbackQuery):
+    await db.update_bot_settings(base_month_price_inr=139)
     await db.reset_pricing_defaults()
-    await query.answer("Pricing reset to defaults! 🔄", show_alert=True)
+    await query.answer("Pricing reset to default ₹139! 🔄", show_alert=True)
     text, markup = await build_owner_pricing_panel()
     await edit_message_content(query.message, text, reply_markup=markup)
 

@@ -100,6 +100,30 @@ def format_user_time(dt_or_ts, tz_name: str = "Asia/Kolkata") -> str:
     return local_dt.strftime("%d %b %Y, %I:%M %p %Z")
 
 
+# ==================== FAST IN-MEMORY TTL CACHE (< 100ms UI RESPONSE) ====================
+_CACHE = {}
+_CACHE_TTL = 30.0  # 30 seconds TTL
+
+def _cache_get(key: str):
+    item = _CACHE.get(key)
+    if not item:
+        return None
+    val, expires_at = item
+    if time.time() > expires_at:
+        _CACHE.pop(key, None)
+        return None
+    return val
+
+def _cache_set(key: str, val, ttl: float = _CACHE_TTL):
+    _CACHE[key] = (val, time.time() + ttl)
+
+def _cache_invalidate(*prefixes):
+    for prefix in prefixes:
+        matched = [k for k in list(_CACHE.keys()) if k.startswith(prefix)]
+        for k in matched:
+            _CACHE.pop(k, None)
+
+
 class Database:
 
     def __init__(self, uri, database_name):
@@ -223,6 +247,7 @@ class Database:
     # Thumbnail methods
     async def set_thumbnail(self, id, file_id):
         await self.col.update_one({'_id': int(id)}, {'$set': {'file_id': file_id}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_thumbnail(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -231,6 +256,7 @@ class Database:
     # Caption methods
     async def set_caption(self, id, caption):
         await self.col.update_one({'_id': int(id)}, {'$set': {'caption': caption}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_caption(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -239,6 +265,7 @@ class Database:
     # Prefix methods
     async def set_prefix(self, id, prefix):
         await self.col.update_one({'_id': int(id)}, {'$set': {'prefix': prefix}}, upsert=True)  
+        _cache_invalidate(f"user_settings:{id}")
         
     async def get_prefix(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -247,6 +274,7 @@ class Database:
     # Episode Template methods
     async def set_template(self, id, template):
         await self.col.update_one({'_id': int(id)}, {'$set': {'episode_template': template}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_template(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -255,6 +283,7 @@ class Database:
     # Suffix methods
     async def set_suffix(self, id, suffix):
         await self.col.update_one({'_id': int(id)}, {'$set': {'suffix': suffix}}, upsert=True)  
+        _cache_invalidate(f"user_settings:{id}")
         
     async def get_suffix(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -263,6 +292,7 @@ class Database:
     # Metadata methods
     async def set_metadata_bool(self, id, metadata_bool):
         await self.col.update_one({'_id': int(id)}, {'$set': {'metadata_bool': bool(metadata_bool)}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_metadata_bool(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -272,6 +302,7 @@ class Database:
 
     async def set_metadata_code(self, id, metadata_code):
         await self.col.update_one({'_id': int(id)}, {'$set': {'metadata_code': metadata_code}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_metadata_code(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -282,6 +313,7 @@ class Database:
     # Word cleaner & replacer methods
     async def set_clean_words(self, id, clean_words):
         await self.col.update_one({'_id': int(id)}, {'$set': {'clean_words': clean_words}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_clean_words(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -289,6 +321,7 @@ class Database:
 
     async def set_replace_words(self, id, replace_words):
         await self.col.update_one({'_id': int(id)}, {'$set': {'replace_words': replace_words}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_replace_words(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -297,6 +330,7 @@ class Database:
     # Sample duration methods
     async def set_sample_duration(self, id, sample_duration):
         await self.col.update_one({'_id': int(id)}, {'$set': {'sample_duration': int(sample_duration)}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_sample_duration(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -305,6 +339,7 @@ class Database:
     # Screenshot methods
     async def set_screenshots(self, id, screenshots):
         await self.col.update_one({'_id': int(id)}, {'$set': {'screenshots': int(screenshots)}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_screenshots(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -313,6 +348,7 @@ class Database:
     # Dump channel methods
     async def set_dump_channel(self, id, dump_channel):
         await self.col.update_one({'_id': int(id)}, {'$set': {'dump_channel': dump_channel, 'user_dump': dump_channel}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_dump_channel(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -323,6 +359,7 @@ class Database:
     # Upload mode methods ("Ask", "Document", "Video", "Audio")
     async def set_upload_mode(self, id, upload_mode):
         await self.col.update_one({'_id': int(id)}, {'$set': {'upload_mode': upload_mode}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
 
     async def get_upload_mode(self, id):
         user = await self.col.find_one({'_id': int(id)})
@@ -330,9 +367,13 @@ class Database:
 
     # Full User Settings Aggregator
     async def get_user_settings(self, id):
+        ck = f"user_settings:{id}"
+        cached = _cache_get(ck)
+        if cached is not None:
+            return cached
         user = await self.col.find_one({'_id': int(id)})
         if not user:
-            return {
+            res = {
                 "thumbnail": None,
                 "caption": None,
                 "prefix": None,
@@ -347,7 +388,9 @@ class Database:
                 "upload_mode": "Ask",
                 "timezone": "Asia/Kolkata"
             }
-        return {
+            _cache_set(ck, res)
+            return res
+        res = {
             "thumbnail": user.get('file_id', None),
             "caption": user.get('caption', None),
             "prefix": user.get('prefix', None),
@@ -362,6 +405,8 @@ class Database:
             "upload_mode": user.get('upload_mode', "Ask"),
             "timezone": user.get('timezone', "Asia/Kolkata")
         }
+        _cache_set(ck, res)
+        return res
 
     # ==================== BOT CONFIGURATION & OWNER PERSISTENCE ====================
 
@@ -420,6 +465,7 @@ class Database:
             upsert=True
         )
         await self.cfg.update_one({'_id': 'bot_settings'}, {'$addToSet': {'premium_users': int(user_id)}}, upsert=True)
+        _cache_invalidate(f"prem_info:{user_id}")
         return new_expiry
 
     async def remove_premium_user(self, user_id: int):
@@ -433,10 +479,16 @@ class Database:
             upsert=True
         )
         await self.cfg.update_one({'_id': 'bot_settings'}, {'$pull': {'premium_users': int(user_id)}}, upsert=True)
+        _cache_invalidate(f"prem_info:{user_id}")
 
     async def get_premium_info(self, user_id: int) -> dict:
+        ck = f"prem_info:{user_id}"
+        cached = _cache_get(ck)
+        if cached is not None:
+            return cached
+
         if int(user_id) in Config.ADMIN:
-            return {
+            res = {
                 "tier": 3,
                 "plan_name": "👑 Owner (Diamond)",
                 "expiry": 0,
@@ -445,9 +497,12 @@ class Database:
                 "is_owner": True,
                 "active": True
             }
+            _cache_set(ck, res)
+            return res
+
         user = await self.col.find_one({'_id': int(user_id)})
         if not user:
-            return {
+            res = {
                 "tier": 0,
                 "plan_name": "Free",
                 "expiry": 0,
@@ -456,6 +511,8 @@ class Database:
                 "is_owner": False,
                 "active": False
             }
+            _cache_set(ck, res)
+            return res
 
         tier = int(user.get("premium_tier", 0) or 0)
         expiry = float(user.get("premium_expiry", 0) or 0)
@@ -464,7 +521,7 @@ class Database:
         # Check expiration
         if tier > 0 and expiry > 0 and now > expiry:
             await self.remove_premium_user(user_id)
-            return {
+            res = {
                 "tier": 0,
                 "plan_name": "Free (Expired)",
                 "expiry": 0,
@@ -473,12 +530,14 @@ class Database:
                 "is_owner": False,
                 "active": False
             }
+            _cache_set(ck, res)
+            return res
 
         if tier > 0 and expiry > now:
             remaining_sec = expiry - now
             days_left = int(remaining_sec // 86400)
             hours_left = int((remaining_sec % 86400) // 3600)
-            return {
+            res = {
                 "tier": tier,
                 "plan_name": user.get("plan_name", TIER_NAMES.get(tier, f"Level {tier}")),
                 "expiry": expiry,
@@ -487,8 +546,10 @@ class Database:
                 "is_owner": False,
                 "active": True
             }
+            _cache_set(ck, res)
+            return res
 
-        return {
+        res = {
             "tier": 0,
             "plan_name": "Free",
             "expiry": 0,
@@ -497,6 +558,8 @@ class Database:
             "is_owner": False,
             "active": False
         }
+        _cache_set(ck, res)
+        return res
 
     async def is_premium_user(self, user_id: int) -> bool:
         if int(user_id) in Config.ADMIN:
@@ -522,12 +585,19 @@ class Database:
     # ==================== 1-TIME 3-DAY FREE TRIAL ====================
 
     async def has_claimed_trial(self, user_id: int) -> bool:
+        ck = f"trial:{user_id}"
+        cached = _cache_get(ck)
+        if cached is not None:
+            return cached
         user = await self.col.find_one({'_id': int(user_id)})
         if user and user.get("trial_claimed"):
+            _cache_set(ck, True)
             return True
         cfg = await self.cfg.find_one({'_id': 'bot_settings'})
         claimed_ids = cfg.get("claimed_trial_ids", []) if cfg else []
-        return int(user_id) in claimed_ids
+        res = int(user_id) in claimed_ids
+        _cache_set(ck, res)
+        return res
 
     async def claim_free_trial(self, user_id: int) -> bool:
         if await self.has_claimed_trial(user_id):
@@ -535,6 +605,7 @@ class Database:
         # Record claimed status permanently on both user doc and global bot_config
         await self.col.update_one({'_id': int(user_id)}, {'$set': {'trial_claimed': True}}, upsert=True)
         await self.cfg.update_one({'_id': 'bot_settings'}, {'$addToSet': {'claimed_trial_ids': int(user_id)}}, upsert=True)
+        _cache_invalidate(f"trial:{user_id}", f"prem_info:{user_id}")
         # Grant 3 days Level 2 Gold (4GB)
         await self.set_user_premium(user_id, tier=2, days=3, plan_name="Gold (3-Day Trial)")
         return True
@@ -543,6 +614,7 @@ class Database:
         """Resets a user's trial status allowing them to claim free trial again."""
         await self.col.update_one({'_id': int(user_id)}, {'$set': {'trial_claimed': False}}, upsert=True)
         await self.cfg.update_one({'_id': 'bot_settings'}, {'$pull': {'claimed_trial_ids': int(user_id)}}, upsert=True)
+        _cache_invalidate(f"trial:{user_id}", f"prem_info:{user_id}")
         return True
 
     async def reset_user_tasks(self, user_id: int) -> int:
@@ -1175,10 +1247,15 @@ class Database:
     # ==================== DYNAMIC PRICING ENGINE ====================
     async def get_premium_pricing(self) -> dict:
         """Retrieves live pricing from MongoDB; defaults to PLAN_PRICING with 1:1 INR/Stars parity."""
+        cached = _cache_get("premium_pricing")
+        if cached is not None:
+            return cached
         import copy
         doc = await self.cfg.find_one({'_id': 'premium_pricing'})
         if not doc or not doc.get("pricing"):
-            return copy.deepcopy(PLAN_PRICING)
+            res = copy.deepcopy(PLAN_PRICING)
+            _cache_set("premium_pricing", res)
+            return res
         raw = doc.get("pricing", {})
         parsed = {}
         for tier_k, tier_v in raw.items():
@@ -1187,6 +1264,7 @@ class Database:
             for d_k, d_v in tier_v.items():
                 if str(d_k).isdigit():
                     parsed[t_int][int(d_k)] = d_v
+        _cache_set("premium_pricing", parsed)
         return parsed
 
     async def set_plan_price(self, tier: int, days: int, price: int) -> bool:
@@ -1205,6 +1283,7 @@ class Database:
 
         db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in pricing.items()}
         await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
+        _cache_invalidate("premium_pricing")
         return True
 
     async def boost_all_prices_percent(self, percent: float = 30.0) -> dict:
@@ -1220,6 +1299,7 @@ class Database:
                     tier_v[d_k]["stars"] = new_val
         db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in pricing.items()}
         await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
+        _cache_invalidate("premium_pricing")
         return pricing
 
     async def reset_pricing_defaults(self) -> dict:
@@ -1227,6 +1307,7 @@ class Database:
         import copy
         db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in PLAN_PRICING.items()}
         await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
+        _cache_invalidate("premium_pricing")
         return copy.deepcopy(PLAN_PRICING)
 
     # ==================== ATOMIC STATS & LIVE COUNTERS ====================
@@ -1288,9 +1369,12 @@ class Database:
 
     # ==================== DYNAMIC BOT CONFIGURATION ====================
     async def get_bot_settings(self) -> dict:
-        """Returns live bot configuration settings."""
+        """Returns live bot configuration settings with fast TTL cache."""
+        cached = _cache_get("bot_settings")
+        if cached is not None:
+            return cached
         cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
-        return {
+        res = {
             "owner_only": bool(cfg.get("owner_only", Config.OWNER_ONLY)),
             "force_sub": cfg.get("force_sub", Config.FORCE_SUB),
             "free_quota_gb": int(cfg.get("free_quota_gb", 20)),
@@ -1298,6 +1382,7 @@ class Database:
             "prem_concurrency": int(cfg.get("prem_concurrency", 4)),
             "trial_enabled": bool(cfg.get("trial_enabled", True)),
             "trial_days": int(cfg.get("trial_days", 3)),
+            "base_month_price_inr": int(cfg.get("base_month_price_inr", 139)),
             "ram_disk_enabled": bool(cfg.get("ram_disk_enabled", True)),
             "session_upload_enabled": bool(cfg.get("session_upload_enabled", True)),
             "auto_sample_enabled": bool(cfg.get("auto_sample_enabled", True)),
@@ -1305,12 +1390,15 @@ class Database:
             "payment_qr_url": cfg.get("payment_qr_url", getattr(Config, "QR_PIC", "https://graph.org/file/f0a4f5f54316ee0a71be9.jpg")),
             "admin_contact": cfg.get("admin_contact", "NexCRSupportbot")
         }
+        _cache_set("bot_settings", res)
+        return res
 
     async def update_bot_settings(self, **kwargs) -> dict:
         """Updates live bot configuration settings in MongoDB."""
         clean = {k: v for k, v in kwargs.items() if v is not None}
         if clean:
             await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': clean}, upsert=True)
+            _cache_invalidate("bot_settings")
         return await self.get_bot_settings()
 
 
