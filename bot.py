@@ -1,5 +1,13 @@
 import os
 import sys
+
+# High-Speed C++ based uvloop Event Loop for Linux (100-200 MB/s transfers)
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
+
 import time
 import gc
 import shutil
