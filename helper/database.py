@@ -16,10 +16,10 @@ TIER_NAMES = {
 }
 
 TIER_LIMITS = {
-    0: {"max_file_size": 2 * 1024 * 1024 * 1024, "daily_bytes": 5 * 1024 * 1024 * 1024, "concurrency": 1, "max_speed": 3.5 * 1024 * 1024},
-    1: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 25 * 1024 * 1024 * 1024, "concurrency": 2, "max_speed": 12 * 1024 * 1024},
-    2: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 100 * 1024 * 1024 * 1024, "concurrency": 3, "max_speed": 25 * 1024 * 1024},
-    3: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 1024 * 1024 * 1024 * 1024 * 100, "concurrency": 5, "max_speed": 0},
+    0: {"max_file_size": 2 * 1024 * 1024 * 1024, "daily_bytes": 20 * 1024 * 1024 * 1024, "concurrency": 1, "queue_limit": 3, "max_speed": 0},
+    1: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 50 * 1024 * 1024 * 1024, "concurrency": 4, "queue_limit": 15, "max_speed": 0},
+    2: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 150 * 1024 * 1024 * 1024, "concurrency": 4, "queue_limit": 15, "max_speed": 0},
+    3: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 1024 * 1024 * 1024 * 1024 * 100, "concurrency": 4, "queue_limit": 15, "max_speed": 0},
 }
 
 PLAN_DURATIONS = {
@@ -120,6 +120,7 @@ class Database:
         self.col = self.db.user
         self.cfg = self.db.bot_config
         self.logs = self.db.activity_logs
+        self.tasks = self.db.active_tasks
 
     @property
     def client(self):
@@ -242,6 +243,14 @@ class Database:
     async def get_prefix(self, id):
         user = await self.col.find_one({'_id': int(id)})
         return user.get('prefix', None) if user else None
+
+    # Episode Template methods
+    async def set_template(self, id, template):
+        await self.col.update_one({'_id': int(id)}, {'$set': {'episode_template': template}}, upsert=True)
+
+    async def get_template(self, id):
+        user = await self.col.find_one({'_id': int(id)})
+        return user.get('episode_template', None) if user else None
         
     # Suffix methods
     async def set_suffix(self, id, suffix):
@@ -1093,6 +1102,64 @@ class Database:
             "pts": pts,
             "inviter_name": updated_inviter.get("first_name", "User")
         }
+
+    # ==================== ZERO-LOSS PERSISTENT TASK QUEUE ====================
+    async def add_active_task(self, task_id: str, user_id: int, file_name: str, file_size: int, task_type: str = "rename", extra: dict = None) -> bool:
+        """Stores or updates an active task in MongoDB for crash recovery and queue tracking."""
+        try:
+            doc = {
+                "_id": str(task_id),
+                "user_id": int(user_id),
+                "file_name": str(file_name),
+                "file_size": int(file_size),
+                "task_type": str(task_type),
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "status": "in_progress",
+                "extra": extra or {}
+            }
+            await self.tasks.update_one({"_id": str(task_id)}, {"$set": doc}, upsert=True)
+            return True
+        except Exception:
+            return False
+
+    async def remove_active_task(self, task_id: str) -> bool:
+        """Removes a finished or cancelled task from the persistent queue."""
+        try:
+            res = await self.tasks.delete_one({"_id": str(task_id)})
+            return res.deleted_count > 0
+        except Exception:
+            return False
+
+    async def get_active_tasks(self, max_age_seconds: int = 7200) -> list:
+        """Returns all in-progress active tasks created within the last max_age_seconds (default 2h)."""
+        try:
+            min_ts = time.time() - max_age_seconds
+            cursor = self.tasks.find({"updated_at": {"$gte": min_ts}, "status": "in_progress"})
+            return await cursor.to_list(length=200)
+        except Exception:
+            return []
+
+    async def get_user_active_tasks_count(self, user_id: int) -> int:
+        """Returns number of active tasks currently running or queued for a user."""
+        try:
+            min_ts = time.time() - 7200
+            return await self.tasks.count_documents({
+                "user_id": int(user_id),
+                "status": "in_progress",
+                "updated_at": {"$gte": min_ts}
+            })
+        except Exception:
+            return 0
+
+    async def cleanup_stale_tasks(self, max_age_seconds: int = 7200) -> int:
+        """Deletes tasks older than max_age_seconds from MongoDB."""
+        try:
+            min_ts = time.time() - max_age_seconds
+            res = await self.tasks.delete_many({"updated_at": {"$lt": min_ts}})
+            return res.deleted_count
+        except Exception:
+            return 0
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

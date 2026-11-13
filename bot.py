@@ -26,6 +26,17 @@ from helper.database import db
 # Support for channels with large IDs
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 
+# Bot Process Start Time & Drain Mode Tracker
+BOT_START_TIME = time.time()
+
+def is_in_drain_mode() -> bool:
+    """Returns True if the bot has been running for >= 5 hours 15 minutes (18,900s) and is preparing for high-speed cloud handoff."""
+    return (time.time() - BOT_START_TIME) >= 18900
+
+def get_bot_uptime() -> float:
+    """Returns uptime in seconds."""
+    return time.time() - BOT_START_TIME
+
 # Bot Commands Definitions
 # 1. Public User Commands (Default Scope - 32 Commands with /start strictly #1)
 USER_COMMANDS = [
@@ -59,6 +70,12 @@ USER_COMMANDS = [
     BotCommand("add_clean", "➕ Add Word to Filename Cleaner"),
     BotCommand("del_clean", "➖ Remove Word from Cleaner"),
     BotCommand("clear_clean", "🗑️ Clear All Cleaner Words"),
+    BotCommand("streams", "🎧 Inspect & Strip Audio/Sub Tracks"),
+    BotCommand("remux", "🔄 Lossless MKV ⇄ MP4 Remuxer"),
+    BotCommand("sheet", "📸 3x3 HD Screenshot Sheet"),
+    BotCommand("extract", "📦 Extract ZIP, RAR, 7Z Archives"),
+    BotCommand("zip", "🗜️ Compress Files to ZIP"),
+    BotCommand("template", "🏷️ Episode Auto-Rename Template"),
     BotCommand("set_dump", "📦 Set Personal Dump Channel ID"),
     BotCommand("del_dump", "🗑️ Remove Personal Dump Channel"),
     BotCommand("donate", "❤️ Support & Donate to Developer"),
@@ -195,6 +212,29 @@ class Bot(Client):
             except Exception as e:
                 print(f"Please Make Sure The Bot Is Admin In Your Log Channel: {e}")
 
+        # Check for any active tasks from a previous instance (Cloud Handoff Recovery)
+        try:
+            pending_tasks = await db.get_active_tasks(max_age_seconds=7200)
+            if pending_tasks:
+                print(f"🔄 [Recovery] Found {len(pending_tasks)} active/queued tasks from previous cloud run.")
+                notified_users = set()
+                for t in pending_tasks:
+                    uid = t.get("user_id")
+                    fname = t.get("file_name", "File")
+                    if uid and uid not in notified_users:
+                        notified_users.add(uid)
+                        try:
+                            await self.send_message(
+                                uid,
+                                f"🔄 <b>NeX Cloud Handoff Completed!</b>\n\n"
+                                f"The server successfully reconnected to Telegram. Your task for <code>{fname}</code> is now ready. Send your file again if it was interrupted."
+                            )
+                        except Exception:
+                            pass
+                await db.cleanup_stale_tasks(max_age_seconds=7200)
+        except Exception as rec_err:
+            print(f"⚠️ [Recovery] Startup task recovery warning: {rec_err}")
+
         # Launch permanent background tasks for 24/7 zero-downtime operation
         asyncio.create_task(self._mtproto_watchdog())
         asyncio.create_task(self._temp_cleanup_worker())
@@ -299,6 +339,25 @@ class Bot(Client):
                 except Exception:
                     is_active_task_path = lambda p: False
                     ACTIVE_WORK_DIRS = set()
+
+                # 0. Scan Linux RAM-disk /dev/shm/nex_tasks
+                shm_dir = "/dev/shm/nex_tasks"
+                if os.path.exists(shm_dir):
+                    for entry in os.listdir(shm_dir):
+                        entry_path = os.path.join(shm_dir, entry)
+                        abs_entry = os.path.abspath(entry_path)
+                        if is_active_task_path(entry_path) or abs_entry in ACTIVE_WORK_DIRS:
+                            continue
+                        try:
+                            mtime = os.path.getmtime(entry_path)
+                            if (now - mtime) >= cutoff_time:
+                                if os.path.isdir(entry_path):
+                                    shutil.rmtree(entry_path, ignore_errors=True)
+                                elif os.path.isfile(entry_path):
+                                    os.remove(entry_path)
+                                deleted_files += 1
+                        except Exception:
+                            pass
 
                 # 1. Scan downloads/ directory
                 downloads_dir = "downloads"

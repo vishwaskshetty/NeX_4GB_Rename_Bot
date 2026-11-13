@@ -1,3 +1,5 @@
+import os
+import re
 import math
 import time
 import asyncio
@@ -71,8 +73,8 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     percentage = (current * 100 / total) if (total and total > 0) else 0
     pct_diff = abs(percentage - last_pct)
 
-    # Strictly throttle UI progress edits to once every 5.0 seconds (or min 2% change) or upon completion
-    if ((now - last_update >= 5.0 and pct_diff >= 2.0) or (now - last_update >= 10.0) or (current == total)):
+    # Strictly throttle UI progress edits to once every 5.0 seconds (or min 3% change) or upon completion
+    if ((now - last_update >= 5.0 and pct_diff >= 3.0) or (now - last_update >= 10.0) or (current == total)):
         PROGRESS_TIMESTAMPS[key] = now
         PROGRESS_PERCENTAGES[key] = percentage
         diff = max(now - start, 0.001)
@@ -213,4 +215,94 @@ async def edit_message_content(message, text, reply_markup=None, parse_mode=None
             except Exception:
                 return None
     return None
+
+
+# ==================== AUTO-EPISODE BATCH RENAMER ====================
+def parse_media_tags(filename: str) -> dict:
+    """
+    Parses TV series / anime / movie filenames to extract Title, Season, Episode,
+    Quality, Codec, Audio tags, and Extension.
+    """
+    base, ext = os.path.splitext(filename)
+    clean_base = base.replace(".", " ").replace("_", " ").strip()
+
+    season = "01"
+    episode = "01"
+    quality = ""
+    codec = ""
+    audio = ""
+
+    # Season & Episode extraction
+    se_match = re.search(r'(?i)[sS](\d{1,2})\s*[eE](\d{1,3})', clean_base)
+    if se_match:
+        season = f"{int(se_match.group(1)):02d}"
+        episode = f"{int(se_match.group(2)):02d}"
+    else:
+        x_match = re.search(r'(?i)\b(\d{1,2})[xX](\d{1,3})\b', clean_base)
+        if x_match:
+            season = f"{int(x_match.group(1)):02d}"
+            episode = f"{int(x_match.group(2)):02d}"
+        else:
+            ep_match = re.search(r'(?i)(?:episode|ep|e)\s*(\d{1,3})\b', clean_base)
+            if ep_match:
+                episode = f"{int(ep_match.group(1)):02d}"
+            s_match = re.search(r'(?i)(?:season|s)\s*(\d{1,2})\b', clean_base)
+            if s_match:
+                season = f"{int(s_match.group(1)):02d}"
+
+    # Quality extraction
+    q_match = re.search(r'(?i)\b(2160p|1080p|720p|480p|4k|uhd|fhd|hd)\b', clean_base)
+    if q_match:
+        quality = q_match.group(1).upper()
+
+    # Codec extraction
+    c_match = re.search(r'(?i)\b(hevc|x265|x264|h265|h264|10bit|8bit)\b', clean_base)
+    if c_match:
+        codec = c_match.group(1).upper()
+
+    # Audio extraction
+    a_match = re.search(r'(?i)\b(dual\s*audio|multi\s*audio|hindi|eng|japanese|tamil|telugu)\b', clean_base)
+    if a_match:
+        audio = a_match.group(1).title()
+
+    # Extract clean title by taking text before SxxExx or Quality
+    title_part = clean_base
+    cut_match = re.search(r'(?i)([sS]\d{1,2}|E\d{1,3}|\d{1,2}x\d{1,3}|2160p|1080p|720p|480p)', clean_base)
+    if cut_match:
+        title_part = clean_base[:cut_match.start()].strip()
+    title = re.sub(r'[\[\(].*?[\]\)]', '', title_part).strip(' -_')
+    if not title:
+        title = "Episode"
+
+    return {
+        "title": title,
+        "season": season,
+        "episode": episode,
+        "quality": quality or "720p",
+        "codec": codec or "x264",
+        "audio": audio or "Original",
+        "ext": ext or ".mkv"
+    }
+
+
+def apply_episode_template(filename: str, template: str) -> str:
+    """
+    Applies custom user template to an extracted media filename.
+    Supported placeholders: {Title}, {Season}, {Episode}, {Quality}, {Codec}, {Audio}
+    """
+    tags = parse_media_tags(filename)
+    res = template
+    res = res.replace("{Title}", tags["title"]).replace("{title}", tags["title"])
+    res = res.replace("{Season}", tags["season"]).replace("{season}", tags["season"])
+    res = res.replace("{Episode}", tags["episode"]).replace("{episode}", tags["episode"])
+    res = res.replace("{Quality}", tags["quality"]).replace("{quality}", tags["quality"])
+    res = res.replace("{Codec}", tags["codec"]).replace("{codec}", tags["codec"])
+    res = res.replace("{Audio}", tags["audio"]).replace("{audio}", tags["audio"])
+    
+    # Clean whitespace and append original extension if missing
+    res = re.sub(r'\s+', ' ', res).strip()
+    if not res.lower().endswith(tags["ext"].lower()):
+        res = f"{res}{tags['ext']}"
+    return res
+
 

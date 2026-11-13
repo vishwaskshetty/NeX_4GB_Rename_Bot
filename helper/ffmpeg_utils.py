@@ -1,16 +1,19 @@
 import os
 import json
+import shutil
 import asyncio
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 
 # NeX 4GB Rename Bot - FFmpeg Engine
 # Developed by @Nex_bots
 
-try:
-    import static_ffmpeg
-    static_ffmpeg.add_paths()
-except Exception as e:
-    print(f"static_ffmpeg auto-init info: {e}")
+# Instant startup: only load static_ffmpeg if system ffmpeg/ffprobe binaries are not found
+if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+    except Exception as e:
+        print(f"static_ffmpeg auto-init info: {e}")
 
 
 async def inject_metadata(input_path: str, output_path: str, meta_text: str) -> bool:
@@ -250,4 +253,143 @@ async def get_video_duration_and_dims(file_path: str) -> Tuple[int, int, int]:
             pass
 
     return int(duration), int(width), int(height)
+
+
+async def get_media_streams(file_path: str) -> Dict[str, list]:
+    """
+    Inspects all video, audio, and subtitle streams in a media file using ffprobe.
+    """
+    res = {"video": [], "audio": [], "subtitle": []}
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            file_path
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        if stdout:
+            data = json.loads(stdout.decode())
+            for stream in data.get("streams", []):
+                stype = stream.get("codec_type")
+                tags = stream.get("tags", {})
+                info = {
+                    "index": int(stream.get("index", 0)),
+                    "codec": stream.get("codec_name", "unknown"),
+                    "lang": tags.get("language", "und"),
+                    "title": tags.get("title", tags.get("handler_name", ""))
+                }
+                if stype == "video":
+                    info["width"] = stream.get("width")
+                    info["height"] = stream.get("height")
+                    res["video"].append(info)
+                elif stype == "audio":
+                    info["channels"] = stream.get("channels", 2)
+                    res["audio"].append(info)
+                elif stype == "subtitle":
+                    res["subtitle"].append(info)
+    except Exception as e:
+        print(f"ffprobe get_media_streams error: {e}")
+    return res
+
+
+async def remux_select_streams(
+    input_path: str,
+    output_path: str,
+    a_indices: List[int] = None,
+    s_indices: List[int] = None
+) -> bool:
+    """
+    Losslessly strips unwanted tracks or selects specific audio/subtitle streams in under 5 seconds.
+    """
+    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path, "-map", "0:v"]
+
+    if a_indices:
+        for idx in a_indices:
+            cmd.extend(["-map", f"0:{idx}"])
+    else:
+        cmd.extend(["-map", "0:a?"])
+
+    if s_indices:
+        for idx in s_indices:
+            cmd.extend(["-map", f"0:{idx}"])
+    elif s_indices is not None and len(s_indices) == 0:
+        # Strip all subtitles if empty list provided
+        pass
+    else:
+        cmd.extend(["-map", "0:s?"])
+
+    cmd.extend(["-c", "copy", output_path])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    except Exception as e:
+        print(f"FFmpeg remux_select_streams error: {e}")
+        return False
+
+
+async def remux_container(input_path: str, output_path: str) -> bool:
+    """
+    Fast lossless container remuxing between MKV and MP4 in 4-8 seconds without CPU re-encoding.
+    """
+    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path, "-c", "copy"]
+    if output_path.lower().endswith(".mp4"):
+        cmd.extend(["-movflags", "+faststart"])
+    cmd.append(output_path)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    except Exception as e:
+        print(f"FFmpeg remux_container error: {e}")
+        return False
+
+
+async def generate_screenshot_grid(input_path: str, output_path: str, total_duration: int) -> bool:
+    """
+    Generates a high-resolution 3x3 contact sheet (9 evenly spaced frames) in a single image.
+    """
+    if total_duration <= 0:
+        total_duration = 120
+
+    # Extract 9 frames evenly distributed and tile them 3x3
+    interval = max(5, total_duration // 10)
+    # Fast select filter to pick 9 frames
+    vf = f"select='not(mod(n\\,{interval}))',scale=480:-1,tile=3x3"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-vf", vf,
+        "-frames:v", "1",
+        "-q:v", "2",
+        output_path
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await proc.communicate()
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    except Exception as e:
+        print(f"FFmpeg generate_screenshot_grid error: {e}")
+        return False
+
 

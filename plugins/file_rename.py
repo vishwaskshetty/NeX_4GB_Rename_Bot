@@ -57,6 +57,30 @@ PENDING_MEDIA_EXTRAS = {}
 ACTIVE_WORK_DIRS = set()
 
 
+def get_optimal_work_dir(user_id: int, file_size: int = 0) -> str:
+    """
+    Returns a high-speed RAM-disk path (/dev/shm/nex_tasks/...) if running on Linux
+    and /dev/shm has sufficient free space (> 2.2 * file_size).
+    Otherwise falls back to SSD 'downloads/...'.
+    """
+    ts = int(time.time())
+    pid = os.getpid()
+    sub = f"{user_id}_{ts}_{pid}"
+    if os.name != 'nt' and os.path.exists('/dev/shm'):
+        try:
+            shm_usage = shutil.disk_usage('/dev/shm')
+            needed = int(file_size * 2.2) if file_size > 0 else (100 * 1024 * 1024)
+            if shm_usage.free > needed:
+                path = f"/dev/shm/nex_tasks/{sub}"
+                os.makedirs(path, exist_ok=True)
+                return path
+        except Exception:
+            pass
+    fallback = f"downloads/{sub}"
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
+
+
 def is_active_task_path(target_path: str) -> bool:
     """Checks whether a given file or directory is part of an ongoing rename task."""
     try:
@@ -494,17 +518,38 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
     user_id = update.from_user.id
     ms = update.message if hasattr(update, 'message') else update
 
-    # Verify Concurrency Limit
+    # 0. Check Drain Mode (Server 24/7 Cloud Handoff Window)
+    try:
+        from bot import is_in_drain_mode
+        if is_in_drain_mode():
+            return await ms.edit(
+                "🔄 <b>Server is performing a 30-second high-speed cloud handoff...</b>\n\n"
+                "To ensure 100% transfer integrity, new tasks are briefly paused.\n"
+                "Please wait ~30-60 seconds and try again! ⚡",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+            )
+    except Exception:
+        pass
+
+    # Verify Concurrency & Queue Limit (Free = 1 conc / 3 queue, Premium = 4 conc / 15 queue)
     prem_info = await db.get_premium_info(user_id)
     user_tier = prem_info.get("tier", 0)
     effective_tier = 3 if user_id in Config.ADMIN else user_tier
-    max_concurrent = float('inf') if user_id in Config.ADMIN else TIER_LIMITS.get(user_tier, {}).get("concurrency", 1)
+    if user_id in Config.ADMIN:
+        max_concurrent = 10
+        max_queue = 50
+    elif user_tier == 0:
+        max_concurrent = 1
+        max_queue = 3
+    else:
+        max_concurrent = 4
+        max_queue = 15
 
-    if ACTIVE_USER_TASKS.get(user_id, 0) >= max_concurrent:
+    if ACTIVE_USER_TASKS.get(user_id, 0) >= max_queue:
         return await ms.edit(
-            f"⚠️ <b>Processing Slot Busy!</b>\n\n"
-            f"Your plan (<b>{prem_info['plan_name']}</b>) allows <b>{max_concurrent}</b> concurrent task(s).\n"
-            f"Please wait for your active task to finish or upgrade via <code>/plan</code>!",
+            f"⚠️ <b>Processing Queue Full!</b>\n\n"
+            f"Your plan (<b>{prem_info['plan_name']}</b>) allows up to <b>{max_queue}</b> tasks in queue.\n"
+            f"Please wait for your active task(s) to finish or upgrade via <code>/plan</code>!",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💎 View Plans", callback_data="open_plans")],
                 [InlineKeyboardButton("❌ Close", callback_data="close")]
@@ -548,14 +593,27 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
     await ms.edit("⏳ <b>Adding to processing queue... Please wait.</b>")
     
     async with RENAME_SEMAPHORE:
-        work_dir = f"downloads/{user_id}_{int(time.time())}_{os.getpid()}"
-        os.makedirs(work_dir, exist_ok=True)
+        # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 2.2x file size free; fallback to SSD
+        work_dir = get_optimal_work_dir(user_id, file_size)
         abs_work_dir = os.path.abspath(work_dir)
         ACTIVE_WORK_DIRS.add(abs_work_dir)
         file_path = os.path.join(work_dir, new_filename)
         ph_path = None
         sample_path = None
         ss_dir = None
+        task_id = f"task_{user_id}_{int(time.time())}_{os.getpid()}"
+
+        try:
+            await db.add_active_task(
+                task_id=task_id,
+                user_id=user_id,
+                file_name=new_filename,
+                file_size=file_size,
+                task_type="rename",
+                extra={"upload_type": upload_type, "work_dir": work_dir}
+            )
+        except Exception:
+            pass
 
         await ms.edit("<b>◈ ꜰɪʟᴇ ʀᴇɴᴀᴍᴇ ᴍᴏᴅᴇ: ᴇɴɢᴀɢɪɴɢ! 💠</b>")
 
@@ -563,9 +621,10 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             # 1. Download media via parallel MTProto chunk streaming (40-80+ MB/s) with safe fallback
             try:
                 start_time = time.time()
+                is_4gb_file = file_size > (1.95 * 1024 * 1024 * 1024)
                 downloader = client
                 # Route downloads through 4GB Telegram Premium Client if active & file > 500MB
-                if client_4gb and getattr(client_4gb, "is_connected", False) and (file_size > 500 * 1024 * 1024 or is_4gb):
+                if client_4gb and getattr(client_4gb, "is_connected", False) and (file_size > 500 * 1024 * 1024 or is_4gb_file):
                     downloader = client_4gb
 
                 try:
@@ -947,7 +1006,12 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             return await ms.edit(f"❌ <b>Error occurred:</b> <code>{e}</code>")
 
         finally:
-            # 9. Strict Cleanup of Temporary Files, Concurrency Counter & Cancellation Set
+            # 9. Strict Cleanup of Temporary Files, Concurrency Counter & Persistent Task
+            try:
+                if 'task_id' in locals():
+                    await db.remove_active_task(task_id)
+            except Exception:
+                pass
             try:
                 ACTIVE_WORK_DIRS.discard(abs_work_dir)
             except Exception:

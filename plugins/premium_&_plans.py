@@ -41,18 +41,18 @@ TIER_INFO = {
         "icon": "🥈",
         "name": "Silver Tier",
         "size": "4GB Max File Size",
-        "daily": "25 GB / Day",
-        "speed": "12 MB/s Fast Speed",
-        "conc": "2 Tasks Concurrency",
+        "daily": "50 GB / Day",
+        "speed": "Turbo (40-80 MB/s)",
+        "conc": "4 Tasks Concurrency",
         "features": "4GB Uploads + Custom Metadata + Cleaner"
     },
     2: {
         "icon": "🥇",
         "name": "Gold Tier",
         "size": "4GB Max File Size",
-        "daily": "100 GB / Day",
-        "speed": "25 MB/s Blazing Speed",
-        "conc": "3 Tasks Concurrency",
+        "daily": "150 GB / Day",
+        "speed": "Turbo (40-80 MB/s)",
+        "conc": "4 Tasks Concurrency",
         "features": "4GB Uploads + Sample Video + Screenshots + Watermark"
     },
     3: {
@@ -60,8 +60,8 @@ TIER_INFO = {
         "name": "Diamond VIP",
         "size": "4GB Max File Size",
         "daily": "UNLIMITED Bandwidth",
-        "speed": "⚡ Unlimited VIP Speed",
-        "conc": "5 Tasks Concurrency",
+        "speed": "⚡ Unthrottled VIP Speed",
+        "conc": "4 Tasks Concurrency",
         "features": "4GB Uploads + Priority Queue + All Video Tools"
     }
 }
@@ -217,7 +217,7 @@ async def build_profile_card(user_id: int):
         speed_str = TIER_INFO.get(tier, {}).get("speed", "Fast")
     else:
         expiry_str = "Free Tier"
-        speed_str = "3.5 MB/s Cap"
+        speed_str = "Turbo (40-80 MB/s)"
 
     pct = min(100, int((used_bytes / daily_limit) * 100)) if (tier < 3 and not prem_info.get("is_owner")) else 0
     blocks = min(10, pct // 10)

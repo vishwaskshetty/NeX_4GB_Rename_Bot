@@ -1,10 +1,30 @@
 import os
+import time
+import zipfile
+import tarfile
+import asyncio
 import shutil
 import psutil
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ReplyParameters
 from helper.database import db
-from helper.utils import humanbytes, get_readable_file_size, CANCEL_REQUESTS, edit_message_content
+from helper.utils import (
+    humanbytes,
+    get_readable_file_size,
+    CANCEL_REQUESTS,
+    edit_message_content,
+    progress_for_pyrogram,
+    parse_media_tags,
+    apply_episode_template
+)
+from helper.ffmpeg_utils import (
+    get_media_streams,
+    remux_select_streams,
+    remux_container,
+    generate_screenshot_grid,
+    get_video_duration_and_dims
+)
+from helper.fast_transfer import fast_download
 from config import Config
 
 # NeX 4GB Rename Bot - Extra Features & Settings Dashboard
@@ -831,3 +851,411 @@ async def commands_list_cmd(client, message):
         ]
     ])
     await message.reply_text(text, reply_markup=btn)
+
+
+# ==================== ALL-IN-ONE MEDIA TOOLS ====================
+
+@Client.on_message(filters.private & filters.command(["streams", "tracks"]))
+async def streams_inspector_cmd(client, message):
+    reply_msg = message.reply_to_message
+    if not reply_msg or not (reply_msg.video or reply_msg.document):
+        return await message.reply_text(
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   🎧 <b>Stream Inspector</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "◈ <b>How to use:</b>\n"
+            "Reply to any video with <code>/streams</code> to view all audio & subtitle tracks!\n\n"
+            "◈ <b>Options:</b>\n"
+            "• <code>/streams strip_subs</code> : Remove all subtitles\n"
+            "• <code>/streams audio 1</code> : Keep only audio stream 1",
+            reply_parameters=ReplyParameters(message_id=message.id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        )
+
+    file = reply_msg.video or reply_msg.document
+    filename = file.file_name or "video.mkv"
+    ms = await message.reply_text("🔍 <b>Inspecting media streams... Please wait.</b>", quote=True)
+
+    from plugins.file_rename import get_optimal_work_dir, ACTIVE_WORK_DIRS
+    work_dir = get_optimal_work_dir(message.from_user.id, file.file_size)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    input_path = os.path.join(work_dir, filename)
+
+    try:
+        start_time = time.time()
+        await fast_download(
+            client=client,
+            message_or_file=reply_msg,
+            file_path=input_path,
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ɪɴꜱᴘᴇᴄᴛɪᴏɴ... 📥</b>", ms, start_time, client, 0)
+        )
+
+        streams_data = await get_media_streams(input_path)
+        cmd_args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+
+        # If user passed remux parameters (e.g. /streams strip_subs or /streams audio <index>)
+        if cmd_args:
+            action = cmd_args[0].lower()
+            a_idx = None
+            s_idx = None
+
+            if action == "strip_subs":
+                s_idx = []
+            elif action == "audio" and len(cmd_args) > 1 and cmd_args[1].isdigit():
+                a_idx = [int(cmd_args[1])]
+
+            out_filename = f"stripped_{filename}"
+            output_path = os.path.join(work_dir, out_filename)
+            await ms.edit("<b>◈ ʟᴏꜱꜱʟᴇꜱꜱʟʏ ʀᴇᴍᴜxɪɴɢ ꜱᴛʀᴇᴀᴍꜱ... ⚡</b>")
+            ok = await remux_select_streams(input_path, output_path, a_indices=a_idx, s_indices=s_idx)
+            if ok and os.path.exists(output_path):
+                up_start = time.time()
+                await ms.edit("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ʀᴇᴍᴜxᴇᴅ ᴠɪᴅᴇᴏ... 🚀</b>")
+                await client.send_document(
+                    chat_id=message.chat.id,
+                    document=output_path,
+                    file_name=out_filename,
+                    caption=f"✅ <b>Streams Remuxed Successfully!</b>\n\n🏷 <code>{out_filename}</code>",
+                    progress=progress_for_pyrogram,
+                    progress_args=("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ʀᴇᴍᴜxᴇᴅ ᴠɪᴅᴇᴏ... 🚀</b>", ms, up_start, client, 0)
+                )
+                await ms.delete()
+                return
+
+        # Display streams info
+        v_list = "\n".join([f"• Stream #{s['index']}: {s['codec']} ({s.get('resolution', '')})" for s in streams_data["video"]]) or "None"
+        a_list = "\n".join([f"• Stream #{s['index']}: {s['codec']} [{s.get('lang', 'und')}]" for s in streams_data["audio"]]) or "None"
+        s_list = "\n".join([f"• Stream #{s['index']}: {s['codec']} [{s.get('lang', 'und')}]" for s in streams_data["subtitle"]]) or "None"
+
+        res_text = (
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   🎧 <b>Media Streams Detected</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"🎥 <b>Video Streams:</b>\n{v_list}\n\n"
+            f"🎵 <b>Audio Streams:</b>\n{a_list}\n\n"
+            f"💬 <b>Subtitle Streams:</b>\n{s_list}\n\n"
+            "<i>To strip subtitles: reply <code>/streams strip_subs</code></i>"
+        )
+        await ms.edit(res_text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]]))
+
+    except Exception as e:
+        await ms.edit(f"❌ <b>Stream inspection failed:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_message(filters.private & filters.command(["remux", "convert_container"]))
+async def remux_command(client, message):
+    reply_msg = message.reply_to_message
+    if not reply_msg or not (reply_msg.video or reply_msg.document):
+        return await message.reply_text(
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   🔄 <b>Lossless Remuxer</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "◈ <b>How to use:</b>\n"
+            "Reply to any video with <code>/remux</code> to switch containers (<b>MKV ⇄ MP4</b>) losslessly in seconds without CPU re-encoding!",
+            reply_parameters=ReplyParameters(message_id=message.id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        )
+
+    file = reply_msg.video or reply_msg.document
+    orig_name = file.file_name or "video.mkv"
+    base, ext = os.path.splitext(orig_name)
+    target_ext = ".mp4" if ext.lower() == ".mkv" else ".mkv"
+    target_name = f"{base}{target_ext}"
+
+    ms = await message.reply_text("⏳ <b>Starting lossless container remuxing...</b>", quote=True)
+    from plugins.file_rename import get_optimal_work_dir, ACTIVE_WORK_DIRS
+    work_dir = get_optimal_work_dir(message.from_user.id, file.file_size)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    in_path = os.path.join(work_dir, orig_name)
+    out_path = os.path.join(work_dir, target_name)
+
+    try:
+        start_time = time.time()
+        await fast_download(
+            client=client,
+            message_or_file=reply_msg,
+            file_path=in_path,
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ʀᴇᴍᴜx... 📥</b>", ms, start_time, client, 0)
+        )
+
+        await ms.edit(f"<b>◈ ʟᴏꜱꜱʟᴇꜱꜱʟʏ ʀᴇᴍᴜxɪɴɢ ᴛᴏ {target_ext.upper()}... ⚡</b>")
+        ok = await remux_container(in_path, out_path)
+        if ok and os.path.exists(out_path):
+            up_start = time.time()
+            await ms.edit("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ʀᴇᴍᴜxᴇᴅ ꜰɪʟᴇ... 🚀</b>")
+            if target_ext.lower() == ".mp4":
+                dur, w, h = await get_video_duration_and_dims(out_path)
+                await client.send_video(
+                    chat_id=message.chat.id,
+                    video=out_path,
+                    file_name=target_name,
+                    caption=f"✅ <b>Remuxed to MP4 Losslessly!</b>\n\n🏷 <code>{target_name}</code>",
+                    duration=dur,
+                    width=w,
+                    height=h,
+                    supports_streaming=True,
+                    progress=progress_for_pyrogram,
+                    progress_args=("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ʀᴇᴍᴜxᴇᴅ ꜰɪʟᴇ... 🚀</b>", ms, up_start, client, 0)
+                )
+            else:
+                await client.send_document(
+                    chat_id=message.chat.id,
+                    document=out_path,
+                    file_name=target_name,
+                    caption=f"✅ <b>Remuxed to MKV Losslessly!</b>\n\n🏷 <code>{target_name}</code>",
+                    progress=progress_for_pyrogram,
+                    progress_args=("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ʀᴇᴍᴜxᴇᴅ ꜰɪʟᴇ... 🚀</b>", ms, up_start, client, 0)
+                )
+            await ms.delete()
+        else:
+            await ms.edit("❌ <b>Remuxing failed! File format may be unsupported.</b>")
+    except Exception as e:
+        await ms.edit(f"❌ <b>Remuxing error:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_message(filters.private & filters.command(["sheet", "contact_sheet", "grid"]))
+async def screenshot_sheet_cmd(client, message):
+    reply_msg = message.reply_to_message
+    if not reply_msg or not (reply_msg.video or reply_msg.document):
+        return await message.reply_text(
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   📸 <b>3x3 Screenshot Grid</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "◈ <b>How to use:</b>\n"
+            "Reply to any video with <code>/sheet</code> to generate an instant 3x3 high-definition screenshot preview sheet!",
+            reply_parameters=ReplyParameters(message_id=message.id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        )
+
+    file = reply_msg.video or reply_msg.document
+    filename = file.file_name or "video.mp4"
+    ms = await message.reply_text("⏳ <b>Generating 3x3 Screenshot Sheet...</b>", quote=True)
+
+    from plugins.file_rename import get_optimal_work_dir, ACTIVE_WORK_DIRS
+    work_dir = get_optimal_work_dir(message.from_user.id, file.file_size)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    in_path = os.path.join(work_dir, filename)
+    sheet_out = os.path.join(work_dir, "sheet_3x3.jpg")
+
+    try:
+        start_time = time.time()
+        await fast_download(
+            client=client,
+            message_or_file=reply_msg,
+            file_path=in_path,
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰᴏʀ ꜱʜᴇᴇᴛ... 📥</b>", ms, start_time, client, 0)
+        )
+
+        dur, _, _ = await get_video_duration_and_dims(in_path)
+        await ms.edit("<b>◈ ɢᴇɴᴇʀᴀᴛɪɴɢ 3x3 ʜᴅ ᴄᴏɴᴛᴀᴄᴛ ꜱʜᴇᴇᴛ... 📸</b>")
+        ok = await generate_screenshot_grid(in_path, sheet_out, dur)
+        if ok and os.path.exists(sheet_out):
+            await client.send_photo(
+                chat_id=message.chat.id,
+                photo=sheet_out,
+                caption=f"📸 <b>3x3 HD Screenshot Sheet</b>\n\n🏷 <code>{filename}</code>\n⏱ <b>Duration:</b> <code>{dur}s</code>\n\n⚡ @Nex_bots",
+                reply_parameters=ReplyParameters(message_id=reply_msg.id)
+            )
+            await ms.delete()
+        else:
+            await ms.edit("❌ <b>Failed to generate screenshot grid!</b>")
+    except Exception as e:
+        await ms.edit(f"❌ <b>Screenshot sheet error:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_message(filters.private & filters.command(["extract", "unzip", "unrar", "7z"]))
+async def archive_extract_cmd(client, message):
+    reply_msg = message.reply_to_message
+    if not reply_msg or not (reply_msg.document):
+        return await message.reply_text(
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   📦 <b>Archive Extractor</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "◈ <b>How to use:</b>\n"
+            "Reply to any <code>.zip</code>, <code>.rar</code>, <code>.7z</code> or <code>.tar</code> archive with <code>/extract</code> to unpack and download all files!",
+            reply_parameters=ReplyParameters(message_id=message.id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        )
+
+    file = reply_msg.document
+    filename = file.file_name or "archive.zip"
+    ms = await message.reply_text("⏳ <b>Downloading archive for extraction...</b>", quote=True)
+
+    from plugins.file_rename import get_optimal_work_dir, ACTIVE_WORK_DIRS
+    work_dir = get_optimal_work_dir(message.from_user.id, file.file_size)
+    extract_dir = os.path.join(work_dir, "extracted")
+    os.makedirs(extract_dir, exist_ok=True)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    archive_path = os.path.join(work_dir, filename)
+
+    try:
+        start_time = time.time()
+        await fast_download(
+            client=client,
+            message_or_file=reply_msg,
+            file_path=archive_path,
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴀʀᴄʜɪᴠᴇ... 📥</b>", ms, start_time, client, 0)
+        )
+
+        await ms.edit("<b>◈ ᴇxᴛʀᴀᴄᴛɪɴɢ ᴀʀᴄʜɪᴠᴇ ᴄᴏɴᴛᴇɴᴛꜱ... 📦</b>")
+        lower_name = filename.lower()
+        extracted = False
+
+        if lower_name.endswith(".zip") and zipfile.is_zipfile(archive_path):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(extract_dir)
+            extracted = True
+        elif lower_name.endswith((".tar", ".tar.gz", ".tgz")):
+            with tarfile.open(archive_path, "r:*") as tf:
+                tf.extractall(extract_dir)
+            extracted = True
+        elif shutil.which("7z"):
+            proc = await asyncio.create_subprocess_exec("7z", "x", archive_path, f"-o{extract_dir}", "-y")
+            await proc.communicate()
+            extracted = True
+        elif shutil.which("unrar") and lower_name.endswith(".rar"):
+            proc = await asyncio.create_subprocess_exec("unrar", "x", "-y", archive_path, extract_dir)
+            await proc.communicate()
+            extracted = True
+
+        if not extracted:
+            return await ms.edit("❌ <b>Unsupported archive format or extractor missing!</b>")
+
+        # Gather extracted files (up to 20 files)
+        out_files = []
+        for root, _, files in os.walk(extract_dir):
+            for f in files:
+                out_files.append(os.path.join(root, f))
+
+        if not out_files:
+            return await ms.edit("⚠️ <b>No files found inside archive!</b>")
+
+        await ms.edit(f"<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ {len(out_files[:15])} ᴇxᴛʀᴀᴄᴛᴇᴅ ꜰɪʟᴇꜱ... 🚀</b>")
+        for fp in out_files[:15]:
+            fn = os.path.basename(fp)
+            try:
+                await client.send_document(
+                    chat_id=message.chat.id,
+                    document=fp,
+                    file_name=fn,
+                    caption=f"📦 <code>{fn}</code>"
+                )
+            except Exception:
+                pass
+
+        await ms.delete()
+
+    except Exception as e:
+        await ms.edit(f"❌ <b>Extraction failed:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_message(filters.private & filters.command(["zip", "pack"]))
+async def archive_pack_cmd(client, message):
+    reply_msg = message.reply_to_message
+    if not reply_msg or not (reply_msg.document or reply_msg.video or reply_msg.audio):
+        return await message.reply_text(
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   🗜️ <b>ZIP File Packer</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "◈ <b>How to use:</b>\n"
+            "Reply to any file with <code>/zip</code> to compress it into a clean <code>.zip</code> archive!",
+            reply_parameters=ReplyParameters(message_id=message.id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        )
+
+    file = reply_msg.document or reply_msg.video or reply_msg.audio
+    filename = file.file_name or "file.dat"
+    ms = await message.reply_text("⏳ <b>Downloading file to compress...</b>", quote=True)
+
+    from plugins.file_rename import get_optimal_work_dir, ACTIVE_WORK_DIRS
+    work_dir = get_optimal_work_dir(message.from_user.id, file.file_size)
+    ACTIVE_WORK_DIRS.add(os.path.abspath(work_dir))
+    in_path = os.path.join(work_dir, filename)
+    zip_name = f"{os.path.splitext(filename)[0]}.zip"
+    zip_path = os.path.join(work_dir, zip_name)
+
+    try:
+        start_time = time.time()
+        await fast_download(
+            client=client,
+            message_or_file=reply_msg,
+            file_path=in_path,
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, 0)
+        )
+
+        await ms.edit("<b>◈ ᴄᴏᴍᴘʀᴇꜱꜱɪɴɢ ɪɴᴛᴏ ᴢɪᴘ... 🗜️</b>")
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.write(in_path, arcname=filename)
+
+        up_start = time.time()
+        await ms.edit("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ᴢɪᴘ ᴀʀᴄʜɪᴠᴇ... 🚀</b>")
+        await client.send_document(
+            chat_id=message.chat.id,
+            document=zip_path,
+            file_name=zip_name,
+            caption=f"✅ <b>Packed into ZIP Archive!</b>\n\n🏷 <code>{zip_name}</code>",
+            progress=progress_for_pyrogram,
+            progress_args=("<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ᴢɪᴘ ᴀʀᴄʜɪᴠᴇ... 🚀</b>", ms, up_start, client, 0)
+        )
+        await ms.delete()
+
+    except Exception as e:
+        await ms.edit(f"❌ <b>ZIP compression failed:</b> <code>{e}</code>")
+    finally:
+        ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_message(filters.private & filters.command(["template", "epformat"]))
+async def episode_template_cmd(client, message):
+    user_id = message.from_user.id
+    cmd_parts = message.text.split(maxsplit=1)
+
+    if len(cmd_parts) < 2:
+        curr = await db.get_template(user_id)
+        return await message.reply_text(
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   🏷️ <b>Episode Template</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"◈ <b>Current:</b> <code>{curr or 'Not Set (Default)'}</code>\n\n"
+            "◈ <b>How to set:</b>\n"
+            "<code>/template {title} - S{season:02d}E{episode:02d} [{quality}]</code>\n\n"
+            "◈ <b>Tokens:</b> <code>{title}</code>, <code>{season}</code>, <code>{episode}</code>, <code>{quality}</code>\n"
+            "◈ <b>Clear:</b> <code>/template clear</code>",
+            reply_parameters=ReplyParameters(message_id=message.id),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        )
+
+    val = cmd_parts[1].strip()
+    if val.lower() == "clear":
+        await db.set_template(user_id, None)
+        await message.reply_text("✅ <b>Episode template cleared! Default naming restored.</b>")
+    else:
+        await db.set_template(user_id, val)
+        await message.reply_text(
+            f"✅ <b>Episode template updated successfully!</b>\n\n"
+            f"<code>{val}</code>",
+            reply_parameters=ReplyParameters(message_id=message.id)
+        )

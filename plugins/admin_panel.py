@@ -1433,7 +1433,8 @@ async def cb_owner_channels(client, query: CallbackQuery):
 # ==================== COMPREHENSIVE BOT & SERVER STATS ====================
 
 async def build_admin_stats_view(client: Client):
-    uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(time.time() - (Config.BOT_UPTIME or time.time())))
+    uptime_sec = time.time() - (Config.BOT_UPTIME or time.time())
+    uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(uptime_sec))
     total_users = await _safe(db.total_users_count(), default=0)
     usage = await _safe(db.get_global_usage(), default={})
     banned = await _safe(db.get_banned_users(), default=[])
@@ -1441,31 +1442,43 @@ async def build_admin_stats_view(client: Client):
     total_disk, used_disk, free_disk = shutil.disk_usage(".")
     cpu = psutil.cpu_percent(interval=0.1)
     ram = psutil.virtual_memory().percent
-    has_4gb = "Connected 🟢" if getattr(client, "app_4gb", None) else "Disabled 🔴"
+
+    shm_free_str = "N/A"
+    if os.path.exists('/dev/shm'):
+        try:
+            _, _, free_shm = shutil.disk_usage('/dev/shm')
+            shm_free_str = get_readable_file_size(free_shm)
+        except Exception:
+            pass
 
     from plugins.file_rename import ACTIVE_USER_TASKS
     active_tasks = sum(ACTIVE_USER_TASKS.values()) if ACTIVE_USER_TASKS else 0
 
+    # Next cloud handoff countdown (at 5h 15m = 18900s)
+    if uptime_sec < 18900:
+        rem_sec = int(18900 - uptime_sec)
+        handoff_str = f"{rem_sec // 3600}h {(rem_sec % 3600) // 60}m"
+    else:
+        handoff_str = "Drain Mode Active 🔄"
+
+    has_4gb = "Connected 🟢" if getattr(client, "app_4gb", None) else "Disabled 🔴"
+
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   📊 <b>Server & Bot Statistics</b>\n"
+        "┃   📊 <b>NeX Telemetry Dashboard</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>Total Users :</b> <code>{total_users}</code>\n"
-        f"◈ <b>VIP Users :</b> <code>{usage.get('total_premium', 0)}</code> "
+        f"◈ <b>Users :</b> <code>{total_users}</code> | <b>Banned :</b> <code>{len(banned)}</code>\n"
+        f"◈ <b>VIPs :</b> <code>{usage.get('total_premium', 0)}</code> "
         f"(🥈{usage.get('silver_users', 0)} 🥇{usage.get('gold_users', 0)} 💎{usage.get('diamond_users', 0)})\n"
-        f"◈ <b>Banned :</b> <code>{len(banned)}</code> | <b>Tasks :</b> <code>{active_tasks}</code>\n\n"
-        "📈 <b>Bot Activity Stats:</b>\n"
-        f"  • 📁 Renamed : <code>{usage.get('global_files', 0)}</code> ({humanbytes(usage.get('global_bytes', 0))})\n"
-        f"  • 🎬 Samples : <code>{usage.get('global_samples', 0)}</code>\n"
-        f"  • 📸 Shots : <code>{usage.get('global_screenshots', 0)}</code>\n"
-        f"  • 💧 Watermarks : <code>{usage.get('global_watermarks', 0)}</code>\n"
-        f"  • 🏷️ Metadata : <code>{usage.get('global_metadata', 0)}</code>\n"
-        f"  • 🎁 Referrals : <code>{usage.get('global_referrals', 0)}</code>\n\n"
-        "🖥️ <b>Server Health:</b>\n"
-        f"  • CPU : <code>{cpu}%</code> | RAM : <code>{ram}%</code>\n"
-        f"  • Free Disk : <code>{get_readable_file_size(free_disk)}</code>\n"
-        f"  • Uptime : <code>{uptime}</code>\n"
-        f"  • 4GB Client : <code>{has_4gb}</code>\n\n"
+        f"◈ <b>Active Tasks :</b> <code>{active_tasks}</code> | <b>4GB App :</b> <code>{has_4gb}</code>\n\n"
+        "🚀 <b>Speed Engine & Hardware:</b>\n"
+        "  • Engine: <code>uvloop + TgCrypto + 64 Workers</code>\n"
+        f"  • RAM: <code>{ram}%</code> | CPU: <code>{cpu}%</code>\n"
+        f"  • RAM-Disk: <code>{shm_free_str} Free</code>\n"
+        f"  • Free SSD: <code>{get_readable_file_size(free_disk)}</code>\n"
+        f"  • Uptime: <code>{uptime}</code>\n"
+        f"  • Relay Handoff: <code>{handoff_str}</code>\n\n"
+        f"📁 Renamed: <code>{usage.get('global_files', 0)}</code> ({humanbytes(usage.get('global_bytes', 0))})\n\n"
         "⚡ @Nex_bots | 💬 @NexCRSupportbot"
     )
 

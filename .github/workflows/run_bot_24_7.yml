@@ -19,13 +19,15 @@ jobs:
       contents: read
 
     steps:
-      - name: 72GB SSD & 8GB Swap RAM Shield
+      - name: 100GB+ SSD, 8GB Swap RAM Shield & 8GB RAM-Disk
         run: |
-          echo "🛡️ Freeing up disk space for 72GB+ free SSD..."
+          echo "🛡️ Freeing up disk space for 100GB+ free SSD..."
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
 
           echo "🛡️ Allocating 8GB Swap RAM file (24GB total memory pool)..."
           sudo swapoff -a || true
@@ -34,8 +36,12 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
 
-          echo "✅ Storage & Memory Shield Active:"
+          echo "🚀 Remounting /dev/shm with 8GB RAM Disk for 3+ GB/s I/O..."
+          sudo mount -o remount,size=8G /dev/shm || true
+
+          echo "✅ Storage, Swap & RAM-Disk Active:"
           df -h /
+          df -h /dev/shm
           free -h
 
       - name: Checkout Code
@@ -44,7 +50,7 @@ jobs:
       - name: Install System Dependencies & FFmpeg
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg psmisc aria2 curl build-essential python3-dev
+          sudo apt-get install -y -qq ffmpeg psmisc aria2 curl build-essential python3-dev p7zip-full unrar
 
       - name: Set up Python 3.11 with Pip Cache
         uses: actions/setup-python@v5
@@ -123,14 +129,16 @@ jobs:
           DISK_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
           RAM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
           SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
+          RAM_DISK=$(df -h /dev/shm | awk 'NR==2 {print $2}')
 
           UVLOOP_STATUS=$(python3 -c "import uvloop; print('Active ⚡ (C++ Loop)')" 2>/dev/null || echo "Not Active ❌")
           TGCRYPTO_STATUS=$(python3 -c "import tgcrypto; print('Active ⚡ (C++ AES)')" 2>/dev/null || echo "Not Active ❌")
 
           STARTUP_ALERT="🚀 <b><u>NeX 4GB Rename Bot — 24/7 Runner Online</u></b> ⚡\n\n"
           STARTUP_ALERT+="🖥️ <b>Host :</b> GitHub Actions (Ubuntu)\n"
-          STARTUP_ALERT+="💾 <b>Free SSD :</b> <code>${DISK_FREE} / ${DISK_TOTAL} (72GB+ Shield)</code>\n"
+          STARTUP_ALERT+="💾 <b>Free SSD :</b> <code>${DISK_FREE} / ${DISK_TOTAL} (100GB+ Shield)</code>\n"
           STARTUP_ALERT+="🧠 <b>Memory Pool :</b> <code>${RAM_TOTAL} RAM + ${SWAP_TOTAL} Swap (24GB)</code>\n"
+          STARTUP_ALERT+="🚀 <b>RAM-Disk :</b> <code>${RAM_DISK} (/dev/shm 3+ GB/s I/O)</code>\n"
           STARTUP_ALERT+="⚡ <b>Event Loop :</b> <code>${UVLOOP_STATUS}</code>\n"
           STARTUP_ALERT+="🔐 <b>TgCrypto :</b> <code>${TGCRYPTO_STATUS}</code>\n"
           STARTUP_ALERT+="⏱️ <b>Job Window :</b> <code>5 Hours 25 Minutes (19,500s)</code>\n\n"
