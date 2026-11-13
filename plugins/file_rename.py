@@ -4,10 +4,14 @@ import re
 import shutil
 import asyncio
 import mimetypes
+import warnings
 import humanize
 import pytz
 from datetime import datetime
 from PIL import Image
+
+warnings.filterwarnings("ignore", message=".*reply_to_message_id.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="pyrogram")
 
 from pyrogram import Client, filters
 from pyrogram.enums import MessageMediaType
@@ -16,13 +20,16 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     ForceReply,
     InputMediaPhoto,
-    CallbackQuery
+    CallbackQuery,
+    ReplyParameters
 )
 from pyrogram.file_id import FileId
 try:
     from pyrogram import StopTransmission
 except ImportError:
     from pyrogram.errors import StopTransmission
+
+from helper.fast_telethon_pyro import fast_download
 
 from helper.utils import (
     progress_for_pyrogram,
@@ -245,7 +252,7 @@ async def rename_start(client, message):
 
     await message.reply_text(
         text=media_info_text,
-        reply_to_message_id=message.id,
+        reply_parameters=ReplyParameters(message_id=message.id),
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
@@ -291,12 +298,12 @@ async def auto_rename_handler(client, update: CallbackQuery):
 
 @Client.on_callback_query(filters.regex('^rename$'))
 async def rename_handler(client, update: CallbackQuery):
-    msg_id = update.message.reply_to_message_id
+    msg_id = getattr(update.message.reply_to_message, "id", None) or getattr(update.message, "reply_to_message_id", None)
     await update.message.delete()
     await update.message.reply_text(
         "<b>◈ ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ɴᴇᴡ ꜰɪʟᴇ ɴᴀᴍᴇ...</b>\n\n"
         "<i>(You can omit the extension; the original extension will be preserved automatically.)</i>",
-        reply_to_message_id=msg_id,
+        reply_parameters=ReplyParameters(message_id=msg_id) if msg_id else None,
         reply_markup=ForceReply(True)
     )
 
@@ -335,7 +342,7 @@ async def refunc(client, message):
         if upload_mode in ["Document", "Video", "Audio"]:
             prompt_msg = await message.reply(
                 text=f"**Processing With Default Mode ({upload_mode})...**\n\n**File Name :-** `{final_name}`",
-                reply_to_message_id=file_msg.id
+                reply_parameters=ReplyParameters(message_id=file_msg.id)
             )
             # Create a mock callback object to execute the pipeline cleanly
             class MockCallback:
@@ -355,7 +362,7 @@ async def refunc(client, message):
 
         await message.reply(
             text=f"**Select The Output File Type**\n\n**File Name :-** `{final_name}`",
-            reply_to_message_id=file_msg.id,
+            reply_parameters=ReplyParameters(message_id=file_msg.id),
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
@@ -553,15 +560,33 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
         await ms.edit("<b>◈ ꜰɪʟᴇ ʀᴇɴᴀᴍᴇ ᴍᴏᴅᴇ: ᴇɴɢᴀɢɪɴɢ! 💠</b>")
 
         try:
-            # 1. Download media with live progress bar and cancellation hook
+            # 1. Download media via parallel MTProto chunk streaming (40-80+ MB/s) with safe fallback
             try:
                 start_time = time.time()
-                path = await client.download_media(
-                    message=file_msg,
-                    file_name=file_path,
-                    progress=progress_for_pyrogram,
-                    progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
-                )
+                downloader = client
+                # Route downloads through 4GB Telegram Premium Client if active & file > 500MB
+                if client_4gb and getattr(client_4gb, "is_connected", False) and (file_size > 500 * 1024 * 1024 or is_4gb):
+                    downloader = client_4gb
+
+                try:
+                    path = await fast_download(
+                        client=downloader,
+                        message_or_file=file_msg,
+                        file_path=file_path,
+                        progress=progress_for_pyrogram,
+                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                    )
+                except Exception as down_err:
+                    if downloader != client:
+                        path = await fast_download(
+                            client=client,
+                            message_or_file=file_msg,
+                            file_path=file_path,
+                            progress=progress_for_pyrogram,
+                            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                        )
+                    else:
+                        raise down_err
             except StopTransmission:
                 if os.path.exists(work_dir):
                     shutil.rmtree(work_dir, ignore_errors=True)
@@ -749,7 +774,7 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         warn_msg = await client.send_message(
                             chat_id=user_id,
                             text=warn_text,
-                            reply_to_message_id=target_msg_id
+                            reply_parameters=ReplyParameters(message_id=target_msg_id)
                         )
                         user_sent_msgs.append(warn_msg.id)
                     except Exception:
@@ -803,7 +828,7 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         warn_msg = await client.send_message(
                             chat_id=user_id,
                             text=warn_text,
-                            reply_to_message_id=sent_msg.id
+                            reply_parameters=ReplyParameters(message_id=sent_msg.id)
                         )
                         user_sent_msgs.append(warn_msg.id)
                     except Exception:

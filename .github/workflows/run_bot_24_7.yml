@@ -90,6 +90,16 @@ jobs:
           "
           chmod 600 .env
 
+      - name: Linux TCP BBR & Socket Buffer Optimization
+        run: |
+          echo "⚡ Tuning Linux TCP stack for Gigabit WAN throughput to Telegram DCs..."
+          sudo sysctl -w net.core.rmem_max=67108864 || true
+          sudo sysctl -w net.core.wmem_max=67108864 || true
+          sudo sysctl -w net.ipv4.tcp_rmem="4096 87380 67108864" || true
+          sudo sysctl -w net.ipv4.tcp_wmem="4096 65536 67108864" || true
+          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr || true
+          echo "✅ TCP BBR and 64MB socket buffers optimized."
+
       - name: Run NeX Bot for 5h 25m (19500s) with Live Telegram Alerts
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}

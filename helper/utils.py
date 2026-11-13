@@ -15,8 +15,9 @@ SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
 # Global set to track active operations marked for cancellation
 CANCEL_REQUESTS = set()
-# Global dict to track progress edit timestamps for strictly 4.0s throttling
+# Global dicts to track progress edit timestamps and percentages for strictly 5.0s (min 2%) throttling
 PROGRESS_TIMESTAMPS = {}
+PROGRESS_PERCENTAGES = {}
 
 
 def get_readable_file_size(size_in_bytes) -> str:
@@ -46,10 +47,10 @@ def get_readable_time(seconds: int) -> str:
 
 
 TIER_SPEED_LIMITS = {
-    0: 3.5 * 1024 * 1024,   # 3.5 MB/s Free
-    1: 12.0 * 1024 * 1024,  # 12 MB/s Silver
-    2: 25.0 * 1024 * 1024,  # 25 MB/s Gold
-    3: 0                    # Unlimited Diamond / Owner
+    0: 0,   # Full High-Speed (40-80+ MB/s)
+    1: 0,
+    2: 0,
+    3: 0
 }
 
 
@@ -61,40 +62,30 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
 
     if msg_id in CANCEL_REQUESTS or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS)):
         PROGRESS_TIMESTAMPS.pop(key, None)
+        PROGRESS_PERCENTAGES.pop(key, None)
         raise StopTransmission("Operation Cancelled by User")
-
-    # Tier-based speed throttling
-    max_speed = TIER_SPEED_LIMITS.get(tier, 3.5 * 1024 * 1024)
-    if max_speed > 0 and current > 0:
-        elapsed = time.time() - start
-        expected_min_time = current / max_speed
-        if elapsed < expected_min_time:
-            delay = min(expected_min_time - elapsed, 1.5)
-            if delay > 0.05:
-                await asyncio.sleep(delay)
 
     now = time.time()
     last_update = PROGRESS_TIMESTAMPS.get(key, 0)
-    # Strictly throttle UI progress edits to once every 4.0 seconds or upon completion
-    if (now - last_update >= 4.0) or (current == total):
+    last_pct = PROGRESS_PERCENTAGES.get(key, -1.0)
+    percentage = (current * 100 / total) if (total and total > 0) else 0
+    pct_diff = abs(percentage - last_pct)
+
+    # Strictly throttle UI progress edits to once every 5.0 seconds (or min 2% change) or upon completion
+    if ((now - last_update >= 5.0 and pct_diff >= 2.0) or (now - last_update >= 10.0) or (current == total)):
         PROGRESS_TIMESTAMPS[key] = now
+        PROGRESS_PERCENTAGES[key] = percentage
         diff = max(now - start, 0.001)
-        percentage = (current * 100 / total) if (total and total > 0) else 0
         speed = (current / diff) if diff > 0 else 0
         elapsed_time = round(diff) * 1000
         time_to_completion = (round((total - current) / speed) * 1000) if speed > 0 else 0
-        estimated_total_time = elapsed_time + time_to_completion
 
         elapsed_str = TimeFormatter(milliseconds=elapsed_time)
         eta_str = TimeFormatter(milliseconds=time_to_completion) if speed > 0 else "0s"
 
         completed_blocks = math.floor(percentage / 5)
         progress = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
-
-        if tier == 0:
-            speed_txt = f"{humanbytes(speed)}/s (Free: 3.5M/s)"
-        else:
-            speed_txt = f"{humanbytes(speed)}/s"
+        speed_txt = f"{humanbytes(speed)}/s"
 
         status_text = (
             f"<b>{ud_type}</b>\n\n"
@@ -117,6 +108,7 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
 
         if current == total:
             PROGRESS_TIMESTAMPS.pop(key, None)
+            PROGRESS_PERCENTAGES.pop(key, None)
 
 
 def humanbytes(size):    
