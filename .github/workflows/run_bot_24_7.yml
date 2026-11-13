@@ -1,0 +1,127 @@
+name: NeX 4GB Rename Bot 24/7 Production Runner
+
+'on':
+  workflow_dispatch:
+  schedule:
+    - cron: '30 */5 * * *'
+  repository_dispatch:
+    types: [restart_bot]
+
+concurrency:
+  group: nex-4gb-rename-bot-production
+  cancel-in-progress: true
+
+jobs:
+  run-bot:
+    name: Run NeX Bot 24/7
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    permissions:
+      actions: write
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg & System Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg psmisc
+
+      - name: Set up Python 3.11 with Pip Cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install -q --upgrade pip
+          pip install -q -r requirements.txt
+
+      - name: Generate .env File Safely from GitHub Secrets
+        env:
+          API_ID: ${{ secrets.API_ID || '26154211' }}
+          API_HASH: ${{ secrets.API_HASH || '89baf3e48959d2f0584a0071f0d5dfc4' }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          STRING_SESSION: ${{ secrets.STRING_SESSION }}
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_NAME: ${{ secrets.DB_NAME || 'NeX_4GB_Rename_Bot' }}
+          ADMIN: ${{ secrets.ADMIN || '6059191947' }}
+          LOG_CHANNEL: ${{ secrets.LOG_CHANNEL || '-1002216632939' }}
+          FILES_CHANNEL: ${{ secrets.FILES_CHANNEL || '-1002216632939' }}
+          START_PIC: ${{ secrets.START_PIC || 'https://graph.org/file/8ce9f483c987c2635d3da-8d76ae56d500a868e7.jpg' }}
+          FORCE_SUB: ${{ secrets.FORCE_SUB || 'Nex_bots' }}
+          OWNER_ONLY: ${{ secrets.OWNER_ONLY || 'True' }}
+          WEBHOOK: "False"
+          PORT: "8090"
+        run: |
+          python3 -c "
+          import os
+          keys = [
+              'API_ID', 'API_HASH', 'BOT_TOKEN', 'STRING_SESSION',
+              'DB_URL', 'DB_NAME', 'ADMIN', 'LOG_CHANNEL', 'FILES_CHANNEL',
+              'START_PIC', 'FORCE_SUB', 'OWNER_ONLY', 'WEBHOOK', 'PORT'
+          ]
+          with open('.env', 'w', encoding='utf-8') as f:
+              for k in keys:
+                  v = os.environ.get(k, '')
+                  f.write(f'{k}={v}\n')
+          print('✅ Production .env generated successfully.')
+          "
+          chmod 600 .env
+
+      - name: Run Bot for 5 Hours 25 Minutes (19500s) with Auto-Restart Supervisor
+        run: |
+          START_TIME=$(date +%s)
+          MAX_RUNTIME=19500
+
+          echo "=========================================================="
+          echo "🚀 NeX 4GB Rename Bot 24/7 Production Runner Initiated"
+          echo "⏱️ Max Execution Window: ${MAX_RUNTIME} seconds (5h 25m)"
+          echo "=========================================================="
+
+          while true; do
+            NOW=$(date +%s)
+            ELAPSED=$((NOW - START_TIME))
+
+            if [ $ELAPSED -ge $MAX_RUNTIME ]; then
+              echo "⏱️ Reached 5h 25m execution limit (${ELAPSED}s elapsed)."
+              echo "🔄 Initiating clean runner handoff sequence..."
+              break
+            fi
+
+            REMAINING=$((MAX_RUNTIME - ELAPSED))
+            echo "⚡ [Supervisor] Starting Bot process (Elapsed: ${ELAPSED}s | Remaining: ${REMAINING}s)..."
+
+            # Run bot with timeout for the remaining window
+            timeout -s SIGTERM -k 15s "${REMAINING}s" python3 -u bot.py || true
+
+            NOW=$(date +%s)
+            ELAPSED=$((NOW - START_TIME))
+            if [ $ELAPSED -ge $MAX_RUNTIME ]; then
+              echo "⏱️ 5h 25m window concluded. Preparing next runner..."
+              break
+            fi
+
+            echo "⚠️ [Supervisor] Bot process stopped unexpectedly before 5h 25m limit."
+            echo "🔄 Auto-restarting in 2 seconds..."
+            sleep 2
+          done
+
+      - name: Auto-Trigger Next Workflow Run
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔄 Triggering next 24/7 runner handoff via GitHub CLI..."
+          gh workflow run run_bot_24_7.yml --ref main || {
+            echo "⚠️ Fallback to GitHub REST API dispatch..."
+            curl -s -X POST \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/run_bot_24_7.yml/dispatches" \
+              -d '{"ref":"main"}' || true
+          }
+          echo "✅ Next runner dispatch completed."
