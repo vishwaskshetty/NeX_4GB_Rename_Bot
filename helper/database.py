@@ -17,8 +17,8 @@ TIER_NAMES = {
 
 TIER_LIMITS = {
     0: {"max_file_size": 2 * 1024 * 1024 * 1024, "daily_bytes": 20 * 1024 * 1024 * 1024, "concurrency": 1, "queue_limit": 3, "max_speed": 0},
-    1: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 50 * 1024 * 1024 * 1024, "concurrency": 4, "queue_limit": 15, "max_speed": 0},
-    2: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 150 * 1024 * 1024 * 1024, "concurrency": 4, "queue_limit": 15, "max_speed": 0},
+    1: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 50 * 1024 * 1024 * 1024, "concurrency": 2, "queue_limit": 5, "max_speed": 0},
+    2: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 150 * 1024 * 1024 * 1024, "concurrency": 3, "queue_limit": 10, "max_speed": 0},
     3: {"max_file_size": 4 * 1024 * 1024 * 1024, "daily_bytes": 1024 * 1024 * 1024 * 1024 * 100, "concurrency": 4, "queue_limit": 15, "max_speed": 0},
 }
 
@@ -1382,7 +1382,10 @@ class Database:
             "prem_concurrency": int(cfg.get("prem_concurrency", 4)),
             "trial_enabled": bool(cfg.get("trial_enabled", True)),
             "trial_days": int(cfg.get("trial_days", 3)),
-            "base_month_price_inr": int(cfg.get("base_month_price_inr", 139)),
+            "plan_1_base_inr": int(cfg.get("plan_1_base_inr", 99)),
+            "plan_2_base_inr": int(cfg.get("plan_2_base_inr", 139)),
+            "plan_3_base_inr": int(cfg.get("plan_3_base_inr", 199)),
+            "base_month_price_inr": int(cfg.get("base_month_price_inr", cfg.get("plan_2_base_inr", 139))),
             "ram_disk_enabled": bool(cfg.get("ram_disk_enabled", True)),
             "session_upload_enabled": bool(cfg.get("session_upload_enabled", True)),
             "auto_sample_enabled": bool(cfg.get("auto_sample_enabled", True)),

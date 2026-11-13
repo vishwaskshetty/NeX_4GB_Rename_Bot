@@ -79,7 +79,14 @@ def calc_plan_prices(months: int, base_inr: int = 139):
     
     inr = max(1, round(base_inr * months * (1.0 - discount)))
     stars = max(1, round((inr * 100) / 199))
-    usd = round(inr / 84.0, 2)
+    if inr == 199 and months == 1:
+        usd = 2.39
+    elif inr == 99 and months == 1:
+        usd = 1.18
+    elif inr == 139 and months == 1:
+        usd = 1.65
+    else:
+        usd = round(inr / 84.0, 2)
     return inr, stars, usd
 
 # Global set to track active operations marked for cancellation

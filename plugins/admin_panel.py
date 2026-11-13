@@ -1289,25 +1289,31 @@ async def owner_state_input_handler(client: Client, message: Message):
         except ValueError:
             return await message.reply_text("❌ <b>Invalid Price!</b> Please send a numeric integer.")
 
-    elif action == "set_base_price":
+    elif action in ["set_tier_base_price", "set_base_price"]:
+        tier = state.get("tier", 2)
         OWNER_STATE.pop(admin_id, None)
         try:
             val = int(input_text.replace("₹", "").replace("$", "").replace("⭐", "").strip())
             if val <= 0:
                 return await message.reply_text("❌ <b>Invalid Price!</b> Price must be greater than 0.")
-            await db.update_bot_settings(base_month_price_inr=val)
+            update_kw = {f"plan_{tier}_base_inr": val}
+            if tier == 2:
+                update_kw["base_month_price_inr"] = val
+            await db.update_bot_settings(**update_kw)
             inr, stars, usd = calc_plan_prices(1, val)
+            t_names = {1: "Silver (Starter)", 2: "Gold (Pro)", 3: "Diamond (VIP Ultimate)"}
+            t_name = t_names.get(tier, f"Tier {tier}")
             return await message.reply_text(
-                f"💎 <b>Base Month Price Updated!</b>\n\n"
+                f"💎 <b>{t_name} Base Price Updated!</b>\n\n"
                 f"◈ <b>1 Month Base INR :</b> <code>₹{val}</code>\n"
                 f"◈ <b>Calculated Stars :</b> <code>{stars} ⭐</code>\n"
                 f"◈ <b>Calculated USD :</b> <code>${usd:.2f}</code>\n\n"
-                f"<i>All dynamic plans (1–24 months) will now use this base rate.</i>\n\n"
+                f"<i>All dynamic durations (1–24 months) for {t_name} will now use this rate.</i>\n\n"
                 f"⚡ @Nex_bots",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Pricing Panel", callback_data="cb_owner_pricing")]])
             )
         except ValueError:
-            return await message.reply_text("❌ <b>Invalid Price!</b> Please send a numeric integer (e.g. <code>139</code>).")
+            return await message.reply_text("❌ <b>Invalid Price!</b> Please send a numeric integer (e.g. <code>99</code>).")
 
     elif action == "reset_user_trial":
         OWNER_STATE.pop(admin_id, None)
@@ -1624,7 +1630,11 @@ async def build_health_report(client: Client):
         except Exception:
             pass
 
-    from plugins.file_rename import ACTIVE_USER_TASKS, USER_QUEUE
+    try:
+        from plugins.file_rename import ACTIVE_USER_TASKS, USER_QUEUE
+    except (ImportError, Exception):
+        ACTIVE_USER_TASKS = {}
+        USER_QUEUE = {}
     active_cnt = sum(ACTIVE_USER_TASKS.values()) if ACTIVE_USER_TASKS else 0
     queued_cnt = sum(len(q) for q in USER_QUEUE.values()) if USER_QUEUE else 0
     db_tasks_cnt = await _safe(db.tasks.count_documents({}), default=0)
@@ -1678,7 +1688,7 @@ async def cb_owner_reset_stuck(client: Client, query: CallbackQuery):
         from plugins.file_rename import ACTIVE_USER_TASKS, USER_QUEUE
         ACTIVE_USER_TASKS.clear()
         USER_QUEUE.clear()
-    except Exception:
+    except (ImportError, Exception):
         pass
     await query.answer("All active queues and pending tasks cleared! 🧹", show_alert=True)
     text, markup = await build_health_report(client)
@@ -1689,75 +1699,46 @@ async def cb_owner_reset_stuck(client: Client, query: CallbackQuery):
 
 async def build_owner_pricing_panel():
     settings = await db.get_bot_settings()
-    base_inr = settings.get("base_month_price_inr", 139)
-    inr_1, stars_1, usd_1 = calc_plan_prices(1, base_inr)
-    inr_3, stars_3, usd_3 = calc_plan_prices(3, base_inr)
-    inr_6, stars_6, usd_6 = calc_plan_prices(6, base_inr)
-    inr_12, stars_12, usd_12 = calc_plan_prices(12, base_inr)
+    p1_inr = settings.get("plan_1_base_inr", 99)
+    p2_inr = settings.get("plan_2_base_inr", 139)
+    p3_inr = settings.get("plan_3_base_inr", 199)
+
+    p1_stars = max(1, round((p1_inr * 100) / 199))
+    p1_usd = round(p1_inr / 84.0, 2)
+
+    p2_stars = max(1, round((p2_inr * 100) / 199))
+    p2_usd = round(p2_inr / 84.0, 2)
+
+    p3_stars = max(1, round((p3_inr * 100) / 199))
+    p3_usd = round(p3_inr / 84.0, 2)
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   💎 <b>Dynamic Premium Pricing</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>Base 1-Month Price :</b> <code>₹{base_inr}</code>\n"
-        f"  (Auto-Calc: <code>{stars_1} ⭐</code> | <code>${usd_1:.2f}</code>)\n\n"
-        "<b>Sample Duration Rates:</b>\n"
-        f"◈ <b>1 Month  :</b> ₹{inr_1} | {stars_1} ⭐ | ${usd_1:.2f}\n"
-        f"◈ <b>3 Months :</b> ₹{inr_3} | {stars_3} ⭐ | ${usd_3:.2f}\n"
-        f"◈ <b>6 Months :</b> ₹{inr_6} | {stars_6} ⭐ | ${usd_6:.2f}\n"
-        f"◈ <b>1 Year   :</b> ₹{inr_12} | {stars_12} ⭐ | ${usd_12:.2f}\n\n"
-        "<i>All dynamic plans (1–24 months) auto-calculate with volume discounts.</i>\n\n"
+        "╭━━━〔 💎 𝗢𝗪𝗡𝗘𝗥 𝗣𝗥𝗜𝗖𝗜𝗡𝗚 𝗘𝗗𝗜𝗧𝗢𝗥 〕━━━\n\n"
+        "🥈 <b>𝟭. 𝗦𝗜𝗟𝗩𝗘𝗥 𝗣𝗟𝗔𝗡 (𝗦𝘁𝗮𝗿𝘁𝗲𝗿)</b>\n"
+        f"┣ Base Rate : <code>₹{p1_inr}/mo</code>  |  <code>{p1_stars} ⭐</code>  |  <code>${p1_usd:.2f}</code>\n\n"
+        "🥇 <b>𝟮. 𝗚𝗢𝗟𝗗 𝗣𝗟𝗔𝗡 (𝗣𝗿𝗼)</b>\n"
+        f"┣ Base Rate : <code>₹{p2_inr}/mo</code>  |  <code>{p2_stars} ⭐</code>  |  <code>${p2_usd:.2f}</code>\n\n"
+        "💎 <b>𝟯. 𝗗𝗜𝗔𝗠𝗢𝗡𝗗 𝗣𝗟𝗔𝗡 (𝗩𝗜𝗣)</b>\n"
+        f"┣ Base Rate : <code>₹{p3_inr}/mo</code>  |  <code>{p3_stars} ⭐</code>  |  <code>${p3_usd:.2f}</code>\n\n"
+        "<i>Tap a tier button below to edit its 1-month base INR price. Stars & USD auto-sync.</i>\n\n"
         "⚡ @Nex_bots"
     )
 
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✏️ Edit Base Price", callback_data="cb_oprice_base_wiz")
+            InlineKeyboardButton("🥈 Edit Silver (₹)", callback_data="cb_oprice_edit_1"),
+            InlineKeyboardButton("🥇 Edit Gold (₹)", callback_data="cb_oprice_edit_2")
         ],
         [
-            InlineKeyboardButton("🚀 +30% Boost Base", callback_data="cb_oprice_boost"),
-            InlineKeyboardButton("🔄 Reset Default (₹139)", callback_data="cb_oprice_reset")
+            InlineKeyboardButton("💎 Edit Diamond (₹)", callback_data="cb_oprice_edit_3")
         ],
         [
-            InlineKeyboardButton("🥈 Silver", callback_data="cb_oprice_tier_1"),
-            InlineKeyboardButton("🥇 Gold", callback_data="cb_oprice_tier_2"),
-            InlineKeyboardButton("💎 Diamond", callback_data="cb_oprice_tier_3")
+            InlineKeyboardButton("🚀 +30% Boost All", callback_data="cb_oprice_boost"),
+            InlineKeyboardButton("🔄 Reset Defaults", callback_data="cb_oprice_reset")
         ],
         [
             InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
             InlineKeyboardButton("❌ Close", callback_data="close")
-        ]
-    ])
-    return text, markup
-
-
-async def build_tier_price_editor(tier: int):
-    pricing = await db.get_premium_pricing()
-    t_pricing = pricing.get(tier, {})
-    t_name = TIER_NAMES.get(tier, f"Tier {tier}")
-    
-    text = (
-        f"╭━━━━━━━━━━━━━━━━━━━╮\n"
-        f"┃   💎 <b>Edit {t_name} Prices</b>\n"
-        f"╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"Select a duration to modify price:\n\n"
-        f"◈ <b>30 Days :</b> ₹{t_pricing.get(30, {}).get('inr', 0)} / {t_pricing.get(30, {}).get('stars', 0)}⭐\n"
-        f"◈ <b>90 Days :</b> ₹{t_pricing.get(90, {}).get('inr', 0)} / {t_pricing.get(90, {}).get('stars', 0)}⭐\n"
-        f"◈ <b>180 Days :</b> ₹{t_pricing.get(180, {}).get('inr', 0)} / {t_pricing.get(180, {}).get('stars', 0)}⭐\n"
-        f"◈ <b>365 Days :</b> ₹{t_pricing.get(365, {}).get('inr', 0)} / {t_pricing.get(365, {}).get('stars', 0)}⭐\n\n"
-        f"⚡ @Nex_bots"
-    )
-    markup = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(f"30D (₹{t_pricing.get(30, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_30"),
-            InlineKeyboardButton(f"90D (₹{t_pricing.get(90, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_90")
-        ],
-        [
-            InlineKeyboardButton(f"180D (₹{t_pricing.get(180, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_180"),
-            InlineKeyboardButton(f"365D (₹{t_pricing.get(365, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_365")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Back to Pricing", callback_data="cb_owner_pricing")
         ]
     ])
     return text, markup
@@ -1770,49 +1751,63 @@ async def cb_owner_pricing_handler(client, query: CallbackQuery):
     await query.answer()
 
 
-@Client.on_callback_query(filters.regex(r"^cb_oprice_base_wiz$") & filters.user(Config.ADMIN))
-async def cb_oprice_base_wiz_handler(client, query: CallbackQuery):
-    OWNER_STATE[query.from_user.id] = {"action": "set_base_price"}
+@Client.on_callback_query(filters.regex(r"^(?:cb_oprice_edit_|cb_oprice_tier_)(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oprice_edit_tier_handler(client, query: CallbackQuery):
+    tier = int(query.matches[0].group(1))
+    tier = tier if tier in [1, 2, 3] else 2
+    t_names = {1: "Silver (Starter)", 2: "Gold (Pro)", 3: "Diamond (VIP)"}
+    t_name = t_names.get(tier, f"Tier {tier}")
     settings = await db.get_bot_settings()
-    curr_base = settings.get("base_month_price_inr", 139)
+    default_bases = {1: 99, 2: 139, 3: 199}
+    curr_inr = settings.get(f"plan_{tier}_base_inr", default_bases.get(tier, 139))
+    OWNER_STATE[query.from_user.id] = {"action": "set_tier_base_price", "tier": tier}
     text = (
-        "💎 <b><u>Set Base 1-Month INR Price</u></b>\n\n"
-        f"◈ <b>Current Base Price :</b> <code>₹{curr_base}</code>\n\n"
-        "Please send the new 1-month base price in INR as an integer (e.g. <code>149</code>):\n\n"
-        "<i>Stars and USD will automatically recalculate for all durations. Send /cancel to abort.</i>"
+        f"💎 <b><u>Set 1-Month Base Price for {t_name}</u></b>\n\n"
+        f"◈ <b>Current Price :</b> <code>₹{curr_inr}</code>\n\n"
+        f"Please send the new 1-month base price in INR as an integer (e.g. <code>{default_bases.get(tier, 139)}</code>):\n\n"
+        "<i>Telegram Stars and USD will automatically recalculate for all durations (1–24 months). Send /cancel to abort.</i>"
     )
     markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_pricing")]])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
 
 
+@Client.on_callback_query(filters.regex(r"^cb_oprice_base_wiz$") & filters.user(Config.ADMIN))
+async def cb_oprice_base_wiz_handler(client, query: CallbackQuery):
+    query.matches = [type("Match", (), {"group": lambda self, x: "2"})()]
+    await cb_oprice_edit_tier_handler(client, query)
+
+
 @Client.on_callback_query(filters.regex(r"^cb_oprice_boost$") & filters.user(Config.ADMIN))
 async def cb_oprice_boost_handler(client, query: CallbackQuery):
     settings = await db.get_bot_settings()
-    curr_base = settings.get("base_month_price_inr", 139)
-    new_base = max(1, round(curr_base * 1.30))
-    await db.update_bot_settings(base_month_price_inr=new_base)
+    p1 = max(1, round(settings.get("plan_1_base_inr", 99) * 1.30))
+    p2 = max(1, round(settings.get("plan_2_base_inr", 139) * 1.30))
+    p3 = max(1, round(settings.get("plan_3_base_inr", 199) * 1.30))
+    await db.update_bot_settings(
+        plan_1_base_inr=p1,
+        plan_2_base_inr=p2,
+        plan_3_base_inr=p3,
+        base_month_price_inr=p2
+    )
     await db.boost_all_prices_percent(30.0)
-    await query.answer(f"Base price boosted to ₹{new_base} (+30%)! 🚀", show_alert=True)
+    await query.answer("All 3 plans boosted by +30%! 🚀", show_alert=True)
     text, markup = await build_owner_pricing_panel()
     await edit_message_content(query.message, text, reply_markup=markup)
 
 
 @Client.on_callback_query(filters.regex(r"^cb_oprice_reset$") & filters.user(Config.ADMIN))
 async def cb_oprice_reset_handler(client, query: CallbackQuery):
-    await db.update_bot_settings(base_month_price_inr=139)
+    await db.update_bot_settings(
+        plan_1_base_inr=99,
+        plan_2_base_inr=139,
+        plan_3_base_inr=199,
+        base_month_price_inr=139
+    )
     await db.reset_pricing_defaults()
-    await query.answer("Pricing reset to default ₹139! 🔄", show_alert=True)
+    await query.answer("Pricing reset to defaults (₹99 / ₹139 / ₹199)! 🔄", show_alert=True)
     text, markup = await build_owner_pricing_panel()
     await edit_message_content(query.message, text, reply_markup=markup)
-
-
-@Client.on_callback_query(filters.regex(r"^cb_oprice_tier_(\d+)$") & filters.user(Config.ADMIN))
-async def cb_oprice_tier_handler(client, query: CallbackQuery):
-    tier = int(query.matches[0].group(1))
-    text, markup = await build_tier_price_editor(tier)
-    await edit_message_content(query.message, text, reply_markup=markup)
-    await query.answer()
 
 
 @Client.on_callback_query(filters.regex(r"^cb_oprice_set_(\d+)_(\d+)$") & filters.user(Config.ADMIN))

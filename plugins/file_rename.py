@@ -56,6 +56,7 @@ RENAME_SEMAPHORE = asyncio.Semaphore(10)
 
 # Per-user active task tracking & pre-rename extras cache
 ACTIVE_USER_TASKS = {}
+USER_QUEUE = {}
 PENDING_MEDIA_EXTRAS = {}
 ACTIVE_WORK_DIRS = set()
 USER_FILE_CONTEXT = {}
