@@ -33,38 +33,38 @@ PLAN_PRICING = {
     1: {
         "name": "Silver Plan",
         "badge": "🥈",
-        "speed": "12 MB/s",
-        "quota": "25 GB/Day",
-        "concurrency": 2,
-        "features": "4GB Support • 12 MB/s Speed • 25 GB/Day • Watermark & Meta • 2 Tasks",
-        30: {"inr": 79, "stars": 70},
-        90: {"inr": 199, "stars": 175},
-        180: {"inr": 349, "stars": 300},
-        365: {"inr": 599, "stars": 520},
+        "speed": "Turbo (40-80 MB/s)",
+        "quota": "50 GB/Day",
+        "concurrency": 4,
+        "features": "4GB Support • 40-80 MB/s Speed • 50 GB/Day • Watermark & Meta • 4 Tasks",
+        30: {"inr": 103, "stars": 103},
+        90: {"inr": 259, "stars": 259},
+        180: {"inr": 454, "stars": 454},
+        365: {"inr": 779, "stars": 779},
     },
     2: {
         "name": "Gold Plan",
         "badge": "🥇",
-        "speed": "25 MB/s",
-        "quota": "100 GB/Day",
-        "concurrency": 3,
-        "features": "4GB Support • 25 MB/s Speed • 100 GB/Day • Watermark, Sample & Priority • 3 Tasks",
-        30: {"inr": 129, "stars": 110},
-        90: {"inr": 329, "stars": 280},
-        180: {"inr": 599, "stars": 520},
-        365: {"inr": 999, "stars": 850},
+        "speed": "Turbo (40-80 MB/s)",
+        "quota": "150 GB/Day",
+        "concurrency": 4,
+        "features": "4GB Support • 40-80 MB/s Speed • 150 GB/Day • Watermark, Sample & Priority • 4 Tasks",
+        30: {"inr": 168, "stars": 168},
+        90: {"inr": 428, "stars": 428},
+        180: {"inr": 779, "stars": 779},
+        365: {"inr": 1299, "stars": 1299},
     },
     3: {
         "name": "Diamond VIP Plan",
         "badge": "💎",
         "speed": "Unlimited Max Speed",
         "quota": "Unlimited Daily Quota",
-        "concurrency": 5,
-        "features": "4GB Support • UNLIMITED Speed • UNLIMITED Daily Quota • All Features • 5 Tasks",
-        30: {"inr": 199, "stars": 175},
-        90: {"inr": 499, "stars": 430},
-        180: {"inr": 899, "stars": 780},
-        365: {"inr": 1499, "stars": 1250},
+        "concurrency": 4,
+        "features": "4GB Support • UNLIMITED Speed • UNLIMITED Daily Quota • All Features • 4 Tasks",
+        30: {"inr": 259, "stars": 259},
+        90: {"inr": 649, "stars": 649},
+        180: {"inr": 1169, "stars": 1169},
+        365: {"inr": 1949, "stars": 1949},
     }
 }
 
@@ -538,6 +538,17 @@ class Database:
         # Grant 3 days Level 2 Gold (4GB)
         await self.set_user_premium(user_id, tier=2, days=3, plan_name="Gold (3-Day Trial)")
         return True
+
+    async def reset_user_trial(self, user_id: int) -> bool:
+        """Resets a user's trial status allowing them to claim free trial again."""
+        await self.col.update_one({'_id': int(user_id)}, {'$set': {'trial_claimed': False}}, upsert=True)
+        await self.cfg.update_one({'_id': 'bot_settings'}, {'$pull': {'claimed_trial_ids': int(user_id)}}, upsert=True)
+        return True
+
+    async def reset_user_tasks(self, user_id: int) -> int:
+        """Deletes all active and queued tasks for a user from MongoDB and clears active counter."""
+        res = await self.tasks.delete_many({"user_id": int(user_id)})
+        return res.deleted_count
 
     # ==================== COUPON CODE SYSTEM ====================
 
@@ -1160,6 +1171,147 @@ class Database:
             return res.deleted_count
         except Exception:
             return 0
+
+    # ==================== DYNAMIC PRICING ENGINE ====================
+    async def get_premium_pricing(self) -> dict:
+        """Retrieves live pricing from MongoDB; defaults to PLAN_PRICING with 1:1 INR/Stars parity."""
+        import copy
+        doc = await self.cfg.find_one({'_id': 'premium_pricing'})
+        if not doc or not doc.get("pricing"):
+            return copy.deepcopy(PLAN_PRICING)
+        raw = doc.get("pricing", {})
+        parsed = {}
+        for tier_k, tier_v in raw.items():
+            t_int = int(tier_k)
+            parsed[t_int] = dict(tier_v)
+            for d_k, d_v in tier_v.items():
+                if str(d_k).isdigit():
+                    parsed[t_int][int(d_k)] = d_v
+        return parsed
+
+    async def set_plan_price(self, tier: int, days: int, price: int) -> bool:
+        """Sets a plan price with strict 1:1 parity between INR and Stars."""
+        import copy
+        pricing = await self.get_premium_pricing()
+        tier = int(tier)
+        days = int(days)
+        price = max(1, int(price))
+        if tier not in pricing:
+            pricing[tier] = copy.deepcopy(PLAN_PRICING.get(tier, {}))
+        if days not in pricing[tier]:
+            pricing[tier][days] = {}
+        pricing[tier][days]["inr"] = price
+        pricing[tier][days]["stars"] = price
+
+        db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in pricing.items()}
+        await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
+        return True
+
+    async def boost_all_prices_percent(self, percent: float = 30.0) -> dict:
+        """Boosts all plan prices by percent% and enforces strict 1:1 INR == Stars parity."""
+        pricing = await self.get_premium_pricing()
+        factor = 1.0 + (percent / 100.0)
+        for tier_k, tier_v in pricing.items():
+            for d_k in [30, 90, 180, 365]:
+                if d_k in tier_v and isinstance(tier_v[d_k], dict):
+                    cur_inr = tier_v[d_k].get("inr", 100)
+                    new_val = max(1, round(cur_inr * factor))
+                    tier_v[d_k]["inr"] = new_val
+                    tier_v[d_k]["stars"] = new_val
+        db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in pricing.items()}
+        await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
+        return pricing
+
+    async def reset_pricing_defaults(self) -> dict:
+        """Resets pricing back to default PLAN_PRICING with +30% 1:1 parity."""
+        import copy
+        db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in PLAN_PRICING.items()}
+        await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
+        return copy.deepcopy(PLAN_PRICING)
+
+    # ==================== ATOMIC STATS & LIVE COUNTERS ====================
+    async def increment_rename_stats(self, user_id: int, file_size: int):
+        """Atomically increments total files renamed and total bytes processed (global and per-user)."""
+        today_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+        size = int(file_size) if file_size else 0
+        try:
+            await self.db.bot_stats.update_one(
+                {"_id": "global"},
+                {
+                    "$inc": {
+                        "total_files_renamed": 1,
+                        "total_bytes_processed": size
+                    },
+                    "$set": {"last_rename_time": time.time()}
+                },
+                upsert=True
+            )
+            await self.db.bot_stats.update_one(
+                {"_id": f"daily_{today_str}"},
+                {
+                    "$inc": {
+                        "files_renamed": 1,
+                        "bytes_processed": size
+                    }
+                },
+                upsert=True
+            )
+            await self.col.update_one(
+                {"_id": int(user_id)},
+                {
+                    "$inc": {
+                        "files_renamed_total": 1,
+                        "bytes_used_total": size,
+                        "daily_files_used": 1,
+                        "daily_bytes_used": size
+                    }
+                },
+                upsert=True
+            )
+        except Exception as e:
+            print(f"increment_rename_stats error: {e}")
+
+    async def get_global_rename_stats(self) -> dict:
+        """Returns live all-time and today rename and bandwidth stats from MongoDB."""
+        today_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+        try:
+            g = await self.db.bot_stats.find_one({"_id": "global"}) or {}
+            d = await self.db.bot_stats.find_one({"_id": f"daily_{today_str}"}) or {}
+            return {
+                "total_files": g.get("total_files_renamed", 0),
+                "total_bytes": g.get("total_bytes_processed", 0),
+                "today_files": d.get("files_renamed", 0),
+                "today_bytes": d.get("bytes_processed", 0)
+            }
+        except Exception:
+            return {"total_files": 0, "total_bytes": 0, "today_files": 0, "today_bytes": 0}
+
+    # ==================== DYNAMIC BOT CONFIGURATION ====================
+    async def get_bot_settings(self) -> dict:
+        """Returns live bot configuration settings."""
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
+        return {
+            "owner_only": bool(cfg.get("owner_only", Config.OWNER_ONLY)),
+            "force_sub": cfg.get("force_sub", Config.FORCE_SUB),
+            "free_quota_gb": int(cfg.get("free_quota_gb", 20)),
+            "free_concurrency": int(cfg.get("free_concurrency", 1)),
+            "prem_concurrency": int(cfg.get("prem_concurrency", 4)),
+            "trial_enabled": bool(cfg.get("trial_enabled", True)),
+            "trial_days": int(cfg.get("trial_days", 3)),
+            "ram_disk_enabled": bool(cfg.get("ram_disk_enabled", True)),
+            "session_upload_enabled": bool(cfg.get("session_upload_enabled", True)),
+            "auto_sample_enabled": bool(cfg.get("auto_sample_enabled", True)),
+            "auto_screenshot_enabled": bool(cfg.get("auto_screenshot_enabled", True)),
+            "payment_qr_url": cfg.get("payment_qr_url", getattr(Config, "QR_PIC", "https://graph.org/file/f0a4f5f54316ee0a71be9.jpg")),
+            "admin_contact": cfg.get("admin_contact", "NexCRSupportbot")
+        }
+
+    async def update_bot_settings(self, **kwargs) -> dict:
+        """Updates live bot configuration settings in MongoDB."""
+        clean = {k: v for k, v in kwargs.items() if v is not None}
+        if clean:
+            await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': clean}, upsert=True)
+        return await self.get_bot_settings()
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

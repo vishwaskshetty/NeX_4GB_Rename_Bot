@@ -35,7 +35,8 @@ from helper.utils import (
     progress_for_pyrogram,
     convert,
     humanbytes,
-    CANCEL_REQUESTS
+    CANCEL_REQUESTS,
+    safe_reply_params
 )
 from helper.ffmpeg_utils import (
     inject_metadata,
@@ -55,6 +56,8 @@ RENAME_SEMAPHORE = asyncio.Semaphore(10)
 ACTIVE_USER_TASKS = {}
 PENDING_MEDIA_EXTRAS = {}
 ACTIVE_WORK_DIRS = set()
+USER_FILE_CONTEXT = {}
+USER_RENAME_CACHE = {}
 
 
 def get_optimal_work_dir(user_id: int, file_size: int = 0) -> str:
@@ -193,18 +196,29 @@ async def rename_start(client, message):
     max_size = tier_limits["max_file_size"]
     daily_limit = tier_limits["daily_bytes"]
 
+    # Cache active media file context for user
+    USER_FILE_CONTEXT[user_id] = {
+        "file_msg_id": message.id,
+        "chat_id": message.chat.id,
+        "filename": filename,
+        "file_size": file_size,
+        "file_id": file_id
+    }
+
     # 2GB+ File Upsell for Normal Users
     if file_size > (2 * 1024 * 1024 * 1024) and user_tier == 0 and user_id not in Config.ADMIN:
+        has_trial = await db.has_claimed_trial(user_id)
+        bot_settings = await db.get_bot_settings()
+        row = [InlineKeyboardButton("💎 Buy Premium Plan", callback_data="open_plans")]
+        if not has_trial and bot_settings.get("trial_enabled", True):
+            row.append(InlineKeyboardButton("🎁 Claim 3-Day Free Trial", callback_data="claim_trial_cb"))
         return await message.reply_text(
             f"💎 <b>4GB+ Premium File Detected!</b>\n\n"
             f"📦 <b>File Size:</b> <code>{filesize}</code>\n"
             f"⚠️ Normal users can rename files up to <b>2.0 GB</b>.\n\n"
             f"🚀 Upgrade to <b>Premium</b> to unlock <b>4GB+ High-Speed Renaming</b>, Custom Watermarks, and Sample Videos!",
             reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("💎 Buy Premium Plan", callback_data="open_plans"),
-                    InlineKeyboardButton("🎁 Claim 3-Day Free Trial", callback_data="claim_trial_cb")
-                ],
+                row,
                 [InlineKeyboardButton("❌ Close", callback_data="close")]
             ]),
             quote=True
@@ -274,24 +288,35 @@ async def rename_start(client, message):
         ]
     ]
 
+    reply_kwargs = safe_reply_params(message.id)
     await message.reply_text(
         text=media_info_text,
-        reply_parameters=ReplyParameters(message_id=message.id),
-        reply_markup=InlineKeyboardMarkup(buttons)
+        reply_markup=InlineKeyboardMarkup(buttons),
+        **reply_kwargs
     )
 
 
 @Client.on_callback_query(filters.regex('^auto_rename$'))
 async def auto_rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
-    reply_msg = update.message.reply_to_message
-    if not reply_msg:
-        return await update.message.edit("❌ Original file message not found!")
+    target_id = (
+        update.message.reply_to_message_id
+        or getattr(update.message.reply_to_message, "id", None)
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+    reply_msg = None
+    if target_id:
+        try:
+            reply_msg = await client.get_messages(update.message.chat.id, target_id)
+        except Exception:
+            pass
+    if not reply_msg or not (reply_msg.document or reply_msg.video or reply_msg.audio):
+        reply_msg = update.message.reply_to_message
+
+    if not reply_msg or not (reply_msg.document or reply_msg.video or reply_msg.audio):
+        return await update.message.edit("❌ Original file message not found! Please send your file again.")
 
     file = reply_msg.document or reply_msg.video or reply_msg.audio
-    if not file:
-        return await update.message.edit("❌ No media found in message!")
-
     orig_filename = file.file_name or "file.mkv"
     clean_words = await db.get_clean_words(user_id)
     replace_words = await db.get_replace_words(user_id)
@@ -303,16 +328,14 @@ async def auto_rename_handler(client, update: CallbackQuery):
 
     upload_mode = await db.get_upload_mode(user_id)
     if upload_mode in ["Document", "Video", "Audio"]:
-        # Auto proceed directly with user's preferred upload mode
         await route_to_extras_or_execute(client, update, final_name, upload_mode.lower(), reply_msg)
         return
 
-    # If upload mode is "Ask", present format selection
-    buttons = [[InlineKeyboardButton("📁 Document", callback_data="upload_document")]]
+    buttons = [[InlineKeyboardButton("📁 Document", callback_data=f"upload_document_{reply_msg.id}")]]
     if reply_msg.video or (reply_msg.document and final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))):
-        buttons.append([InlineKeyboardButton("🎥 Video", callback_data="upload_video")])
+        buttons.append([InlineKeyboardButton("🎥 Video", callback_data=f"upload_video_{reply_msg.id}")])
     elif reply_msg.audio or (reply_msg.document and final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))):
-        buttons.append([InlineKeyboardButton("🎵 Audio", callback_data="upload_audio")])
+        buttons.append([InlineKeyboardButton("🎵 Audio", callback_data=f"upload_audio_{reply_msg.id}")])
 
     await update.message.edit_text(
         text=f"⚡ <b>Auto Cleaned & Formatted Name:</b>\n`{final_name}`\n\n<b>Select Output Format:</b>",
@@ -322,13 +345,31 @@ async def auto_rename_handler(client, update: CallbackQuery):
 
 @Client.on_callback_query(filters.regex('^rename$'))
 async def rename_handler(client, update: CallbackQuery):
-    msg_id = getattr(update.message.reply_to_message, "id", None) or getattr(update.message, "reply_to_message_id", None)
-    await update.message.delete()
-    await update.message.reply_text(
-        "<b>◈ ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ɴᴇᴡ ꜰɪʟᴇ ɴᴀᴍᴇ...</b>\n\n"
-        "<i>(You can omit the extension; the original extension will be preserved automatically.)</i>",
-        reply_parameters=ReplyParameters(message_id=msg_id) if msg_id else None,
-        reply_markup=ForceReply(True)
+    user_id = update.from_user.id
+    file_msg_id = (
+        update.message.reply_to_message_id
+        or getattr(update.message.reply_to_message, "id", None)
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+    USER_RENAME_CACHE[user_id] = {
+        "file_msg_id": file_msg_id,
+        "chat_id": update.message.chat.id
+    }
+    chat_id = update.message.chat.id
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    reply_kwargs = safe_reply_params(file_msg_id)
+    await client.send_message(
+        chat_id=chat_id,
+        text=(
+            "<b>◈ ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ɴᴇᴡ ꜰɪʟᴇ ɴᴀᴍᴇ...</b>\n\n"
+            "<i>(You can omit the extension; the original extension will be preserved automatically.)</i>"
+        ),
+        reply_markup=ForceReply(True),
+        **reply_kwargs
     )
 
 
@@ -337,17 +378,38 @@ async def refunc(client, message):
     reply_message = message.reply_to_message
     if reply_message and reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply):
         new_name = message.text.strip()
-        await message.delete()
-        
-        msg = await client.get_messages(message.chat.id, reply_message.id)
-        file_msg = msg.reply_to_message
-        if not file_msg:
-            return await message.reply_text("❌ Original media message could not be retrieved!")
+        user_id = message.from_user.id
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        file_msg = None
+        file_msg_id = (
+            getattr(reply_message, "reply_to_message_id", None)
+            or getattr(reply_message.reply_to_message, "id", None)
+            or USER_RENAME_CACHE.get(user_id, {}).get("file_msg_id")
+            or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+        )
+
+        if file_msg_id:
+            try:
+                file_msg = await client.get_messages(message.chat.id, file_msg_id)
+            except Exception:
+                pass
+
+        if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+            if reply_message.reply_to_message and (
+                reply_message.reply_to_message.document
+                or reply_message.reply_to_message.video
+                or reply_message.reply_to_message.audio
+            ):
+                file_msg = reply_message.reply_to_message
+
+        if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+            return await message.reply_text("❌ Original media not found! Please send your file again.")
 
         file = file_msg.document or file_msg.video or file_msg.audio
-        if not file:
-            return await message.reply_text("❌ Original media not found!")
-
         orig_name = file.file_name or "file.mkv"
         _, orig_ext = os.path.splitext(orig_name)
 
@@ -355,58 +417,85 @@ async def refunc(client, message):
             new_name = new_name + (orig_ext if orig_ext else ".mkv")
 
         # Apply prefix & suffix
-        user_id = message.from_user.id
         prefix = await db.get_prefix(user_id)
         suffix = await db.get_suffix(user_id)
         final_name = apply_prefix_suffix(new_name, prefix, suffix)
 
-        await reply_message.delete()
+        try:
+            await reply_message.delete()
+        except Exception:
+            pass
 
         upload_mode = await db.get_upload_mode(user_id)
         if upload_mode in ["Document", "Video", "Audio"]:
-            prompt_msg = await message.reply(
+            prompt_msg = await client.send_message(
+                chat_id=message.chat.id,
                 text=f"**Processing With Default Mode ({upload_mode})...**\n\n**File Name :-** `{final_name}`",
-                reply_parameters=ReplyParameters(message_id=file_msg.id)
+                **safe_reply_params(file_msg.id)
             )
-            # Create a mock callback object to execute the pipeline cleanly
             class MockCallback:
                 def __init__(self, msg, user):
                     self.message = msg
                     self.from_user = user
-                    self.data = f"upload_{upload_mode.lower()}"
+                    self.data = f"upload_{upload_mode.lower()}_{file_msg.id}"
             mock_cb = MockCallback(prompt_msg, message.from_user)
             await route_to_extras_or_execute(client, mock_cb, final_name, upload_mode.lower(), file_msg)
             return
 
-        buttons = [[InlineKeyboardButton("📁 Document", callback_data="upload_document")]]
+        buttons = [[InlineKeyboardButton("📁 Document", callback_data=f"upload_document_{file_msg.id}")]]
         if file_msg.video or (file_msg.document and final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))):
-            buttons.append([InlineKeyboardButton("🎥 Video", callback_data="upload_video")])
+            buttons.append([InlineKeyboardButton("🎥 Video", callback_data=f"upload_video_{file_msg.id}")])
         elif file_msg.audio or (file_msg.document and final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))):
-            buttons.append([InlineKeyboardButton("🎵 Audio", callback_data="upload_audio")])
+            buttons.append([InlineKeyboardButton("🎵 Audio", callback_data=f"upload_audio_{file_msg.id}")])
 
-        await message.reply(
+        await client.send_message(
+            chat_id=message.chat.id,
             text=f"**Select The Output File Type**\n\n**File Name :-** `{final_name}`",
-            reply_parameters=ReplyParameters(message_id=file_msg.id),
-            reply_markup=InlineKeyboardMarkup(buttons)
+            reply_markup=InlineKeyboardMarkup(buttons),
+            **safe_reply_params(file_msg.id)
         )
 
 
-@Client.on_callback_query(filters.regex("^upload_"))
+@Client.on_callback_query(filters.regex(r"^upload_(document|video|audio)(?:_(\d+))?$"))
 async def upload_callback_router(client, update: CallbackQuery):
-    upload_type = update.data.split("_")[1].lower()
-    
+    upload_type = update.matches[0].group(1).lower()
+    encoded_msg_id = update.matches[0].group(2)
+    user_id = update.from_user.id
+
     # Extract filename from message text
-    match = re.search(r'`([^`]+)`', update.message.text)
+    match = re.search(r'`([^`]+)`', update.message.text or "")
     if match:
         new_filename = match.group(1).strip()
-    elif ":-" in update.message.text:
+    elif ":-" in (update.message.text or ""):
         new_filename = update.message.text.split(":-", 1)[1].strip()
     else:
         new_filename = "NeX_Renamed_File"
 
-    file_msg = update.message.reply_to_message
-    if not file_msg:
-        return await update.message.edit("❌ Original media message could not be retrieved!")
+    file_msg = None
+    target_id = (
+        (int(encoded_msg_id) if encoded_msg_id else None)
+        or update.message.reply_to_message_id
+        or getattr(update.message.reply_to_message, "id", None)
+        or USER_RENAME_CACHE.get(user_id, {}).get("file_msg_id")
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+
+    if target_id:
+        try:
+            file_msg = await client.get_messages(update.message.chat.id, target_id)
+        except Exception:
+            pass
+
+    if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+        if update.message.reply_to_message and (
+            update.message.reply_to_message.document
+            or update.message.reply_to_message.video
+            or update.message.reply_to_message.audio
+        ):
+            file_msg = update.message.reply_to_message
+
+    if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+        return await update.message.edit("❌ Original media message could not be retrieved! Please send your file again.")
 
     await route_to_extras_or_execute(client, update, new_filename, upload_type, file_msg)
 
@@ -589,69 +678,58 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
 
     ACTIVE_USER_TASKS[user_id] = ACTIVE_USER_TASKS.get(user_id, 0) + 1
 
-    # Ensure queue concurrency limit
-    await ms.edit("⏳ <b>Adding to processing queue... Please wait.</b>")
-    
-    async with RENAME_SEMAPHORE:
-        # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 2.2x file size free; fallback to SSD
-        work_dir = get_optimal_work_dir(user_id, file_size)
-        abs_work_dir = os.path.abspath(work_dir)
-        ACTIVE_WORK_DIRS.add(abs_work_dir)
-        file_path = os.path.join(work_dir, new_filename)
-        ph_path = None
-        sample_path = None
-        ss_dir = None
-        task_id = f"task_{user_id}_{int(time.time())}_{os.getpid()}"
+    try:
+        # Ensure queue concurrency limit
+        await ms.edit("⏳ <b>Adding to processing queue... Please wait.</b>")
+        
+        async with RENAME_SEMAPHORE:
+            # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 2.2x file size free; fallback to SSD
+            work_dir = get_optimal_work_dir(user_id, file_size)
+            abs_work_dir = os.path.abspath(work_dir)
+            ACTIVE_WORK_DIRS.add(abs_work_dir)
+            file_path = os.path.join(work_dir, new_filename)
+            ph_path = None
+            sample_path = None
+            ss_dir = None
+            task_id = f"task_{user_id}_{int(time.time())}_{os.getpid()}"
 
-        try:
-            await db.add_active_task(
-                task_id=task_id,
-                user_id=user_id,
-                file_name=new_filename,
-                file_size=file_size,
-                task_type="rename",
-                extra={"upload_type": upload_type, "work_dir": work_dir}
-            )
-        except Exception:
-            pass
-
-        await ms.edit("<b>◈ ꜰɪʟᴇ ʀᴇɴᴀᴍᴇ ᴍᴏᴅᴇ: ᴇɴɢᴀɢɪɴɢ! 💠</b>")
-
-        try:
-            # 1. Download media via parallel MTProto chunk streaming (40-80+ MB/s) with safe fallback
             try:
-                start_time = time.time()
-                is_4gb_file = file_size > (1.95 * 1024 * 1024 * 1024)
-                downloader = client
-                # Route downloads through 4GB Telegram Premium Client if active & file > 500MB
-                if client_4gb and getattr(client_4gb, "is_connected", False) and (file_size > 500 * 1024 * 1024 or is_4gb_file):
-                    downloader = client_4gb
+                await db.add_active_task(
+                    task_id=task_id,
+                    user_id=user_id,
+                    file_name=new_filename,
+                    file_size=file_size,
+                    task_type="rename",
+                    extra={"upload_type": upload_type, "work_dir": work_dir}
+                )
+            except Exception:
+                pass
 
-                try:
-                    path = await fast_download(
-                        client=downloader,
-                        message_or_file=file_msg,
-                        file_path=file_path,
-                        progress=progress_for_pyrogram,
-                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
-                    )
-                except Exception as down_err:
-                    if downloader != client:
-                        path = await fast_download(
-                            client=client,
-                            message_or_file=file_msg,
-                            file_path=file_path,
-                            progress=progress_for_pyrogram,
-                            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
-                        )
-                    else:
-                        raise down_err
+            await ms.edit("<b>◈ ꜰɪʟᴇ ʀᴇɴᴀᴍᴇ ᴍᴏᴅᴇ: ᴇɴɢᴀɢɪɴɢ! 💠</b>")
+
+            # 1. Download media via parallel MTProto chunk streaming with safe fallback
+            start_time = time.time()
+            try:
+                path = await fast_download(
+                    client=client,
+                    message_or_file=file_msg,
+                    file_path=file_path,
+                    progress=progress_for_pyrogram,
+                    progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                )
             except StopTransmission:
-                if os.path.exists(work_dir):
-                    shutil.rmtree(work_dir, ignore_errors=True)
-                return await ms.edit("❌ <b>Download Cancelled by User!</b>\n\n⚡ @Nex_bots")
-            except Exception as e:
-                return await ms.edit(f"❌ <b>Download Failed:</b> <code>{e}</code>")
+                raise
+            except Exception as down_err:
+                print(f"⚠️ fast_download failed ({down_err}). Falling back to standard download_media...")
+                path = await client.download_media(
+                    file_msg,
+                    file_name=file_path,
+                    progress=progress_for_pyrogram,
+                    progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                )
+
+            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>")
 
             if ms.id in CANCEL_REQUESTS or f"{ms.chat.id}_{ms.id}" in CANCEL_REQUESTS or (ms.chat and ms.chat.id in CANCEL_REQUESTS) or user_id in CANCEL_REQUESTS:
                 return await ms.edit("❌ <b>Operation Aborted!</b>\n\n⚡ @Nex_bots")
@@ -992,6 +1070,12 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             except Exception:
                 pass
 
+            # Atomically increment real-time persistent stats (total files, total bandwidth, today's counts)
+            try:
+                await db.increment_rename_stats(user_id, actual_file_size)
+            except Exception as stat_err:
+                print(f"Error incrementing rename stats: {stat_err}")
+
             # 8.1 Spawn 15-Minute Copyright Auto-Delete Task (User Private Chat Only)
             if user_sent_msgs:
                 async def _auto_delete_copyright_media(c_id, msg_ids):
@@ -1002,29 +1086,45 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                         pass
                 asyncio.create_task(_auto_delete_copyright_media(user_id, user_sent_msgs))
 
-        except Exception as e:
-            return await ms.edit(f"❌ <b>Error occurred:</b> <code>{e}</code>")
+    except Exception as e:
+        return await ms.edit(f"❌ <b>Error occurred:</b> <code>{e}</code>")
 
-        finally:
-            # 9. Strict Cleanup of Temporary Files, Concurrency Counter & Persistent Task
-            try:
-                if 'task_id' in locals():
-                    await db.remove_active_task(task_id)
-            except Exception:
-                pass
-            try:
+    finally:
+        ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
+        # 9. Strict Cleanup of Temporary Files, Concurrency Counter & Persistent Task
+        try:
+            if 'task_id' in locals():
+                await db.remove_active_task(task_id)
+        except Exception:
+            pass
+        try:
+            if 'abs_work_dir' in locals():
                 ACTIVE_WORK_DIRS.discard(abs_work_dir)
-            except Exception:
-                pass
-            ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
-            CANCEL_REQUESTS.discard(ms.id)
-            CANCEL_REQUESTS.discard(user_id)
-            if ms.chat:
-                CANCEL_REQUESTS.discard(ms.chat.id)
-                CANCEL_REQUESTS.discard(f"{ms.chat.id}_{ms.id}")
-            try:
-                await ms.delete()
-            except Exception:
-                pass
-            if os.path.exists(work_dir):
-                shutil.rmtree(work_dir, ignore_errors=True)
+        except Exception:
+            pass
+        CANCEL_REQUESTS.discard(ms.id)
+        CANCEL_REQUESTS.discard(user_id)
+        if ms.chat:
+            CANCEL_REQUESTS.discard(ms.chat.id)
+            CANCEL_REQUESTS.discard(f"{ms.chat.id}_{ms.id}")
+        try:
+            await ms.delete()
+        except Exception:
+            pass
+        if 'work_dir' in locals() and os.path.exists(work_dir):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@Client.on_message(filters.private & filters.command(["reset_task", "cleartask", "unfreeze"]))
+async def reset_task_cmd(client, message):
+    user_id = message.from_user.id
+    ACTIVE_USER_TASKS[user_id] = 0
+    USER_FILE_CONTEXT.pop(user_id, None)
+    USER_RENAME_CACHE.pop(user_id, None)
+    await db.reset_user_tasks(user_id)
+    await message.reply_text(
+        "✅ <b>Your active task queue and cache have been completely cleared!</b>\n\n"
+        "You can now send files again smoothly. 🚀\n\n"
+        "⚡ @Nex_bots",
+        **safe_reply_params(message.id)
+    )

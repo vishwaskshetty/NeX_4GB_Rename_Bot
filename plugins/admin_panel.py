@@ -57,7 +57,7 @@ ADMIN_COMMANDS = [
     "owner", "admin", "mode", "maintenance", "status", "users", "broadcast", "bcast_btn",
     "add_prem", "rem_prem", "prem_list", "add_user", "rem_user", "auth_list",
     "ban", "unban", "ban_list", "add_coupon", "del_coupon", "coupons",
-    "set_fsub", "fsub", "set_global_meta", "set_upi", "restart", "logs"
+    "set_fsub", "fsub", "set_global_meta", "set_upi", "restart", "logs", "health"
 ]
 
 
@@ -71,7 +71,7 @@ async def unauthorized_owner_cmd(client, message):
     await send_security_alert(client, user, f"Command: {message.text}")
 
 
-@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_|cb_pwiz_|cb_cwiz_|cb_oref_)") & ~filters.user(Config.ADMIN), group=1)
+@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_|cb_pwiz_|cb_cwiz_|cb_oref_|cb_oprice_|cb_otrial_|cb_oquota_|cb_otoggle_|cb_opay_)") & ~filters.user(Config.ADMIN), group=1)
 async def unauthorized_owner_cb(client, query: CallbackQuery):
     await query.answer("🚨 SECURITY ALERT: Unauthorized Access! This action has been logged.", show_alert=True)
     await send_security_alert(client, query.from_user, f"Callback: {query.data}")
@@ -102,6 +102,7 @@ async def build_owner_panel(client: Client):
     default_meta = await _safe(db.get_default_metadata(), default="Telegram : @Nex_bots")
     upi_id      = await _safe(db.get_upi_id(), default=getattr(Config, "UPI_ID", "nexbots@upi"))
     usage_stats = await _safe(db.get_global_usage(), default={})
+    rename_stats = await _safe(db.get_global_rename_stats(), default={})
 
     total_disk, used_disk, free_disk = shutil.disk_usage(".")
     cpu = psutil.cpu_percent(interval=0.1)
@@ -112,8 +113,10 @@ async def build_owner_panel(client: Client):
     gold_cnt   = usage_stats.get("gold_users", 0)
     diam_cnt   = usage_stats.get("diamond_users", 0)
     trials_cnt = usage_stats.get("trials_claimed", 0)
-    tot_files  = usage_stats.get("global_files", 0)
-    tot_bytes  = usage_stats.get("global_bytes", 0)
+    tot_files  = rename_stats.get("total_files") or usage_stats.get("global_files", 0)
+    tot_bytes  = rename_stats.get("total_bytes") or usage_stats.get("global_bytes", 0)
+    today_files = rename_stats.get("today_files", 0)
+    today_bytes = rename_stats.get("today_bytes", 0)
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
@@ -125,10 +128,10 @@ async def build_owner_panel(client: Client):
         f"◈ <b>💳 Active UPI :</b> <code>{upi_id}</code>\n\n"
         f"◈ <b>👥 Total Users :</b> <code>{total_users}</code> | <b>Trials :</b> <code>{trials_cnt}</code>\n"
         f"◈ <b>💎 Premium :</b> <code>{total_prem}</code> (🥈{silver_cnt} 🥇{gold_cnt} 💎{diam_cnt})\n"
-        f"◈ <b>🛡️ Auth :</b> <code>{len(auth_users)}</code> | <b>🚫 Banned :</b> <code>{len(banned_users)}</code> | <b>🎟️ Coupons :</b> <code>{len(coupons)}</code>\n\n"
-        f"◈ <b>📈 Activity :</b> <code>{tot_files}</code> files ({humanbytes(tot_bytes)})\n"
-        f"◈ <b>💾 Free Disk :</b> <code>{get_readable_file_size(free_disk)}</code> / <code>{get_readable_file_size(total_disk)}</code>\n"
-        f"◈ <b>🖥️ RAM :</b> <code>{ram}%</code> | <b>CPU :</b> <code>{cpu}%</code>\n\n"
+        f"◈ <b>🛡️ Auth :</b> <code>{len(auth_users)}</code> | <b>🚫 Ban :</b> <code>{len(banned_users)}</code> | <b>🎟️ Coupons :</b> <code>{len(coupons)}</code>\n\n"
+        f"◈ <b>📁 Renamed :</b> <code>{tot_files}</code> (Today: <code>{today_files}</code>)\n"
+        f"◈ <b>📊 Bandwidth :</b> <code>{humanbytes(tot_bytes)}</code> (Today: <code>{humanbytes(today_bytes)}</code>)\n"
+        f"◈ <b>🖥️ RAM :</b> <code>{ram}%</code> | <b>CPU :</b> <code>{cpu}%</code> | <b>Disk :</b> <code>{get_readable_file_size(free_disk)}</code>\n\n"
         "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
 
@@ -138,8 +141,16 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton(f"🛠️ Maint: {maint_str}", callback_data="cb_owner_toggle_maint")
         ],
         [
-            InlineKeyboardButton(f"🛡️ Lock: {protect_str}", callback_data="cb_owner_toggle_protect"),
-            InlineKeyboardButton(f"📢 FSub: {fsub_mode_str}", callback_data="cb_owner_fsub")
+            InlineKeyboardButton("💎 Pricing Editor", callback_data="cb_owner_pricing"),
+            InlineKeyboardButton("🎁 Free Trial Config", callback_data="cb_owner_trial_cfg")
+        ],
+        [
+            InlineKeyboardButton("⚡ Quota & Workers", callback_data="cb_owner_quota_cfg"),
+            InlineKeyboardButton("⚙️ Feature Toggles", callback_data="cb_owner_toggles")
+        ],
+        [
+            InlineKeyboardButton("💳 Payment & QR", callback_data="cb_owner_payment_cfg"),
+            InlineKeyboardButton("📢 FSub Channel", callback_data="cb_owner_fsub")
         ],
         [
             InlineKeyboardButton(f"💎 Premium ({total_prem})", callback_data="cb_prem_page_0"),
@@ -150,27 +161,20 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton(f"🚫 Banned ({len(banned_users)})", callback_data="cb_owner_banned")
         ],
         [
-            InlineKeyboardButton("🎁 Referrals", callback_data="cb_owner_referral"),
-            InlineKeyboardButton("📜 Activity Logs", callback_data="cb_owner_logs")
-        ],
-        [
-            InlineKeyboardButton("📈 Analytics", callback_data="cb_owner_analytics"),
+            InlineKeyboardButton("🩺 Health Diagnostic", callback_data="cb_owner_health"),
             InlineKeyboardButton("📊 Server Stats", callback_data="cb_owner_stats")
         ],
         [
-            InlineKeyboardButton("💳 Update UPI ID", callback_data="cb_owner_upi_wiz"),
-            InlineKeyboardButton("🏷️ Global Meta", callback_data="cb_owner_meta_wiz")
+            InlineKeyboardButton("📜 Activity Logs", callback_data="cb_owner_logs"),
+            InlineKeyboardButton("📈 Analytics", callback_data="cb_owner_analytics")
         ],
         [
-            InlineKeyboardButton("📦 Channels & Dumps", callback_data="cb_owner_channels"),
-            InlineKeyboardButton("⚙️ My Settings", callback_data="open_settings")
-        ],
-        [
-            InlineKeyboardButton("🧹 Clear Cache", callback_data="clear_cache_owner"),
+            InlineKeyboardButton("🧹 Clear Stuck Tasks", callback_data="cb_owner_reset_stuck"),
             InlineKeyboardButton("🔄 Restart Bot", callback_data="cb_owner_restart")
         ],
         [
-            InlineKeyboardButton("📋 Commands List", callback_data="cb_owner_cmds")
+            InlineKeyboardButton("📋 Commands List", callback_data="cb_owner_cmds"),
+            InlineKeyboardButton("📦 Dumps & Channels", callback_data="cb_owner_channels")
         ],
         [
             InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
@@ -1251,6 +1255,52 @@ async def owner_state_input_handler(client: Client, message: Message):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel")]])
         )
 
+    elif action == "set_qr_url":
+        OWNER_STATE.pop(admin_id, None)
+        await db.update_bot_settings(payment_qr_url=input_text)
+        return await message.reply_text(
+            f"🖼️ <b>Payment QR URL Updated!</b>\n\n<code>{input_text}</code>\n\n⚡ @Nex_bots",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel")]])
+        )
+
+    elif action == "set_contact":
+        OWNER_STATE.pop(admin_id, None)
+        clean_contact = input_text.lstrip('@')
+        await db.update_bot_settings(admin_contact=clean_contact)
+        return await message.reply_text(
+            f"💬 <b>Support Contact Updated!</b>\n\n@{clean_contact}\n\n⚡ @Nex_bots",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel")]])
+        )
+
+    elif action == "set_plan_price":
+        tier = state.get("tier", 1)
+        days = state.get("days", 30)
+        OWNER_STATE.pop(admin_id, None)
+        try:
+            val = int(input_text.replace("₹", "").replace("⭐", "").strip())
+            await db.set_plan_price(tier, days, val)
+            t_name = TIER_NAMES.get(tier, f"Tier {tier}")
+            return await message.reply_text(
+                f"💎 <b>Price Updated!</b>\n\n"
+                f"<b>{t_name} ({days} Days):</b> <code>₹{val}</code> / <code>{val}⭐</code>\n\n"
+                f"⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 Pricing Panel", callback_data="cb_owner_pricing")]])
+            )
+        except ValueError:
+            return await message.reply_text("❌ <b>Invalid Price!</b> Please send a numeric integer.")
+
+    elif action == "reset_user_trial":
+        OWNER_STATE.pop(admin_id, None)
+        try:
+            target_id = int(input_text)
+            await db.reset_user_trial(target_id)
+            return await message.reply_text(
+                f"🎁 <b>Free Trial Reset!</b>\n\nUser <code>{target_id}</code> can now claim the free trial again.\n\n⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel")]])
+            )
+        except ValueError:
+            return await message.reply_text("❌ <b>Invalid ID!</b> Please enter numeric Telegram User ID.")
+
     await message.continue_propagation()
 
 
@@ -1437,6 +1487,7 @@ async def build_admin_stats_view(client: Client):
     uptime = time.strftime("%Hh %Mm %Ss", time.gmtime(uptime_sec))
     total_users = await _safe(db.total_users_count(), default=0)
     usage = await _safe(db.get_global_usage(), default={})
+    rename_stats = await _safe(db.get_global_rename_stats(), default={})
     banned = await _safe(db.get_banned_users(), default=[])
     
     total_disk, used_disk, free_disk = shutil.disk_usage(".")
@@ -1453,6 +1504,11 @@ async def build_admin_stats_view(client: Client):
 
     from plugins.file_rename import ACTIVE_USER_TASKS
     active_tasks = sum(ACTIVE_USER_TASKS.values()) if ACTIVE_USER_TASKS else 0
+
+    tot_files = rename_stats.get("total_files") or usage.get("global_files", 0)
+    tot_bytes = rename_stats.get("total_bytes") or usage.get("global_bytes", 0)
+    today_files = rename_stats.get("today_files", 0)
+    today_bytes = rename_stats.get("today_bytes", 0)
 
     # Next cloud handoff countdown (at 5h 15m = 18900s)
     if uptime_sec < 18900:
@@ -1478,12 +1534,15 @@ async def build_admin_stats_view(client: Client):
         f"  • Free SSD: <code>{get_readable_file_size(free_disk)}</code>\n"
         f"  • Uptime: <code>{uptime}</code>\n"
         f"  • Relay Handoff: <code>{handoff_str}</code>\n\n"
-        f"📁 Renamed: <code>{usage.get('global_files', 0)}</code> ({humanbytes(usage.get('global_bytes', 0))})\n\n"
+        f"📁 Renamed: <code>{tot_files}</code> (Today: <code>{today_files}</code>)\n"
+        f"📊 Bandwidth: <code>{humanbytes(tot_bytes)}</code> (Today: <code>{humanbytes(today_bytes)}</code>)\n\n"
         "⚡ @Nex_bots | 💬 @NexCRSupportbot"
     )
 
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Refresh Stats", callback_data="cb_owner_stats"),
+         InlineKeyboardButton("🩺 Health Diagnostic", callback_data="cb_owner_health")],
+        [InlineKeyboardButton("🧹 Clear Stuck Tasks", callback_data="cb_owner_reset_stuck"),
          InlineKeyboardButton("📜 Activity Logs", callback_data="cb_owner_logs")],
         [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
          InlineKeyboardButton("❌ Close", callback_data="close")]
@@ -1496,6 +1555,540 @@ async def cb_owner_stats(client, query: CallbackQuery):
     text, markup = await build_admin_stats_view(client)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer("Stats Refreshed! 📊")
+
+
+# ==================== LIVE HEALTH & DIAGNOSTIC SYSTEM ====================
+
+async def build_health_report(client: Client):
+    t0 = time.time()
+    try:
+        await asyncio.wait_for(client.get_me(), timeout=5.0)
+        bot_ping = f"{(time.time() - t0)*1000:.1f}ms 🟢"
+    except Exception:
+        bot_ping = "Timeout/Error 🔴"
+
+    app_4gb = getattr(client, "app_4gb", None)
+    if app_4gb and getattr(app_4gb, "is_connected", False):
+        t1 = time.time()
+        try:
+            await asyncio.wait_for(app_4gb.get_me(), timeout=5.0)
+            prem_status = f"Connected ({(time.time() - t1)*1000:.1f}ms) 🟢"
+        except Exception:
+            prem_status = "Connected 🟢"
+    elif app_4gb:
+        prem_status = "Configured 🟡"
+    else:
+        prem_status = "Disabled ⚪"
+
+    t2 = time.time()
+    try:
+        await asyncio.wait_for(db.ping(), timeout=5.0)
+        db_ping = f"{(time.time() - t2)*1000:.1f}ms 🟢"
+    except Exception:
+        db_ping = "Error 🔴"
+
+    ff_path = shutil.which("ffmpeg")
+    ff_status = "Installed 🟢" if ff_path else "Missing 🔴"
+
+    ram = psutil.virtual_memory().percent
+    swap = psutil.swap_memory().percent
+    cpu = psutil.cpu_percent(interval=0.1)
+    _, _, free_disk = shutil.disk_usage(".")
+    disk_free_str = get_readable_file_size(free_disk)
+
+    shm_str = "N/A"
+    if os.path.exists('/dev/shm'):
+        try:
+            _, _, free_shm = shutil.disk_usage('/dev/shm')
+            shm_str = f"{get_readable_file_size(free_shm)} free"
+        except Exception:
+            pass
+
+    from plugins.file_rename import ACTIVE_USER_TASKS, USER_QUEUE
+    active_cnt = sum(ACTIVE_USER_TASKS.values()) if ACTIVE_USER_TASKS else 0
+    queued_cnt = sum(len(q) for q in USER_QUEUE.values()) if USER_QUEUE else 0
+    db_tasks_cnt = await _safe(db.tasks.count_documents({}), default=0)
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🩺 <b>NeX Health Diagnostic</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>🤖 Bot MTProto :</b> <code>{bot_ping}</code>\n"
+        f"◈ <b>🚀 4GB Client :</b> <code>{prem_status}</code>\n"
+        f"◈ <b>🍃 MongoDB Ping :</b> <code>{db_ping}</code>\n"
+        f"◈ <b>🎬 FFmpeg Binary :</b> <code>{ff_status}</code>\n\n"
+        f"◈ <b>🖥️ CPU :</b> <code>{cpu}%</code> | <b>RAM :</b> <code>{ram}%</code>\n"
+        f"◈ <b>🔄 Swap :</b> <code>{swap}%</code> | <b>SSD :</b> <code>{disk_free_str}</code>\n"
+        f"◈ <b>⚡ RAM-Disk :</b> <code>{shm_str}</code>\n\n"
+        f"◈ <b>⚙️ Active Tasks :</b> <code>{active_cnt}</code>\n"
+        f"◈ <b>📥 In-Memory Queue :</b> <code>{queued_cnt}</code>\n"
+        f"◈ <b>🗄️ DB Tasks :</b> <code>{db_tasks_cnt}</code>\n\n"
+        "⚡ @Nex_bots"
+    )
+
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Refresh Health", callback_data="cb_owner_health"),
+         InlineKeyboardButton("🧹 Clear Stuck Tasks", callback_data="cb_owner_reset_stuck")],
+        [InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    return text, markup
+
+
+@Client.on_message(filters.private & filters.command("health") & filters.user(Config.ADMIN))
+async def health_cmd(client: Client, message: Message):
+    text, markup = await build_health_report(client)
+    await message.reply_text(text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_health$") & filters.user(Config.ADMIN))
+async def cb_owner_health(client: Client, query: CallbackQuery):
+    text, markup = await build_health_report(client)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Health Check Refreshed! 🩺")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_reset_stuck$") & filters.user(Config.ADMIN))
+async def cb_owner_reset_stuck(client: Client, query: CallbackQuery):
+    try:
+        await db.tasks.delete_many({})
+    except Exception:
+        pass
+    try:
+        from plugins.file_rename import ACTIVE_USER_TASKS, USER_QUEUE
+        ACTIVE_USER_TASKS.clear()
+        USER_QUEUE.clear()
+    except Exception:
+        pass
+    await query.answer("All active queues and pending tasks cleared! 🧹", show_alert=True)
+    text, markup = await build_health_report(client)
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+# ==================== DYNAMIC PRICING PANEL & CONTROLS ====================
+
+async def build_owner_pricing_panel():
+    pricing = await db.get_premium_pricing()
+    s = pricing.get(1, {})
+    g = pricing.get(2, {})
+    d = pricing.get(3, {})
+    
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   💎 <b>Dynamic Premium Pricing</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<i>All prices maintain strict 1:1 parity (₹1 = 1⭐).</i>\n\n"
+        f"🥈 <b>Silver :</b> 30D: ₹{s.get(30, {}).get('inr', 103)} | 90D: ₹{s.get(90, {}).get('inr', 259)}\n"
+        f"               180D: ₹{s.get(180, {}).get('inr', 454)} | 365D: ₹{s.get(365, {}).get('inr', 779)}\n\n"
+        f"🥇 <b>Gold :</b> 30D: ₹{g.get(30, {}).get('inr', 168)} | 90D: ₹{g.get(90, {}).get('inr', 428)}\n"
+        f"             180D: ₹{g.get(180, {}).get('inr', 779)} | 365D: ₹{g.get(365, {}).get('inr', 1299)}\n\n"
+        f"💎 <b>Diamond :</b> 30D: ₹{d.get(30, {}).get('inr', 259)} | 90D: ₹{d.get(90, {}).get('inr', 649)}\n"
+        f"                180D: ₹{d.get(180, {}).get('inr', 1169)} | 365D: ₹{d.get(365, {}).get('inr', 1949)}\n\n"
+        "⚡ @Nex_bots"
+    )
+
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🚀 +30% Boost All", callback_data="cb_oprice_boost"),
+            InlineKeyboardButton("🔄 Reset Defaults", callback_data="cb_oprice_reset")
+        ],
+        [
+            InlineKeyboardButton("🥈 Edit Silver", callback_data="cb_oprice_tier_1"),
+            InlineKeyboardButton("🥇 Edit Gold", callback_data="cb_oprice_tier_2"),
+            InlineKeyboardButton("💎 Edit Diamond", callback_data="cb_oprice_tier_3")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
+        ]
+    ])
+    return text, markup
+
+
+async def build_tier_price_editor(tier: int):
+    pricing = await db.get_premium_pricing()
+    t_pricing = pricing.get(tier, {})
+    t_name = TIER_NAMES.get(tier, f"Tier {tier}")
+    
+    text = (
+        f"╭━━━━━━━━━━━━━━━━━━━╮\n"
+        f"┃   💎 <b>Edit {t_name} Prices</b>\n"
+        f"╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"Select a duration to modify price:\n\n"
+        f"◈ <b>30 Days :</b> ₹{t_pricing.get(30, {}).get('inr', 0)} / {t_pricing.get(30, {}).get('stars', 0)}⭐\n"
+        f"◈ <b>90 Days :</b> ₹{t_pricing.get(90, {}).get('inr', 0)} / {t_pricing.get(90, {}).get('stars', 0)}⭐\n"
+        f"◈ <b>180 Days :</b> ₹{t_pricing.get(180, {}).get('inr', 0)} / {t_pricing.get(180, {}).get('stars', 0)}⭐\n"
+        f"◈ <b>365 Days :</b> ₹{t_pricing.get(365, {}).get('inr', 0)} / {t_pricing.get(365, {}).get('stars', 0)}⭐\n\n"
+        f"⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"30D (₹{t_pricing.get(30, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_30"),
+            InlineKeyboardButton(f"90D (₹{t_pricing.get(90, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_90")
+        ],
+        [
+            InlineKeyboardButton(f"180D (₹{t_pricing.get(180, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_180"),
+            InlineKeyboardButton(f"365D (₹{t_pricing.get(365, {}).get('inr', 0)})", callback_data=f"cb_oprice_set_{tier}_365")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to Pricing", callback_data="cb_owner_pricing")
+        ]
+    ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_pricing$") & filters.user(Config.ADMIN))
+async def cb_owner_pricing_handler(client, query: CallbackQuery):
+    text, markup = await build_owner_pricing_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oprice_boost$") & filters.user(Config.ADMIN))
+async def cb_oprice_boost_handler(client, query: CallbackQuery):
+    await db.boost_all_prices_percent(30.0)
+    await query.answer("All plans boosted by +30% (1:1 Stars parity enforced)! 🚀", show_alert=True)
+    text, markup = await build_owner_pricing_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oprice_reset$") & filters.user(Config.ADMIN))
+async def cb_oprice_reset_handler(client, query: CallbackQuery):
+    await db.reset_pricing_defaults()
+    await query.answer("Pricing reset to defaults! 🔄", show_alert=True)
+    text, markup = await build_owner_pricing_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oprice_tier_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oprice_tier_handler(client, query: CallbackQuery):
+    tier = int(query.matches[0].group(1))
+    text, markup = await build_tier_price_editor(tier)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oprice_set_(\d+)_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oprice_set_handler(client, query: CallbackQuery):
+    tier = int(query.matches[0].group(1))
+    days = int(query.matches[0].group(2))
+    OWNER_STATE[query.from_user.id] = {"action": "set_plan_price", "tier": tier, "days": days}
+    t_name = TIER_NAMES.get(tier, f"Tier {tier}")
+    text = (
+        f"💎 <b><u>Set Price for {t_name} ({days} Days)</u></b>\n\n"
+        f"Please send the new price in <b>INR / Telegram Stars</b> (e.g. <code>199</code>):\n\n"
+        f"<i>1:1 parity is strictly maintained. Send /cancel or tap Cancel below to exit.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_pricing")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+# ==================== FREE TRIAL CONFIG PANEL & CONTROLS ====================
+
+async def build_owner_trial_panel():
+    settings = await db.get_bot_settings()
+    usage = await _safe(db.get_global_usage(), default={})
+    trials_claimed = usage.get("trials_claimed", 0)
+    
+    t_enabled = settings.get("trial_enabled", True)
+    t_status = "ENABLED 🟢" if t_enabled else "DISABLED 🔴"
+    t_days = settings.get("trial_days", 3)
+    
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🎁 <b>Free Trial Configuration</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Trial Status :</b> <code>{t_status}</code>\n"
+        f"◈ <b>Trial Duration :</b> <code>{t_days} Days</code>\n"
+        f"◈ <b>Total Trials Claimed :</b> <code>{trials_claimed}</code>\n\n"
+        "<i>Users can claim a 1-time 4GB Gold Trial with unthrottled speed. Once claimed or expired, the trial button is hidden.</i>\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"{'🔴 Disable Trial' if t_enabled else '🟢 Enable Trial'}", callback_data="cb_otrial_toggle")
+        ],
+        [
+            InlineKeyboardButton(f"{'✅ ' if t_days==1 else ''}1 Day", callback_data="cb_otrial_days_1"),
+            InlineKeyboardButton(f"{'✅ ' if t_days==3 else ''}3 Days", callback_data="cb_otrial_days_3"),
+            InlineKeyboardButton(f"{'✅ ' if t_days==7 else ''}7 Days", callback_data="cb_otrial_days_7")
+        ],
+        [
+            InlineKeyboardButton("🔄 Reset User Trial", callback_data="cb_otrial_reset_wiz")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
+        ]
+    ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_trial_cfg$") & filters.user(Config.ADMIN))
+async def cb_owner_trial_cfg_handler(client, query: CallbackQuery):
+    text, markup = await build_owner_trial_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otrial_toggle$") & filters.user(Config.ADMIN))
+async def cb_otrial_toggle_handler(client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    cur = settings.get("trial_enabled", True)
+    await db.update_bot_settings(trial_enabled=not cur)
+    await query.answer(f"Trial {'DISABLED 🔴' if cur else 'ENABLED 🟢'}", show_alert=True)
+    text, markup = await build_owner_trial_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otrial_days_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_otrial_days_handler(client, query: CallbackQuery):
+    days = int(query.matches[0].group(1))
+    await db.update_bot_settings(trial_days=days)
+    await query.answer(f"Trial duration set to {days} Days! 🎁")
+    text, markup = await build_owner_trial_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otrial_reset_wiz$") & filters.user(Config.ADMIN))
+async def cb_otrial_reset_wiz_handler(client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "reset_user_trial"}
+    text = (
+        "🎁 <b><u>Reset User Free Trial</u></b>\n\n"
+        "Send the <b>Telegram User ID</b> whose free trial you want to reset:\n\n"
+        "<i>Or tap Cancel below to exit.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_trial_cfg")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+# ==================== QUOTA & CONCURRENCY CONTROLS ====================
+
+async def build_owner_quota_panel():
+    settings = await db.get_bot_settings()
+    free_gb = settings.get("free_quota_gb", 20)
+    f_conc = settings.get("free_concurrency", 1)
+    p_conc = settings.get("prem_concurrency", 4)
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   ⚡ <b>Quota & Concurrency Manager</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Free Daily Quota :</b> <code>{free_gb} GB/day</code>\n"
+        f"◈ <b>Free Concurrency :</b> <code>{f_conc} parallel task(s)</code>\n"
+        f"◈ <b>Premium Concurrency :</b> <code>{p_conc} parallel task(s)</code>\n\n"
+        "<i>Select options below to update dynamically:</i>\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"{'✅ ' if free_gb==5 else ''}5 GB", callback_data="cb_oquota_free_5"),
+            InlineKeyboardButton(f"{'✅ ' if free_gb==10 else ''}10 GB", callback_data="cb_oquota_free_10"),
+            InlineKeyboardButton(f"{'✅ ' if free_gb==20 else ''}20 GB", callback_data="cb_oquota_free_20"),
+            InlineKeyboardButton(f"{'✅ ' if free_gb==50 else ''}50 GB", callback_data="cb_oquota_free_50")
+        ],
+        [
+            InlineKeyboardButton(f"{'✅ ' if f_conc==1 else ''}Free: 1 Task", callback_data="cb_oquota_fconc_1"),
+            InlineKeyboardButton(f"{'✅ ' if f_conc==2 else ''}Free: 2 Tasks", callback_data="cb_oquota_fconc_2")
+        ],
+        [
+            InlineKeyboardButton(f"{'✅ ' if p_conc==2 else ''}Prem: 2", callback_data="cb_oquota_pconc_2"),
+            InlineKeyboardButton(f"{'✅ ' if p_conc==4 else ''}Prem: 4", callback_data="cb_oquota_pconc_4"),
+            InlineKeyboardButton(f"{'✅ ' if p_conc==8 else ''}Prem: 8", callback_data="cb_oquota_pconc_8")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
+        ]
+    ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_quota_cfg$") & filters.user(Config.ADMIN))
+async def cb_owner_quota_cfg_handler(client, query: CallbackQuery):
+    text, markup = await build_owner_quota_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oquota_free_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oquota_free_handler(client, query: CallbackQuery):
+    gb = int(query.matches[0].group(1))
+    await db.update_bot_settings(free_quota_gb=gb)
+    await query.answer(f"Free daily quota set to {gb} GB/day! ⚡")
+    text, markup = await build_owner_quota_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oquota_fconc_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oquota_fconc_handler(client, query: CallbackQuery):
+    conc = int(query.matches[0].group(1))
+    await db.update_bot_settings(free_concurrency=conc)
+    await query.answer(f"Free concurrency set to {conc} task(s)! ⚡")
+    text, markup = await build_owner_quota_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_oquota_pconc_(\d+)$") & filters.user(Config.ADMIN))
+async def cb_oquota_pconc_handler(client, query: CallbackQuery):
+    conc = int(query.matches[0].group(1))
+    await db.update_bot_settings(prem_concurrency=conc)
+    await query.answer(f"Premium concurrency set to {conc} task(s)! ⚡")
+    text, markup = await build_owner_quota_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+# ==================== FEATURE TOGGLES CONTROLS ====================
+
+async def build_owner_toggles_panel():
+    settings = await db.get_bot_settings()
+    sample_on = settings.get("auto_sample_enabled", True)
+    ss_on = settings.get("auto_screenshot_enabled", True)
+    ramdisk_on = settings.get("ram_disk_enabled", True)
+    session_on = settings.get("session_upload_enabled", True)
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   ⚙️ <b>Bot Feature Toggles</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>🎬 Sample Video :</b> <code>{'ON 🟢' if sample_on else 'OFF 🔴'}</code>\n"
+        f"◈ <b>📸 Screenshots :</b> <code>{'ON 🟢' if ss_on else 'OFF 🔴'}</code>\n"
+        f"◈ <b>⚡ RAM-Disk Accel :</b> <code>{'ON 🟢' if ramdisk_on else 'OFF 🔴'}</code>\n"
+        f"◈ <b>🚀 4GB Session Upload :</b> <code>{'ON 🟢' if session_on else 'OFF 🔴'}</code>\n\n"
+        "<i>Tap a feature button to toggle ON/OFF:</i>\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"🎬 Sample: {'ON 🟢' if sample_on else 'OFF 🔴'}", callback_data="cb_otoggle_sample"),
+            InlineKeyboardButton(f"📸 SS: {'ON 🟢' if ss_on else 'OFF 🔴'}", callback_data="cb_otoggle_ss")
+        ],
+        [
+            InlineKeyboardButton(f"⚡ RAM-Disk: {'ON 🟢' if ramdisk_on else 'OFF 🔴'}", callback_data="cb_otoggle_ramdisk"),
+            InlineKeyboardButton(f"🚀 4GB Session: {'ON 🟢' if session_on else 'OFF 🔴'}", callback_data="cb_otoggle_session")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
+        ]
+    ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_toggles$") & filters.user(Config.ADMIN))
+async def cb_owner_toggles_handler(client, query: CallbackQuery):
+    text, markup = await build_owner_toggles_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otoggle_sample$") & filters.user(Config.ADMIN))
+async def cb_otoggle_sample_handler(client, query: CallbackQuery):
+    s = await db.get_bot_settings()
+    cur = s.get("auto_sample_enabled", True)
+    await db.update_bot_settings(auto_sample_enabled=not cur)
+    await query.answer(f"Sample Video {'DISABLED 🔴' if cur else 'ENABLED 🟢'}")
+    text, markup = await build_owner_toggles_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otoggle_ss$") & filters.user(Config.ADMIN))
+async def cb_otoggle_ss_handler(client, query: CallbackQuery):
+    s = await db.get_bot_settings()
+    cur = s.get("auto_screenshot_enabled", True)
+    await db.update_bot_settings(auto_screenshot_enabled=not cur)
+    await query.answer(f"Screenshots {'DISABLED 🔴' if cur else 'ENABLED 🟢'}")
+    text, markup = await build_owner_toggles_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otoggle_ramdisk$") & filters.user(Config.ADMIN))
+async def cb_otoggle_ramdisk_handler(client, query: CallbackQuery):
+    s = await db.get_bot_settings()
+    cur = s.get("ram_disk_enabled", True)
+    await db.update_bot_settings(ram_disk_enabled=not cur)
+    await query.answer(f"RAM-Disk {'DISABLED 🔴' if cur else 'ENABLED 🟢'}")
+    text, markup = await build_owner_toggles_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_otoggle_session$") & filters.user(Config.ADMIN))
+async def cb_otoggle_session_handler(client, query: CallbackQuery):
+    s = await db.get_bot_settings()
+    cur = s.get("session_upload_enabled", True)
+    await db.update_bot_settings(session_upload_enabled=not cur)
+    await query.answer(f"4GB Session Upload {'DISABLED 🔴' if cur else 'ENABLED 🟢'}")
+    text, markup = await build_owner_toggles_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+# ==================== PAYMENT & SUPPORT CONFIG CONTROLS ====================
+
+async def build_owner_payment_panel():
+    settings = await db.get_bot_settings()
+    upi_id = await db.get_upi_id()
+    qr_url = settings.get("payment_qr_url", getattr(Config, "QR_PIC", ""))
+    contact = settings.get("admin_contact", "NexCRSupportbot")
+
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   💳 <b>Payment & Support Config</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Active UPI ID :</b> <code>{upi_id}</code>\n"
+        f"◈ <b>Payment QR Pic :</b> <code>{qr_url[:40]}...</code>\n"
+        f"◈ <b>Support Contact :</b> @{contact}\n\n"
+        "<i>Tap a button below to update settings interactively:</i>\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💳 Set UPI ID", callback_data="cb_owner_upi_wiz"),
+            InlineKeyboardButton("🖼️ Set QR URL", callback_data="cb_opay_qr_wiz")
+        ],
+        [
+            InlineKeyboardButton("💬 Set Support Handle", callback_data="cb_opay_contact_wiz")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
+            InlineKeyboardButton("❌ Close", callback_data="close")
+        ]
+    ])
+    return text, markup
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_payment_cfg$") & filters.user(Config.ADMIN))
+async def cb_owner_payment_cfg_handler(client, query: CallbackQuery):
+    text, markup = await build_owner_payment_panel()
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_opay_qr_wiz$") & filters.user(Config.ADMIN))
+async def cb_opay_qr_wiz_handler(client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_qr_url"}
+    text = (
+        "🖼️ <b><u>Update Payment QR Picture URL</u></b>\n\n"
+        "Send the direct image URL for the payment QR code (e.g. Telegraph / Imgur link):\n\n"
+        "<i>Or tap Cancel below to exit.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_payment_cfg")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_opay_contact_wiz$") & filters.user(Config.ADMIN))
+async def cb_opay_contact_wiz_handler(client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_contact"}
+    text = (
+        "💬 <b><u>Update Support / Admin Username</u></b>\n\n"
+        "Send the Telegram username (with or without @) for support inquiries:\n\n"
+        "<i>Or tap Cancel below to exit.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_payment_cfg")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
 
 
 # ==================== OWNER REFERRAL SYSTEM PANEL ====================

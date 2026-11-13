@@ -15,6 +15,19 @@ except ImportError:
 
 SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
+def safe_reply_params(message_id: int):
+    """
+    Returns kwargs dictionary with reply_parameters=ReplyParameters(message_id=message_id)
+    if supported, otherwise falls back to reply_to_message_id=message_id.
+    """
+    if not message_id:
+        return {}
+    try:
+        from pyrogram.types import ReplyParameters
+        return {"reply_parameters": ReplyParameters(message_id=int(message_id))}
+    except (TypeError, ImportError, Exception):
+        return {"reply_to_message_id": int(message_id)}
+
 # Global set to track active operations marked for cancellation
 CANCEL_REQUESTS = set()
 # Global dicts to track progress edit timestamps and percentages for strictly 5.0s (min 2%) throttling

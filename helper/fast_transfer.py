@@ -228,3 +228,4 @@ async def fast_download(
             progress=progress,
             progress_args=progress_args
         )
+

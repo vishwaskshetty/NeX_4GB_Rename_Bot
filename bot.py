@@ -79,10 +79,11 @@ USER_COMMANDS = [
     BotCommand("set_dump", "📦 Set Personal Dump Channel ID"),
     BotCommand("del_dump", "🗑️ Remove Personal Dump Channel"),
     BotCommand("donate", "❤️ Support & Donate to Developer"),
-    BotCommand("cancel", "🛑 Cancel Active Rename Task")
+    BotCommand("cancel", "🛑 Cancel Active Rename Task"),
+    BotCommand("reset_task", "🧹 Reset Stuck Task Queue")
 ]
 
-# 2. Owner / Admin Extra Commands (24 Commands)
+# 2. Owner / Admin Extra Commands (25 Commands)
 OWNER_EXTRA_COMMANDS = [
     BotCommand("owner", "👑 Open Interactive Owner Control Panel"),
     BotCommand("admin", "🛠️ Open Admin Dashboard"),
@@ -108,6 +109,7 @@ OWNER_EXTRA_COMMANDS = [
     BotCommand("set_global_meta", "🏷️ Set Global Default Metadata Tag"),
     BotCommand("set_upi", "🇮🇳 Update UPI ID for Payments"),
     BotCommand("logs", "📜 View Latest Activity Logs"),
+    BotCommand("health", "🩺 System & Server Health Diagnostic"),
     BotCommand("restart", "🔄 Restart the Bot Server")
 ]
 

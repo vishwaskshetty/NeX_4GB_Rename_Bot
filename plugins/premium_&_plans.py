@@ -72,9 +72,18 @@ TIER_INFO = {
 async def build_plans_panel(user_id: int):
     prem_info = await db.get_premium_info(user_id)
     has_trial = await db.has_claimed_trial(user_id)
-    
+    pricing = await db.get_premium_pricing()
+    bot_settings = await db.get_bot_settings()
+
     current_plan = prem_info.get("plan_name", "Free")
-    trial_status = "Claimed ✅" if has_trial else "Available 🎁"
+    tier = prem_info.get("tier", 0)
+    is_prem = (tier > 0) or prem_info.get("is_owner", False)
+    trial_status = "Claimed ✅" if has_trial else ("Active 🟢" if is_prem else "Available 🎁")
+    trial_enabled = bot_settings.get("trial_enabled", True)
+
+    p_silv = pricing.get(1, {}).get(30, {}).get("inr", 103)
+    p_gold = pricing.get(2, {}).get(30, {}).get("inr", 168)
+    p_diam = pricing.get(3, {}).get(30, {}).get("inr", 259)
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
@@ -82,16 +91,17 @@ async def build_plans_panel(user_id: int):
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>Your Status :</b> <b>{current_plan}</b>\n"
         f"◈ <b>3-Day Trial :</b> <code>{trial_status}</code>\n\n"
-        "<b>Available Premium Tiers:</b>\n"
-        "• 🥈 <b>Silver :</b> 25 GB/D (from ₹79)\n"
-        "• 🥇 <b>Gold :</b> 100 GB/D (from ₹129)\n"
-        "• 💎 <b>Diamond :</b> Unlimited (₹199)\n\n"
+        "<b>Available Premium Tiers (1:1 ₹ / ⭐):</b>\n"
+        f"• 🥈 <b>Silver :</b> 50 GB/D (from ₹{p_silv} / {p_silv} ⭐)\n"
+        f"• 🥇 <b>Gold :</b> 150 GB/D (from ₹{p_gold} / {p_gold} ⭐)\n"
+        f"• 💎 <b>Diamond :</b> Unlimited (₹{p_diam} / {p_diam} ⭐)\n\n"
         "<i>All tiers: 1M, 3M, 6M, 1 Year.</i>\n\n"
         "⚡ @Nex_bots | 💬 @NexCRSupportbot"
     )
 
     buttons = []
-    if not has_trial:
+    # Hide Free Trial button if claimed or user is already Premium or trial disabled globally
+    if not has_trial and not is_prem and trial_enabled:
         buttons.append([InlineKeyboardButton("🎁 Claim 3-Day Free Gold Trial", callback_data="claim_trial_cb")])
 
     buttons.extend([
@@ -120,7 +130,8 @@ async def build_plans_panel(user_id: int):
 
 async def build_tier_durations_view(tier: int):
     info = TIER_INFO.get(tier, TIER_INFO[1])
-    prices = PLAN_PRICING.get(tier, PLAN_PRICING[1])
+    pricing = await db.get_premium_pricing()
+    prices = pricing.get(tier, PLAN_PRICING.get(tier, PLAN_PRICING[1]))
 
     text = (
         f"╭━━━━━━━━━━━━━━━━━━━╮\n"
@@ -131,7 +142,7 @@ async def build_tier_durations_view(tier: int):
         f"◈ <b>Max Transfer Speed :</b> {info['speed']}\n"
         f"◈ <b>Concurrency :</b> {info['conc']}\n"
         f"◈ <b>Features :</b> {info['features']}\n\n"
-        "<b>Available Durations & Pricing:</b>\n"
+        "<b>Available Durations & Pricing (1:1 ₹ / ⭐):</b>\n"
         f"• <b>1 Month (30D) :</b> ₹{prices[30]['inr']} INR / {prices[30]['stars']} ⭐\n"
         f"• <b>3 Months (90D) :</b> ₹{prices[90]['inr']} INR / {prices[90]['stars']} ⭐\n"
         f"• <b>6 Months (180D) :</b> ₹{prices[180]['inr']} INR / {prices[180]['stars']} ⭐\n"
@@ -159,7 +170,8 @@ async def build_tier_durations_view(tier: int):
 
 async def build_checkout_view(tier: int, days: int):
     info = TIER_INFO.get(tier, TIER_INFO[1])
-    prices = PLAN_PRICING.get(tier, {}).get(days, {"inr": 99, "stars": 100})
+    pricing = await db.get_premium_pricing()
+    prices = pricing.get(tier, {}).get(days, PLAN_PRICING.get(tier, {}).get(days, {"inr": 103, "stars": 103}))
     dur_label = DURATION_LABELS.get(days, f"{days} Days")
 
     text = (
@@ -408,8 +420,13 @@ async def user_profile_cb(client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^claim_trial_cb$"))
 async def claim_trial_cb(client, query: CallbackQuery):
     user_id = query.from_user.id
-    if await db.has_claimed_trial(user_id):
-        return await query.answer("⚠️ You have already claimed your one-time 3-Day Free Trial!", show_alert=True)
+    prem_info = await db.get_premium_info(user_id)
+    tier = prem_info.get("tier", 0)
+    is_prem = (tier > 0) or prem_info.get("is_owner", False)
+    if await db.has_claimed_trial(user_id) or is_prem:
+        await query.answer("❌ You have already used your one-time Free Trial!", show_alert=True)
+        text, markup = await build_plans_panel(user_id)
+        return await edit_message_content(query.message, text, reply_markup=markup)
 
     success = await db.claim_free_trial(user_id)
     if success:
@@ -453,7 +470,8 @@ async def pay_upi_cb(client, query: CallbackQuery):
     tier = int(query.matches[0].group(1))
     days = int(query.matches[0].group(2))
     upi_id = await db.get_upi_id()
-    prices = PLAN_PRICING.get(tier, {}).get(days, {"inr": 99, "stars": 100})
+    pricing = await db.get_premium_pricing()
+    prices = pricing.get(tier, {}).get(days, PLAN_PRICING.get(tier, {}).get(days, {"inr": 103, "stars": 103}))
     tier_info = TIER_INFO.get(tier, TIER_INFO[1])
     dur_label = DURATION_LABELS.get(days, f"{days} Days")
 
@@ -508,7 +526,8 @@ async def notify_upi_paid_cb(client, query: CallbackQuery):
 async def pay_stars_cb(client, query: CallbackQuery):
     tier = int(query.matches[0].group(1))
     days = int(query.matches[0].group(2))
-    prices = PLAN_PRICING.get(tier, {}).get(days, {"inr": 99, "stars": 100})
+    pricing = await db.get_premium_pricing()
+    prices = pricing.get(tier, {}).get(days, PLAN_PRICING.get(tier, {}).get(days, {"inr": 103, "stars": 103}))
     stars = prices["stars"]
     tier_info = TIER_INFO.get(tier, TIER_INFO[1])
     dur_label = DURATION_LABELS.get(days, f"{days} Days")
