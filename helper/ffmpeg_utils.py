@@ -105,41 +105,77 @@ async def generate_sample_video(input_path: str, output_path: str, total_duratio
         return False
 
 
-async def apply_video_watermark(input_path: str, output_path: str, text: str, position: str = "top_right", size: int = 28, color: str = "white") -> bool:
+async def apply_video_watermark(
+    input_path: str,
+    output_path: str,
+    text: str = "",
+    wm_type: str = "text",
+    image_path: str = None,
+    position: str = "top_right",
+    size: int = 28,
+    opacity: float = 0.85,
+    color: str = "white"
+) -> bool:
     """
-    Applies custom text watermark over video using FFmpeg drawtext with ultrafast preset.
+    Applies custom text or image logo watermark over video using FFmpeg ultrafast preset with 4 threads.
     """
-    pos_coords = {
+    pos_coords_text = {
         "top_left": "x=25:y=25",
         "top_right": "x=w-tw-25:y=25",
         "center": "x=(w-tw)/2:y=(h-th)/2",
         "bottom_left": "x=25:y=h-th-25",
         "bottom_right": "x=w-tw-25:y=h-th-25"
     }
-    coords = pos_coords.get(str(position).lower(), "x=w-tw-25:y=25")
-    
-    # Safe string escaping for FFmpeg drawtext
-    safe_text = str(text).replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:')
-    font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
-    font_size = int(size) if int(size) > 0 else 28
+    pos_coords_img = {
+        "top_left": "overlay=25:25",
+        "top_right": "overlay=main_w-overlay_w-25:25",
+        "center": "overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "bottom_left": "overlay=25:main_h-overlay_h-25",
+        "bottom_right": "overlay=main_w-overlay_w-25:main_h-overlay_h-25"
+    }
 
-    vf_filter = (
-        f"drawtext=text='{safe_text}':{coords}:fontsize={font_size}:fontcolor={font_color}:"
-        f"box=1:boxcolor=black@0.45:boxborderw=5"
-    )
+    op = max(0.1, min(1.0, float(opacity if opacity is not None else 0.85)))
+    norm_pos = str(position).lower().strip() if position else "top_right"
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-threads", "0",
-        "-i", input_path,
-        "-vf", vf_filter,
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "26",
-        "-c:a", "copy",
-        output_path
-    ]
     try:
+        if wm_type == "image" and image_path and os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+            coords = pos_coords_img.get(norm_pos, "overlay=main_w-overlay_w-25:25")
+            img_size = int(size) if int(size) >= 40 else 160
+            filter_complex = f"[1:v]format=rgba,colorchannelmixer=aa={op:.2f},scale={img_size}:-1[wm];[0:v][wm]{coords}"
+            cmd = [
+                "ffmpeg", "-y",
+                "-threads", "4",
+                "-i", input_path,
+                "-i", image_path,
+                "-filter_complex", filter_complex,
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "26",
+                "-c:a", "copy",
+                output_path
+            ]
+        else:
+            coords = pos_coords_text.get(norm_pos, "x=w-tw-25:y=25")
+            safe_text = str(text or "").replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace('%', '\\%')
+            font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
+            font_size = int(size) if int(size) > 0 else 28
+
+            vf_filter = (
+                f"drawtext=text='{safe_text}':{coords}:fontsize={font_size}:fontcolor={font_color}@{op:.2f}:"
+                f"box=1:boxcolor=black@{op*0.55:.2f}:boxborderw=4"
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-threads", "4",
+                "-i", input_path,
+                "-vf", vf_filter,
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "26",
+                "-c:a", "copy",
+                output_path
+            ]
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,

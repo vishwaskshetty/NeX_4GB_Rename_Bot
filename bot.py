@@ -214,28 +214,12 @@ class Bot(Client):
             except Exception as e:
                 print(f"Please Make Sure The Bot Is Admin In Your Log Channel: {e}")
 
-        # Check for any active tasks from a previous instance (Cloud Handoff Recovery)
+        # Check for and automatically resume interrupted tasks from previous cloud instance
         try:
-            pending_tasks = await db.get_active_tasks(max_age_seconds=7200)
-            if pending_tasks:
-                print(f"🔄 [Recovery] Found {len(pending_tasks)} active/queued tasks from previous cloud run.")
-                notified_users = set()
-                for t in pending_tasks:
-                    uid = t.get("user_id")
-                    fname = t.get("file_name", "File")
-                    if uid and uid not in notified_users:
-                        notified_users.add(uid)
-                        try:
-                            await self.send_message(
-                                uid,
-                                f"🔄 <b>NeX Cloud Handoff Completed!</b>\n\n"
-                                f"The server successfully reconnected to Telegram. Your task for <code>{fname}</code> is now ready. Send your file again if it was interrupted."
-                            )
-                        except Exception:
-                            pass
-                await db.cleanup_stale_tasks(max_age_seconds=7200)
+            from plugins.file_rename import resume_interrupted_tasks
+            asyncio.create_task(resume_interrupted_tasks(self))
         except Exception as rec_err:
-            print(f"⚠️ [Recovery] Startup task recovery warning: {rec_err}")
+            print(f"⚠️ [Recovery] Startup task recovery launch error: {rec_err}")
 
         # Launch permanent background tasks for 24/7 zero-downtime operation
         asyncio.create_task(self._mtproto_watchdog())

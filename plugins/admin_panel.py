@@ -1616,11 +1616,14 @@ async def build_health_report(client: Client):
     ff_path = shutil.which("ffmpeg")
     ff_status = "Installed 🟢" if ff_path else "Missing 🔴"
 
-    ram = psutil.virtual_memory().percent
-    swap = psutil.swap_memory().percent
-    cpu = psutil.cpu_percent(interval=0.1)
-    _, _, free_disk = shutil.disk_usage(".")
-    disk_free_str = get_readable_file_size(free_disk)
+    try:
+        ram = psutil.virtual_memory().percent
+        swap = psutil.swap_memory().percent
+        cpu = psutil.cpu_percent(interval=0.1)
+        _, _, free_disk = shutil.disk_usage(".")
+        disk_free_str = get_readable_file_size(free_disk)
+    except Exception:
+        ram, swap, cpu, disk_free_str = 0, 0, 0, "N/A"
 
     shm_str = "N/A"
     if os.path.exists('/dev/shm'):
@@ -1629,6 +1632,21 @@ async def build_health_report(client: Client):
             shm_str = f"{get_readable_file_size(free_shm)} free"
         except Exception:
             pass
+
+    try:
+        uptime_sec = time.time() - (Config.BOT_UPTIME or time.time())
+        uptime_str = time.strftime("%Hh %Mm %Ss", time.gmtime(uptime_sec))
+    except Exception:
+        uptime_str = "N/A"
+
+    try:
+        glob_stats = await db.get_global_rename_stats()
+        total_renamed = glob_stats.get("total_files", 0)
+        total_bytes = glob_stats.get("total_bytes", 0)
+        total_bytes_str = get_readable_file_size(total_bytes)
+    except Exception:
+        total_renamed = 0
+        total_bytes_str = "0 B"
 
     try:
         from plugins.file_rename import ACTIVE_USER_TASKS, USER_QUEUE
@@ -1647,6 +1665,8 @@ async def build_health_report(client: Client):
         f"◈ <b>🚀 4GB Client :</b> <code>{prem_status}</code>\n"
         f"◈ <b>🍃 MongoDB Ping :</b> <code>{db_ping}</code>\n"
         f"◈ <b>🎬 FFmpeg Binary :</b> <code>{ff_status}</code>\n\n"
+        f"◈ <b>⏱️ Bot Uptime :</b> <code>{uptime_str}</code>\n"
+        f"◈ <b>📁 Total Renamed :</b> <code>{total_renamed} files</code> (<code>{total_bytes_str}</code>)\n\n"
         f"◈ <b>🖥️ CPU :</b> <code>{cpu}%</code> | <b>RAM :</b> <code>{ram}%</code>\n"
         f"◈ <b>🔄 Swap :</b> <code>{swap}%</code> | <b>SSD :</b> <code>{disk_free_str}</code>\n"
         f"◈ <b>⚡ RAM-Disk :</b> <code>{shm_str}</code>\n\n"
@@ -1665,17 +1685,29 @@ async def build_health_report(client: Client):
     return text, markup
 
 
-@Client.on_message(filters.private & filters.command("health") & filters.user(Config.ADMIN))
+@Client.on_message(filters.private & filters.command(["health", "health_check"]) & filters.user(Config.ADMIN))
 async def health_cmd(client: Client, message: Message):
-    text, markup = await build_health_report(client)
-    await message.reply_text(text, reply_markup=markup)
+    try:
+        text, markup = await build_health_report(client)
+        await message.reply_text(text, reply_markup=markup)
+    except Exception as err:
+        await message.reply_text(f"⚠️ Health Diagnostic Error: <code>{err}</code>")
 
 
-@Client.on_callback_query(filters.regex(r"^cb_owner_health$") & filters.user(Config.ADMIN))
+@Client.on_callback_query(filters.regex(r"^(cb_owner_health|owner_health|health_check|refresh_health)$") & filters.user(Config.ADMIN))
 async def cb_owner_health(client: Client, query: CallbackQuery):
-    text, markup = await build_health_report(client)
-    await edit_message_content(query.message, text, reply_markup=markup)
-    await query.answer("Health Check Refreshed! 🩺")
+    try:
+        await query.answer("Fetching diagnostic report... 🩺")
+    except Exception:
+        pass
+    try:
+        text, markup = await build_health_report(client)
+        await edit_message_content(query.message, text, reply_markup=markup)
+    except Exception as err:
+        try:
+            await query.message.edit_text(f"⚠️ Health Diagnostic Error: <code>{err}</code>")
+        except Exception:
+            pass
 
 
 @Client.on_callback_query(filters.regex(r"^cb_owner_reset_stuck$") & filters.user(Config.ADMIN))

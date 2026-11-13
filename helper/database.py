@@ -854,34 +854,68 @@ class Database:
         if not user:
             return {
                 "enabled": False,
+                "type": "text",
                 "text": "",
+                "image_id": None,
                 "position": "top_right",
                 "size": 28,
+                "opacity": 0.85,
                 "color": "white"
             }
         return {
             "enabled": bool(user.get("wm_enabled", False)),
-            "text": user.get("wm_text", ""),
-            "position": user.get("wm_position", "top_right"),
+            "type": str(user.get("wm_type", "text")),
+            "text": str(user.get("wm_text", "")),
+            "image_id": user.get("wm_image_id", None),
+            "position": str(user.get("wm_position", "top_right")),
             "size": int(user.get("wm_size", 28)),
-            "color": user.get("wm_color", "white")
+            "opacity": float(user.get("wm_opacity", 0.85)),
+            "color": str(user.get("wm_color", "white"))
         }
 
     async def set_watermark(self, user_id: int, **kwargs):
         update_dict = {}
         if "enabled" in kwargs:
             update_dict["wm_enabled"] = bool(kwargs["enabled"])
+        if "type" in kwargs:
+            update_dict["wm_type"] = str(kwargs["type"]).strip().lower()
         if "text" in kwargs:
             update_dict["wm_text"] = str(kwargs["text"]).strip()
+        if "image_id" in kwargs:
+            update_dict["wm_image_id"] = kwargs["image_id"]
         if "position" in kwargs:
             update_dict["wm_position"] = str(kwargs["position"]).strip().lower()
         if "size" in kwargs:
             update_dict["wm_size"] = int(kwargs["size"])
+        if "opacity" in kwargs:
+            update_dict["wm_opacity"] = float(kwargs["opacity"])
         if "color" in kwargs:
             update_dict["wm_color"] = str(kwargs["color"]).strip().lower()
 
         if update_dict:
             await self.col.update_one({'_id': int(user_id)}, {'$set': update_dict}, upsert=True)
+            _cache_delete(f"user_settings:{user_id}")
+
+    async def reset_watermark(self, user_id: int):
+        await self.col.update_one(
+            {'_id': int(user_id)},
+            {'$set': {
+                "wm_enabled": False,
+                "wm_type": "text",
+                "wm_text": "",
+                "wm_image_id": None,
+                "wm_position": "top_right",
+                "wm_size": 28,
+                "wm_opacity": 0.85,
+                "wm_color": "white"
+            }},
+            upsert=True
+        )
+        _cache_delete(f"user_settings:{user_id}")
+
+    get_watermark_settings = get_watermark
+    update_watermark_settings = set_watermark
+    reset_watermark_settings = reset_watermark
 
     # ==================== SAMPLE VIDEO SETTINGS ====================
     async def get_sample_settings(self, user_id: int) -> dict:
@@ -1214,8 +1248,8 @@ class Database:
         except Exception:
             return False
 
-    async def get_active_tasks(self, max_age_seconds: int = 7200) -> list:
-        """Returns all in-progress active tasks created within the last max_age_seconds (default 2h)."""
+    async def get_active_tasks(self, max_age_seconds: int = 21600) -> list:
+        """Returns all in-progress active tasks created within the last max_age_seconds (default 6h)."""
         try:
             min_ts = time.time() - max_age_seconds
             cursor = self.tasks.find({"updated_at": {"$gte": min_ts}, "status": "in_progress"})
@@ -1226,7 +1260,7 @@ class Database:
     async def get_user_active_tasks_count(self, user_id: int) -> int:
         """Returns number of active tasks currently running or queued for a user."""
         try:
-            min_ts = time.time() - 7200
+            min_ts = time.time() - 21600
             return await self.tasks.count_documents({
                 "user_id": int(user_id),
                 "status": "in_progress",
@@ -1235,7 +1269,7 @@ class Database:
         except Exception:
             return 0
 
-    async def cleanup_stale_tasks(self, max_age_seconds: int = 7200) -> int:
+    async def cleanup_stale_tasks(self, max_age_seconds: int = 21600) -> int:
         """Deletes tasks older than max_age_seconds from MongoDB."""
         try:
             min_ts = time.time() - max_age_seconds

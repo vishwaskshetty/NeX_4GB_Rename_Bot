@@ -24,37 +24,43 @@ BUFFER_SIZE = 16 * 1024 * 1024    # 16MB RAM write buffer for zero disk latency
 
 
 async def get_media_session(client: Client, dc_id: int) -> Session:
-    """Retrieves or initializes an authorized media session for the specified DC."""
+    """Retrieves or initializes an authorized media session for the specified DC with strict timeout."""
     session = client.media_sessions.get(dc_id)
     if not session:
-        test_mode = await client.storage.test_mode()
-        main_dc = await client.storage.dc_id()
+        test_mode = await asyncio.wait_for(client.storage.test_mode(), timeout=5.0)
+        main_dc = await asyncio.wait_for(client.storage.dc_id(), timeout=5.0)
         auth_key = (
-            await Auth(client, dc_id, test_mode).create()
+            await asyncio.wait_for(Auth(client, dc_id, test_mode).create(), timeout=5.0)
             if dc_id != main_dc
-            else await client.storage.auth_key()
+            else await asyncio.wait_for(client.storage.auth_key(), timeout=5.0)
         )
         session = client.media_sessions[dc_id] = Session(
             client, dc_id, auth_key, test_mode, is_media=True
         )
-        await session.start()
+        await asyncio.wait_for(session.start(), timeout=5.0)
 
         if dc_id != main_dc:
             for _ in range(3):
-                exported_auth = await client.invoke(
-                    raw.functions.auth.ExportAuthorization(dc_id=dc_id)
-                )
                 try:
-                    await session.invoke(
-                        raw.functions.auth.ImportAuthorization(
-                            id=exported_auth.id,
-                            bytes=exported_auth.bytes
-                        )
+                    exported_auth = await asyncio.wait_for(
+                        client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id)),
+                        timeout=5.0
                     )
+                    await asyncio.wait_for(
+                        session.invoke(
+                            raw.functions.auth.ImportAuthorization(
+                                id=exported_auth.id,
+                                bytes=exported_auth.bytes
+                            )
+                        ),
+                        timeout=5.0
+                    )
+                    break
                 except AuthBytesInvalid:
                     continue
-                else:
-                    break
+                except Exception as ex:
+                    log.warning(f"DC auth export/import error: {ex}")
+                    raise
             else:
                 raise AuthBytesInvalid
     return session
@@ -127,7 +133,11 @@ async def fast_download(
                 thumb_size=thumb_size
             )
 
-        session = await get_media_session(client, dc_id)
+        try:
+            session = await asyncio.wait_for(get_media_session(client, dc_id), timeout=6.0)
+        except Exception as sess_err:
+            log.warning(f"Media session init failed for DC {dc_id} ({sess_err}). Falling back to standard download_media...")
+            return await client.download_media(message_or_file, file_name=file_path, progress=progress, progress_args=progress_args)
 
         total_parts = math.ceil(file_size / CHUNK_SIZE) if file_size > 0 else 1
         queue = asyncio.Queue()
@@ -149,13 +159,16 @@ async def fast_download(
 
                 offset_bytes = part_idx * CHUNK_SIZE
                 try:
-                    r = await session.invoke(
-                        raw.functions.upload.GetFile(
-                            location=location,
-                            offset=offset_bytes,
-                            limit=CHUNK_SIZE
+                    r = await asyncio.wait_for(
+                        session.invoke(
+                            raw.functions.upload.GetFile(
+                                location=location,
+                                offset=offset_bytes,
+                                limit=CHUNK_SIZE
+                            ),
+                            sleep_threshold=getattr(client, "sleep_threshold", 60)
                         ),
-                        sleep_threshold=getattr(client, "sleep_threshold", 60)
+                        timeout=20.0
                     )
 
                     if isinstance(r, raw.types.upload.File):

@@ -35,6 +35,8 @@ async def build_settings_panel(user_id: int):
     settings = await db.get_user_settings(user_id)
     wm = await db.get_watermark(user_id)
     sample_set = await db.get_sample_settings(user_id)
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
     
     meta_status = "✅ ON" if settings["metadata_bool"] else "❌ OFF"
     wm_status = "✅ ON" if wm["enabled"] else "❌ OFF"
@@ -51,28 +53,41 @@ async def build_settings_panel(user_id: int):
     ss_status = f"{settings['screenshots']} frames" if settings["screenshots"] > 0 else "OFF"
     cleaner_status = "Active" if (settings["clean_words"] or settings["replace_words"]) else "None"
     dump_status = "Set" if settings["dump_channel"] else "None"
+    upload_mode = settings.get("upload_mode", "Ask")
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
         "┃   ⚙️ <b>NeX Control Panel & Settings</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>🏷️ Metadata :</b> {meta_status} (<code>{settings['metadata_code'][:18]}..</code>)\n"
-        f"◈ <b>💧 Watermark :</b> {wm_status} (<code>{wm['text'][:12] or 'None'}</code>)\n"
         f"◈ <b>🎬 Sample Video :</b> <code>{sample_status}</code>\n"
         f"◈ <b>📸 Screenshots :</b> <code>{ss_status}</code>\n"
         f"◈ <b>🖼️ Thumbnail :</b> <code>{thumb_status}</code>\n"
         f"◈ <b>📑 Caption :</b> <code>{caption_status}</code>\n"
         f"◈ <b>🔤 Prefix / Suffix :</b> <code>{prefix_status}</code> / <code>{suffix_status}</code>\n"
+        f"◈ <b>📤 Upload Mode :</b> <code>{upload_mode}</code>\n"
+        f"◈ <b>🏷️ Metadata :</b> {meta_status} (<code>{settings['metadata_code'][:16]}..</code>)\n"
+        f"◈ <b>💧 Watermark :</b> {wm_status} (<code>{wm['text'][:12] or ('Logo' if wm.get('image_id') else 'None')}</code>)\n"
         f"◈ <b>🧹 Cleaner :</b> <code>{cleaner_status}</code> | <b>Dump :</b> <code>{dump_status}</code>\n\n"
         "<i>Tap any feature below to customize your preferences:</i>\n\n"
         "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
 
+    if is_prem:
+        meta_btn = InlineKeyboardButton(f"🏷️ Metadata: {meta_status}", callback_data="cb_metadata")
+        wm_btn = InlineKeyboardButton(f"💧 Watermark: {wm_status}", callback_data="cb_watermark")
+        batch_btn = InlineKeyboardButton("📦 Batch Mode", callback_data="cb_batch_info")
+        stream_btn = InlineKeyboardButton("🔇 Stream Stripper", callback_data="cb_stream_info")
+        remux_btn = InlineKeyboardButton("🔀 Fast Remuxer", callback_data="cb_remux_info")
+        extract_btn = InlineKeyboardButton("🗜️ Archive Extract", callback_data="cb_extract_info")
+    else:
+        meta_btn = InlineKeyboardButton("🏷️ Metadata [💎 Prem]", callback_data="cb_prem_locked_meta")
+        wm_btn = InlineKeyboardButton("💧 Watermark [💎 Prem]", callback_data="cb_watermark")
+        batch_btn = InlineKeyboardButton("📦 Batch [💎 Prem]", callback_data="cb_prem_locked_batch")
+        stream_btn = InlineKeyboardButton("🔇 Streams [💎 Prem]", callback_data="cb_prem_locked_streams")
+        remux_btn = InlineKeyboardButton("🔀 Remux [💎 Prem]", callback_data="cb_prem_locked_remux")
+        extract_btn = InlineKeyboardButton("🗜️ Extract [💎 Prem]", callback_data="cb_prem_locked_extract")
+
     keyboard_buttons = [
-        [
-            InlineKeyboardButton(f"🏷️ Metadata: {meta_status}", callback_data="cb_metadata"),
-            InlineKeyboardButton(f"💧 Watermark: {wm_status}", callback_data="cb_watermark")
-        ],
         [
             InlineKeyboardButton(f"🎬 Sample: {sample_dur}s", callback_data="cb_sample_menu"),
             InlineKeyboardButton(f"📸 Screen: {settings['screenshots']}", callback_data="set_cycle_ss")
@@ -82,18 +97,35 @@ async def build_settings_panel(user_id: int):
             InlineKeyboardButton("🗑️ Delete Thumb", callback_data="set_del_thumb")
         ],
         [
-            InlineKeyboardButton("🧹 Cleaner Rules", callback_data="set_view_cleaner"),
-            InlineKeyboardButton("📦 Dump Channel", callback_data="set_view_dump")
+            InlineKeyboardButton("📑 Custom Caption", callback_data="cb_caption_menu"),
+            InlineKeyboardButton(f"📤 Upload: {upload_mode}", callback_data="cb_upload_mode_cycle")
         ],
         [
-            InlineKeyboardButton("👤 My Profile & Plan", callback_data="cb_user_profile"),
+            InlineKeyboardButton("🔤 Prefix / Suffix", callback_data="cb_prefix_suffix_menu"),
+            InlineKeyboardButton("🧹 Cleaner Rules", callback_data="set_view_cleaner")
+        ],
+        [
+            meta_btn,
+            wm_btn
+        ],
+        [
+            batch_btn,
+            stream_btn
+        ],
+        [
+            remux_btn,
+            extract_btn
+        ],
+        [
+            InlineKeyboardButton("📦 Dump Channel", callback_data="set_view_dump"),
             InlineKeyboardButton("🌍 Timezone", callback_data="open_timezone_menu")
         ],
         [
-            InlineKeyboardButton("🔄 Refresh", callback_data="open_settings"),
-            InlineKeyboardButton("⬅️ Back to Start", callback_data="start")
+            InlineKeyboardButton("👤 My Profile & Plan", callback_data="cb_user_profile"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="open_settings")
         ],
         [
+            InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
             InlineKeyboardButton("❌ Close", callback_data="close")
         ]
     ]
@@ -123,6 +155,25 @@ async def open_settings_cb(client, query: CallbackQuery):
 # ==================== METADATA SUBMENU ====================
 
 async def build_metadata_view(user_id: int):
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+
+    if not is_prem:
+        text = (
+            "╭━━━━━━━━━━━━━━━━━━━╮\n"
+            "┃   🏷️ <b>NeX Metadata (Premium)</b>\n"
+            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+            "⚠️ <b>Custom Metadata Injection is an exclusive Premium Feature!</b>\n\n"
+            "Inject your custom branding into title, author, and audio/video/sub streams losslessly.\n\n"
+            "🚀 Upgrade to <b>Premium</b> to unlock Metadata Injection, Watermarks, and 4GB Transfers!"
+        )
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💎 Upgrade to Premium", callback_data="open_plans")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+             InlineKeyboardButton("❌ Close", callback_data="close")]
+        ])
+        return text, markup
+
     meta_bool = await db.get_metadata_bool(user_id)
     meta_code = await db.get_metadata_code(user_id)
     status_str = "ENABLED 🟢" if meta_bool else "DISABLED 🔴"
@@ -177,7 +228,7 @@ async def build_watermark_view(user_id: int):
             "┃   💧 <b>Video Watermark (Premium)</b>\n"
             "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
             "⚠️ <b>Video Watermark is an exclusive Premium Feature!</b>\n\n"
-            "Burn your channel tag or custom watermark text directly into video frames with ultrafast FFmpeg encoding.\n\n"
+            "Burn your channel tag or custom watermark text/logo directly into video frames with ultrafast FFmpeg encoding.\n\n"
             "🚀 Upgrade to <b>Premium</b> to unlock Watermarks, 4GB Transfers, and Unlimited Renaming!"
         )
         markup = InlineKeyboardMarkup([
@@ -189,47 +240,85 @@ async def build_watermark_view(user_id: int):
 
     wm = await db.get_watermark(user_id)
     status_str = "ENABLED 🟢" if wm["enabled"] else "DISABLED 🔴"
-    wm_text = wm["text"] or "<i>Not Set (use /set_watermark)</i>"
+    wm_type = wm.get("type", "text")
+    type_display = "Text 🔤" if wm_type == "text" else "Image Logo 🖼️"
+    
+    if wm_type == "text":
+        content_str = wm.get("text") or "<i>Not Set (use /set_watermark)</i>"
+        size_display = f"{wm.get('size', 28)}px"
+    else:
+        content_str = "Logo Configured ✅" if wm.get("image_id") else "<i>No Logo (reply with /set_wm_logo)</i>"
+        size_display = f"{wm.get('size', 160)}px scale"
+
+    opacity_pct = int(wm.get("opacity", 0.85) * 100)
 
     text = (
         "╭━━━━━━━━━━━━━━━━━━━╮\n"
         "┃   💧 <b>Video Watermark Settings</b>\n"
         "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
         f"◈ <b>Status :</b> <b>{status_str}</b>\n"
-        f"◈ <b>Text :</b> <code>{wm_text}</code>\n"
+        f"◈ <b>Type :</b> <b>{type_display}</b>\n"
+        f"◈ <b>Content :</b> <code>{content_str}</code>\n"
         f"◈ <b>Position :</b> <code>{wm['position']}</code>\n"
-        f"◈ <b>Font Size :</b> <code>{wm['size']}px</code> | <b>Color :</b> <code>{wm['color']}</code>\n\n"
-        "<i>To change text: <code>/set_watermark @YourChannel</code></i>\n\n"
+        f"◈ <b>Size :</b> <code>{size_display}</code> | <b>Opacity :</b> <code>{opacity_pct}%</code>\n"
+    )
+    if wm_type == "text":
+        text += f"◈ <b>Color :</b> <code>{wm['color']}</code>\n\n"
+    else:
+        text += "\n"
+    text += (
+        "<b>Instructions:</b>\n"
+        "• <b>Text :</b> <code>/set_watermark @YourChannel</code>\n"
+        "• <b>Logo Image :</b> Reply to a photo with <code>/set_wm_logo</code>\n"
+        "• <b>Reset :</b> <code>/del_watermark</code>\n\n"
         "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
     )
 
-    markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Toggle: {'Disable ❌' if wm['enabled'] else 'Enable ✅'}", callback_data="cb_wm_toggle")],
+    size_buttons = [
+        InlineKeyboardButton("🔉 Small", callback_data="cb_wm_size_small"),
+        InlineKeyboardButton("🔊 Medium", callback_data="cb_wm_size_med"),
+        InlineKeyboardButton("📢 Large", callback_data="cb_wm_size_large")
+    ]
+
+    markup_buttons = [
+        [
+            InlineKeyboardButton(f"Status: {'Disable ❌' if wm['enabled'] else 'Enable ✅'}", callback_data="cb_wm_toggle"),
+            InlineKeyboardButton(f"Type: {type_display}", callback_data="cb_wm_type_toggle")
+        ],
         [
             InlineKeyboardButton("↖️ Top-Left", callback_data="cb_wm_pos_top_left"),
+            InlineKeyboardButton("🎯 Center", callback_data="cb_wm_pos_center"),
             InlineKeyboardButton("↗️ Top-Right", callback_data="cb_wm_pos_top_right")
         ],
-        [InlineKeyboardButton("🎯 Center", callback_data="cb_wm_pos_center")],
         [
             InlineKeyboardButton("↙️ Bot-Left", callback_data="cb_wm_pos_bottom_left"),
             InlineKeyboardButton("↘️ Bot-Right", callback_data="cb_wm_pos_bottom_right")
         ],
+        size_buttons,
         [
-            InlineKeyboardButton("🔉 Small (18)", callback_data="cb_wm_size_18"),
-            InlineKeyboardButton("🔊 Med (28)", callback_data="cb_wm_size_28"),
-            InlineKeyboardButton("📢 Large (40)", callback_data="cb_wm_size_40")
-        ],
-        [
+            InlineKeyboardButton("💧 50%", callback_data="cb_wm_op_50"),
+            InlineKeyboardButton("💧 75%", callback_data="cb_wm_op_75"),
+            InlineKeyboardButton("💧 85%", callback_data="cb_wm_op_85"),
+            InlineKeyboardButton("💧 100%", callback_data="cb_wm_op_100")
+        ]
+    ]
+
+    if wm_type == "text":
+        markup_buttons.append([
             InlineKeyboardButton("⚪ White", callback_data="cb_wm_col_white"),
             InlineKeyboardButton("🟡 Yellow", callback_data="cb_wm_col_yellow"),
             InlineKeyboardButton("🔵 Cyan", callback_data="cb_wm_col_cyan")
-        ],
-        [
-            InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
-            InlineKeyboardButton("❌ Close", callback_data="close")
-        ]
+        ])
+
+    markup_buttons.append([
+        InlineKeyboardButton("🔄 Reset Default", callback_data="cb_wm_reset"),
+        InlineKeyboardButton("⬅️ Back", callback_data="open_settings")
     ])
-    return text, markup
+    markup_buttons.append([
+        InlineKeyboardButton("❌ Close", callback_data="close")
+    ])
+
+    return text, InlineKeyboardMarkup(markup_buttons)
 
 
 @Client.on_message(filters.private & filters.command("watermark"))
@@ -251,10 +340,50 @@ async def set_watermark_cmd(client, message):
     if len(message.command) == 1:
         return await message.reply_text("⚠️ <b>Usage:</b> <code>/set_watermark @YourChannel</code>")
     text = message.text.split(" ", 1)[1].strip()
-    await db.set_watermark(user_id, text=text, enabled=True)
+    await db.set_watermark(user_id, text=text, type="text", enabled=True)
     await message.reply_text(
         f"✅ <b>Watermark Text Saved!</b>\n\n💧 <b>Tag:</b> <code>{text}</code>\n🟢 <b>Status:</b> Enabled\n\n⚡ @Nex_bots"
     )
+
+
+@Client.on_message(filters.private & filters.command("set_wm_logo"))
+async def set_wm_logo_cmd(client, message):
+    user_id = message.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await message.reply_text(
+            "⚠️ <b>Video Watermark is a Premium-Only Feature!</b>\n\nUpgrade via <code>/plan</code> to unlock.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 View Plans", callback_data="open_plans")]])
+        )
+
+    target = message.reply_to_message or message
+    photo = target.photo or (target.document if target.document and target.document.mime_type and target.document.mime_type.startswith("image/") else None)
+    
+    if not photo:
+        return await message.reply_text(
+            "⚠️ <b>Please reply to an image or photo with <code>/set_wm_logo</code>!</b>\n\n"
+            "PNG format with transparent background is recommended.",
+            quote=True
+        )
+
+    file_id = photo.file_id
+    await db.set_watermark(user_id, image_id=file_id, type="image", enabled=True)
+    await message.reply_text(
+        "✅ <b>Watermark Logo Saved Successfully!</b>\n\n"
+        "💧 <b>Type:</b> Image Logo 🖼️\n"
+        "🟢 <b>Status:</b> ENABLED\n\n"
+        "⚡ <i>Your logo will now be burned into video files.</i>\n"
+        "Customize size, opacity, and position in <code>/settings</code>.",
+        quote=True
+    )
+
+
+@Client.on_message(filters.private & filters.command(["del_watermark", "del_wm_logo"]))
+async def del_watermark_cmd(client, message):
+    user_id = message.from_user.id
+    await db.reset_watermark(user_id)
+    await message.reply_text("✅ <b>Watermark settings have been reset to default!</b>\n\n⚡ @Nex_bots")
 
 
 @Client.on_callback_query(filters.regex(r"^cb_watermark$"))
@@ -275,6 +404,17 @@ async def cb_wm_toggle(client, query: CallbackQuery):
     await query.answer(f"Watermark {'Enabled ✅' if new_state else 'Disabled ❌'}")
 
 
+@Client.on_callback_query(filters.regex(r"^cb_wm_type_toggle$"))
+async def cb_wm_type_toggle(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    wm = await db.get_watermark(user_id)
+    new_type = "image" if wm.get("type", "text") == "text" else "text"
+    await db.set_watermark(user_id, type=new_type)
+    text, markup = await build_watermark_view(user_id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer(f"Mode switched to {'Image Logo 🖼️' if new_type == 'image' else 'Text 🔤'}!")
+
+
 @Client.on_callback_query(filters.regex(r"^cb_wm_pos_(top_left|top_right|center|bottom_left|bottom_right)$"))
 async def cb_wm_pos(client, query: CallbackQuery):
     pos = query.matches[0].group(1)
@@ -284,13 +424,33 @@ async def cb_wm_pos(client, query: CallbackQuery):
     await query.answer(f"Position set to {pos}! 🎯")
 
 
-@Client.on_callback_query(filters.regex(r"^cb_wm_size_(\d+)$"))
+@Client.on_callback_query(filters.regex(r"^cb_wm_size_(small|med|large|\d+)$"))
 async def cb_wm_size(client, query: CallbackQuery):
-    size = int(query.matches[0].group(1))
+    val = query.matches[0].group(1)
+    wm = await db.get_watermark(query.from_user.id)
+    is_img = wm.get("type") == "image"
+    if val == "small":
+        size = 120 if is_img else 18
+    elif val == "med":
+        size = 180 if is_img else 28
+    elif val == "large":
+        size = 260 if is_img else 40
+    else:
+        size = int(val)
     await db.set_watermark(query.from_user.id, size=size)
     text, markup = await build_watermark_view(query.from_user.id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Size set to {size}px! 🔤")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_wm_op_(50|75|85|100)$"))
+async def cb_wm_op(client, query: CallbackQuery):
+    val = int(query.matches[0].group(1))
+    op = val / 100.0
+    await db.set_watermark(query.from_user.id, opacity=op)
+    text, markup = await build_watermark_view(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer(f"Opacity set to {val}%! 💧")
 
 
 @Client.on_callback_query(filters.regex(r"^cb_wm_col_(white|yellow|cyan)$"))
@@ -300,6 +460,193 @@ async def cb_wm_col(client, query: CallbackQuery):
     text, markup = await build_watermark_view(query.from_user.id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Color set to {col}! 🎨")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_wm_reset$"))
+async def cb_wm_reset(client, query: CallbackQuery):
+    await db.reset_watermark(query.from_user.id)
+    text, markup = await build_watermark_view(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Watermark reset to default! 🔄")
+
+
+# ==================== PREMIUM LOCKED POPUPS & ADVANCED TOOLS ====================
+
+@Client.on_callback_query(filters.regex(r"^cb_prem_locked_(meta|batch|streams|remux|extract)$"))
+async def cb_prem_locked_popup(client, query: CallbackQuery):
+    feature = query.matches[0].group(1)
+    feat_names = {
+        "meta": "Custom Metadata Injection",
+        "batch": "Batch Queue Processing",
+        "streams": "Audio & Subtitle Track Remover",
+        "remux": "MKV ⇄ MP4 Fast Container Remuxer",
+        "extract": "Direct Archive Extractor"
+    }
+    fname = feat_names.get(feature, "This Feature")
+    await query.answer(
+        f"💎 {fname} is a Premium-Only Feature!\n\nUpgrade to Silver, Gold, or Diamond via /plan to unlock.",
+        show_alert=True
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^cb_caption_menu$"))
+async def cb_caption_menu(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    current_cap = await db.get_caption(user_id)
+    cap_display = f"<code>{current_cap}</code>" if current_cap else "<i>Default caption (No custom template)</i>"
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   📑 <b>Custom Caption Settings</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Current Caption :</b>\n{cap_display}\n\n"
+        "<b>Supported Dynamic Variables:</b>\n"
+        "• <code>{filename}</code> - Clean file name\n"
+        "• <code>{filesize}</code> - Human readable file size\n"
+        "• <code>{duration}</code> - Video length in MM:SS\n\n"
+        "<b>Commands:</b>\n"
+        "• <code>/set_caption &lt;text&gt;</code> - Set template\n"
+        "• <code>/del_caption</code> - Remove custom template\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑️ Clear Caption", callback_data="cb_clear_caption")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_clear_caption$"))
+async def cb_clear_caption(client, query: CallbackQuery):
+    await db.set_caption(query.from_user.id, None)
+    await query.answer("Custom caption cleared! 🗑️")
+    text, markup = await build_settings_panel(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_prefix_suffix_menu$"))
+async def cb_prefix_suffix_menu(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    prefix = await db.get_prefix(user_id) or "None"
+    suffix = await db.get_suffix(user_id) or "None"
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🔤 <b>Prefix & Suffix Settings</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"◈ <b>Prefix :</b> <code>{prefix}</code>\n"
+        f"◈ <b>Suffix :</b> <code>{suffix}</code>\n\n"
+        "<b>Commands:</b>\n"
+        "• <code>/set_prefix [Nex] </code> - Prepend text to filename\n"
+        "• <code>/del_prefix</code> - Remove prefix\n"
+        "• <code>/set_suffix  @Nex_bots</code> - Append text before extension\n"
+        "• <code>/del_suffix</code> - Remove suffix\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑️ Clear Prefix", callback_data="cb_clear_prefix"),
+         InlineKeyboardButton("🗑️ Clear Suffix", callback_data="cb_clear_suffix")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+         InlineKeyboardButton("❌ Close", callback_data="close")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_clear_prefix$"))
+async def cb_clear_prefix(client, query: CallbackQuery):
+    await db.set_prefix(query.from_user.id, None)
+    await query.answer("Prefix cleared! 🗑️")
+    text, markup = await build_settings_panel(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_clear_suffix$"))
+async def cb_clear_suffix(client, query: CallbackQuery):
+    await db.set_suffix(query.from_user.id, None)
+    await query.answer("Suffix cleared! 🗑️")
+    text, markup = await build_settings_panel(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_upload_mode_cycle$"))
+async def cb_upload_mode_cycle(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    current_mode = await db.get_upload_mode(user_id)
+    cycle = {"Ask": "Document", "Document": "Video", "Video": "Audio", "Audio": "Ask"}
+    next_mode = cycle.get(current_mode, "Ask")
+    await db.set_upload_mode(user_id, next_mode)
+    text, markup = await build_settings_panel(user_id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer(f"Upload Mode: {next_mode} 📤")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_batch_info$"))
+async def cb_batch_info(client, query: CallbackQuery):
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   📦 <b>Batch Mode (Premium)</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "• Forward or send up to <b>10 files</b> in sequence.\n"
+        "• The bot queues and renames all files automatically!\n"
+        "• Use <code>/batch</code> to review active batch operations.\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+                                    InlineKeyboardButton("❌ Close", callback_data="close")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_stream_info$"))
+async def cb_stream_info(client, query: CallbackQuery):
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🔇 <b>Stream Stripper (Premium)</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "• Strip unwanted multi-audio tracks or subtitle streams.\n"
+        "• Lossless track removal with zero re-encoding speed.\n"
+        "• Click <b>🎵 Audio / Sub Streams</b> when sending any video.\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+                                    InlineKeyboardButton("❌ Close", callback_data="close")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_remux_info$"))
+async def cb_remux_info(client, query: CallbackQuery):
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🔀 <b>Fast Remuxer (Premium)</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "• Convert MKV ⇄ MP4 losslessly in under 5 seconds.\n"
+        "• Stream copy without losing 1 frame or audio fidelity.\n"
+        "• Click <b>🔄 MKV ⇄ MP4 Remux</b> on video menu.\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+                                    InlineKeyboardButton("❌ Close", callback_data="close")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_extract_info$"))
+async def cb_extract_info(client, query: CallbackQuery):
+    text = (
+        "╭━━━━━━━━━━━━━━━━━━━╮\n"
+        "┃   🗜️ <b>Archive Extractor (Premium)</b>\n"
+        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "• Extract ZIP, RAR, 7Z, and TAR archives on the fly.\n"
+        "• Individual files uploaded directly to your chat.\n"
+        "• Supports password-protected archives.\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="open_settings"),
+                                    InlineKeyboardButton("❌ Close", callback_data="close")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
 
 
 # ==================== SAMPLE VIDEO & TIMELINE SUBMENU ====================
@@ -523,6 +870,13 @@ async def view_metadata(client, message):
 @Client.on_message(filters.private & filters.command("set_metadata"))
 async def set_metadata_cmd(client, message):
     user_id = message.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await message.reply_text(
+            "⚠️ <b>Custom Metadata is a Premium-Only Feature!</b>\n\nUpgrade via <code>/plan</code> to unlock.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 View Plans", callback_data="open_plans")]])
+        )
     if len(message.command) == 1:
         return await message.reply_text(
             "⚠️ <b>Please provide a metadata tag!</b>\n\n"
@@ -542,6 +896,13 @@ async def set_metadata_cmd(client, message):
 @Client.on_message(filters.private & filters.command("toggle_metadata"))
 async def toggle_metadata_cmd(client, message):
     user_id = message.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await message.reply_text(
+            "⚠️ <b>Custom Metadata is a Premium-Only Feature!</b>\n\nUpgrade via <code>/plan</code> to unlock.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💎 View Plans", callback_data="open_plans")]])
+        )
     current = await db.get_metadata_bool(user_id)
     new_state = not current
     await db.set_metadata_bool(user_id, new_state)

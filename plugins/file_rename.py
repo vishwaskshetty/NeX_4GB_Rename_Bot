@@ -303,6 +303,10 @@ async def rename_start(client, message):
                 InlineKeyboardButton("🔄 MKV ⇄ MP4 Remux", callback_data=f"remux_action_{message.id}")
             ],
             [
+                InlineKeyboardButton("💧 Video Watermark", callback_data=f"watermark_action_{message.id}"),
+                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")
+            ],
+            [
                 InlineKeyboardButton("❌ Cancel", callback_data="close")
             ]
         ]
@@ -636,6 +640,24 @@ async def remux_action_cb(client, query: CallbackQuery):
     )
 
 
+@Client.on_callback_query(filters.regex(r"^watermark_action(?:_(\d+))?$"))
+async def watermark_action_cb(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+
+    if not is_prem:
+        return await query.answer(
+            "💎 Video Watermark is a Premium Feature!\n\nUpgrade via /plan to burn custom text or logo watermarks onto your videos.",
+            show_alert=True
+        )
+
+    from plugins.extra_features import build_watermark_view
+    text, markup = await build_watermark_view(user_id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Watermark Settings Opened! 💧")
+
+
 @Client.on_message(filters.private & filters.reply)
 async def refunc(client, message):
     reply_message = message.reply_to_message
@@ -946,8 +968,14 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
         await ms.edit("⏳ <b>Adding to processing queue... Please wait.</b>")
         
         async with RENAME_SEMAPHORE:
+            clean_name = re.sub(r'[\\/*?:"<>|]', '_', str(new_filename)).strip()
+            if not clean_name:
+                clean_name = "renamed_file.mkv"
+            new_filename = clean_name
+
             # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 2.2x file size free; fallback to SSD
             work_dir = get_optimal_work_dir(user_id, file_size)
+            os.makedirs(work_dir, exist_ok=True)
             abs_work_dir = os.path.abspath(work_dir)
             ACTIVE_WORK_DIRS.add(abs_work_dir)
             file_path = os.path.join(work_dir, new_filename)
@@ -963,12 +991,27 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
                     file_name=new_filename,
                     file_size=file_size,
                     task_type="rename",
-                    extra={"upload_type": upload_type, "work_dir": work_dir}
+                    extra={
+                        "upload_type": upload_type,
+                        "work_dir": work_dir,
+                        "chat_id": file_msg.chat.id,
+                        "source_message_id": file_msg.id,
+                        "status_message_id": ms.id,
+                        "new_name": new_filename,
+                        "extras": extras or {}
+                    }
                 )
             except Exception:
                 pass
 
-            await ms.edit("<b>◈ ꜰɪʟᴇ ʀᴇɴᴀᴍᴇ ᴍᴏᴅᴇ: ᴇɴɢᴀɢɪɴɢ! 💠</b>")
+            cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancel", callback_data=f"cancel_process_{task_id}")]])
+            try:
+                await ms.edit(
+                    "<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>\n\n<i>Connecting to high-speed MTProto server...</i>",
+                    reply_markup=cancel_btn
+                )
+            except Exception:
+                pass
 
             # 1. Download media via parallel MTProto chunk streaming with safe fallback
             start_time = time.time()
@@ -1030,32 +1073,53 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             is_prem = (user_tier >= 1) or (user_id in Config.ADMIN)
             wm_info = await db.get_watermark(user_id)
 
-            if is_video and is_prem and wm_info.get("enabled") and wm_info.get("text"):
-                await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
-                wm_file = os.path.join(work_dir, f"wm_{new_filename}")
-                wm_ok = await apply_video_watermark(
-                    input_path=file_path,
-                    output_path=wm_file,
-                    text=wm_info.get("text"),
-                    position=wm_info.get("position", "top_right"),
-                    size=wm_info.get("size", 28),
-                    color=wm_info.get("color", "white")
-                )
-                if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
-                    clean_target = os.path.join(work_dir, new_filename)
-                    if os.path.exists(file_path):
+            if is_video and is_prem and wm_info.get("enabled"):
+                wm_type = wm_info.get("type", "text")
+                wm_img_path = None
+                can_apply = False
+
+                if wm_type == "image" and wm_info.get("image_id"):
+                    try:
+                        await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴡᴀᴛᴇʀᴍᴀʀᴋ ʟᴏɢᴏ... 🖼️</b>")
+                        logo_target = os.path.join(work_dir, "wm_logo.png")
+                        dl_logo = await client.download_media(wm_info.get("image_id"), file_name=logo_target)
+                        if dl_logo and os.path.exists(dl_logo):
+                            wm_img_path = dl_logo
+                            can_apply = True
+                    except Exception as err:
+                        print(f"Failed to download watermark logo: {err}")
+                elif wm_info.get("text"):
+                    can_apply = True
+
+                if can_apply:
+                    await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                    wm_file = os.path.join(work_dir, f"wm_{new_filename}")
+                    wm_ok = await apply_video_watermark(
+                        input_path=file_path,
+                        output_path=wm_file,
+                        text=wm_info.get("text", ""),
+                        wm_type=wm_type,
+                        image_path=wm_img_path,
+                        position=wm_info.get("position", "top_right"),
+                        size=wm_info.get("size", 28),
+                        opacity=wm_info.get("opacity", 0.85),
+                        color=wm_info.get("color", "white")
+                    )
+                    if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
+                        clean_target = os.path.join(work_dir, new_filename)
+                        if os.path.exists(file_path):
+                            try:
+                                os.remove(file_path)
+                            except Exception:
+                                pass
+                        os.replace(wm_file, clean_target)
+                        file_path = clean_target
+                        actual_file_size = os.path.getsize(file_path)
+                        duration, width, height = await get_video_duration_and_dims(file_path)
                         try:
-                            os.remove(file_path)
+                            await db.increment_stat(user_id, "total_watermarks_applied", 1)
                         except Exception:
                             pass
-                    os.replace(wm_file, clean_target)
-                    file_path = clean_target
-                    actual_file_size = os.path.getsize(file_path)
-                    duration, width, height = await get_video_duration_and_dims(file_path)
-                    try:
-                        await db.increment_stat(user_id, "total_watermarks_applied", 1)
-                    except Exception:
-                        pass
 
             # 4. Process Custom Thumbnail with Aspect Ratio Preservation
             c_thumb = await db.get_thumbnail(user_id)
@@ -1391,3 +1455,87 @@ async def reset_task_cmd(client, message):
         "⚡ @Nex_bots",
         **safe_reply_params(message.id)
     )
+
+
+async def resume_interrupted_tasks(client):
+    """
+    Automatic Task Resumption after cloud handoff or server restart.
+    Automatically retrieves interrupted tasks from MongoDB and resumes execution without user re-sending.
+    """
+    try:
+        pending_tasks = await db.get_active_tasks(max_age_seconds=21600)
+        if not pending_tasks:
+            return
+
+        print(f"🔄 [Recovery] Found {len(pending_tasks)} active/interrupted tasks from previous run.")
+        for task in pending_tasks:
+            task_id = str(task.get("_id"))
+            user_id = task.get("user_id")
+            file_name = task.get("file_name", "file.mkv")
+            extra = task.get("extra", {}) or {}
+            chat_id = extra.get("chat_id") or user_id
+            src_msg_id = extra.get("source_message_id")
+            status_msg_id = extra.get("status_message_id")
+            upload_type = extra.get("upload_type", "document")
+            task_extras = extra.get("extras", {})
+
+            if not src_msg_id:
+                await db.remove_active_task(task_id)
+                continue
+
+            try:
+                file_msg = await client.get_messages(chat_id, int(src_msg_id))
+            except Exception as e:
+                print(f"⚠️ [Recovery] Failed to fetch source message {src_msg_id} in {chat_id}: {e}")
+                file_msg = None
+
+            if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+                try:
+                    await client.send_message(
+                        chat_id=chat_id,
+                        text=f"⚠️ <b>NeX Cloud Handoff:</b>\n\nCould not recover interrupted task for <code>{file_name}</code>. Please send your file again.",
+                        reply_parameters=ReplyParameters(message_id=int(src_msg_id)) if src_msg_id else None
+                    )
+                except Exception:
+                    pass
+                await db.remove_active_task(task_id)
+                continue
+
+            ms = None
+            if status_msg_id:
+                try:
+                    ms = await client.get_messages(chat_id, int(status_msg_id))
+                except Exception:
+                    ms = None
+
+            if not ms or not getattr(ms, "text", None):
+                try:
+                    ms = await client.send_message(
+                        chat_id=chat_id,
+                        text=f"🔄 <b>NeX Cloud Handoff Resuming...</b>\n\nResuming <code>{file_name}</code> automatically ⚡",
+                        reply_parameters=ReplyParameters(message_id=file_msg.id)
+                    )
+                except Exception:
+                    pass
+
+            if not ms:
+                await db.remove_active_task(task_id)
+                continue
+
+            print(f"🚀 [Recovery] Resuming task {task_id} for user {user_id} ({file_name})...")
+            await db.remove_active_task(task_id)
+            asyncio.create_task(
+                execute_rename_pipeline(
+                    client=client,
+                    ms=ms,
+                    new_filename=file_name,
+                    upload_type=upload_type,
+                    file_msg=file_msg,
+                    extras=task_extras
+                )
+            )
+            await asyncio.sleep(2)
+
+        await db.cleanup_stale_tasks(max_age_seconds=21600)
+    except Exception as e:
+        print(f"⚠️ [Recovery] Error in resume_interrupted_tasks: {e}")
