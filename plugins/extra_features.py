@@ -59,7 +59,7 @@ async def build_settings_panel(user_id: int):
 
     text = (
         "<b>◈ Uꜱᴇʀ Sᴇᴛᴛɪɴɢꜱ ⚙️</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ :</b> <code>{sample_status}</code>\n"
         f"▸ <b>📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ :</b> <code>{ss_status}</code>\n"
         f"▸ <b>🖼️ Tʜᴜᴍʙɴᴀɪʟ :</b> <code>{thumb_status}</code>\n"
@@ -69,7 +69,7 @@ async def build_settings_panel(user_id: int):
         f"▸ <b>🏷️ Mᴇᴛᴀᴅᴀᴛᴀ :</b> {meta_status} (<code>{settings['metadata_code'][:16]}..</code>)\n"
         f"▸ <b>💧 Wᴀᴛᴇʀᴍᴀʀᴋ :</b> {wm_status} (<code>{wm['text'][:12] or ('Logo' if wm.get('image_id') else 'None')}</code>)\n"
         f"▸ <b>🧹 Cʟᴇᴀɴᴇʀ :</b> <code>{cleaner_status}</code> | <b>Dᴜᴍᴘ :</b> <code>{dump_status}</code>\n"
-        "───────────────\n"
+        "\n"
         "<i>Tap any feature below to customize your preferences:</i>\n\n"
         "⚡ @Nex_bots | 💬 Sᴜᴘᴘᴏʀᴛ: @NexCRSupportbot"
     )
@@ -163,7 +163,7 @@ async def build_metadata_view(user_id: int):
     if not is_prem:
         text = (
             "<b>◈ NᴇX Mᴇᴛᴀᴅᴀᴛᴀ [💎 Pʀᴇᴍɪᴜᴍ]</b>\n"
-            "───────────────\n"
+            "\n"
             "⚠️ <b>Custom Metadata Injection is an exclusive Premium Feature!</b>\n\n"
             "Inject your custom branding into title, author, and audio/video/sub streams losslessly.\n\n"
             "🚀 Upgrade to <b>Premium</b> to unlock Metadata Injection, Watermarks, and 4GB Transfers!"
@@ -181,7 +181,7 @@ async def build_metadata_view(user_id: int):
 
     text = (
         "<b>◈ NᴇX Mᴇᴛᴀᴅᴀᴛᴀ Eɴɢɪɴᴇ 🏷️</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Cᴜʀʀᴇɴᴛ Sᴛᴀᴛᴜꜱ :</b> <b>{status_str}</b>\n"
         f"▸ <b>Mᴇᴛᴀᴅᴀᴛᴀ Tᴀɢ :</b> <code>{meta_code}</code>\n\n"
         "<b>Iɴꜱᴛʀᴜᴄᴛɪᴏɴꜱ :</b>\n"
@@ -225,7 +225,7 @@ async def build_watermark_view(user_id: int):
     if not is_prem:
         text = (
             "<b>◈ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ [💎 Pʀᴇᴍɪᴜᴍ]</b>\n"
-            "───────────────\n"
+            "\n"
             "⚠️ <b>Video Watermark is an exclusive Premium Feature!</b>\n\n"
             "Burn your channel tag or custom watermark text/logo directly into video frames with ultrafast FFmpeg encoding.\n\n"
             "🚀 Upgrade to <b>Premium</b> to unlock Watermarks, 4GB Transfers, and Unlimited Renaming!"
@@ -253,7 +253,7 @@ async def build_watermark_view(user_id: int):
 
     text = (
         "<b>◈ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Sᴇᴛᴛɪɴɢꜱ 💧</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Sᴛᴀᴛᴜꜱ :</b> <b>{status_str}</b>\n"
         f"▸ <b>Tʏᴘᴇ :</b> <b>{type_display}</b>\n"
         f"▸ <b>Cᴏɴᴛᴇɴᴛ :</b> <code>{content_str}</code>\n"
@@ -427,7 +427,7 @@ async def cb_wm_set_text(client, query: CallbackQuery):
     USER_STATE[user_id] = "waiting_wm_text"
     await query.message.reply_text(
         "<b>◈ Sᴇᴛ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ 💧</b>\n"
-        "───────────────\n"
+        "\n"
         "<i>Please reply to this message with your desired watermark text (e.g. <code>@YourChannel</code>):</i>",
         reply_markup=ForceReply(True)
     )
@@ -444,7 +444,7 @@ async def cb_wm_set_logo(client, query: CallbackQuery):
     USER_STATE[user_id] = "waiting_wm_logo"
     await query.message.reply_text(
         "<b>◈ Sᴇᴛ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ 🖼️</b>\n"
-        "───────────────\n"
+        "\n"
         "<i>Please send or forward a PNG/JPG logo photo as a reply to this message:</i>",
         reply_markup=ForceReply(True)
     )
@@ -532,7 +532,7 @@ async def cb_caption_menu(client, query: CallbackQuery):
     cap_display = f"<code>{current_cap}</code>" if current_cap else "<i>Default caption (No custom template)</i>"
     text = (
         "<b>◈ Cᴜꜱᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Sᴇᴛᴛɪɴɢꜱ 📑</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Cᴜʀʀᴇɴᴛ Cᴀᴘᴛɪᴏɴ :</b>\n{cap_display}\n\n"
         "<b>Sᴜᴘᴘᴏʀᴛᴇᴅ Vᴀʀɪᴀʙʟᴇꜱ :</b>\n"
         "• <code>{filename}</code> - Clean file name\n"
@@ -567,7 +567,7 @@ async def cb_prefix_suffix_menu(client, query: CallbackQuery):
     suffix = await db.get_suffix(user_id) or "None"
     text = (
         "<b>◈ Pʀᴇꜰɪx & Sᴜꜰꜰɪx Sᴇᴛᴛɪɴɢꜱ 🔤</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Pʀᴇꜰɪx :</b> <code>{prefix}</code>\n"
         f"▸ <b>Sᴜꜰꜰɪx :</b> <code>{suffix}</code>\n\n"
         "<b>Cᴏᴍᴍᴀɴᴅꜱ :</b>\n"
@@ -619,7 +619,7 @@ async def cb_upload_mode_cycle(client, query: CallbackQuery):
 async def cb_batch_info(client, query: CallbackQuery):
     text = (
         "<b>◈ Bᴀᴛᴄʜ Mᴏᴅᴇ [💎 Pʀᴇᴍɪᴜᴍ] 📦</b>\n"
-        "───────────────\n"
+        "\n"
         "• Forward or send up to <b>10 files</b> in sequence.\n"
         "• The bot queues and renames all files automatically!\n"
         "• Use <code>/batch</code> to review active batch operations.\n\n"
@@ -635,7 +635,7 @@ async def cb_batch_info(client, query: CallbackQuery):
 async def cb_stream_info(client, query: CallbackQuery):
     text = (
         "<b>◈ Sᴛʀᴇᴀᴍ Sᴛʀɪᴘᴘᴇʀ [💎 Pʀᴇᴍɪᴜᴍ] 🔇</b>\n"
-        "───────────────\n"
+        "\n"
         "• Strip unwanted multi-audio tracks or subtitle streams.\n"
         "• Lossless track removal with zero re-encoding speed.\n"
         "• Click <b>🎵 Audio / Sub Streams</b> when sending any video.\n\n"
@@ -651,7 +651,7 @@ async def cb_stream_info(client, query: CallbackQuery):
 async def cb_remux_info(client, query: CallbackQuery):
     text = (
         "<b>◈ Fᴀꜱᴛ Rᴇᴍᴜxᴇʀ [💎 Pʀᴇᴍɪᴜᴍ] 🔀</b>\n"
-        "───────────────\n"
+        "\n"
         "• Convert MKV ⇄ MP4 losslessly in under 5 seconds.\n"
         "• Stream copy without losing 1 frame or audio fidelity.\n"
         "• Click <b>🔄 MKV ⇄ MP4 Remux</b> on video menu.\n\n"
@@ -667,7 +667,7 @@ async def cb_remux_info(client, query: CallbackQuery):
 async def cb_extract_info(client, query: CallbackQuery):
     text = (
         "<b>◈ Aʀᴄʜɪᴠᴇ Exᴛʀᴀᴄᴛᴏʀ [💎 Pʀᴇᴍɪᴜᴍ] 🗜️</b>\n"
-        "───────────────\n"
+        "\n"
         "• Extract ZIP, RAR, 7Z, and TAR archives on the fly.\n"
         "• Individual files uploaded directly to your chat.\n"
         "• Supports password-protected archives.\n\n"
@@ -689,7 +689,7 @@ async def build_sample_view(user_id: int):
 
     text = (
         "<b>◈ Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ Gᴇɴᴇʀᴀᴛᴏʀ 🎬</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Sᴛᴀᴛᴜꜱ :</b> <b>{status_str}</b>\n"
         f"▸ <b>Dᴜʀᴀᴛɪᴏɴ :</b> <code>{dur} seconds</code>\n"
         f"▸ <b>Tɪᴍᴇʟɪɴᴇ Sᴛᴀʀᴛ :</b> <code>{mode}</code>\n\n"
@@ -808,7 +808,7 @@ async def set_view_cleaner_cb(client, query: CallbackQuery):
     replace_words = await db.get_replace_words(user_id)
     text = (
         "<b>◈ Wᴏʀᴅ Cʟᴇᴀɴᴇʀ & Rᴇᴘʟᴀᴄᴇʀ 🧹</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Wᴏʀᴅꜱ ᴛᴏ Rᴇᴍᴏᴠᴇ :</b> <code>{clean_words or 'None'}</code>\n"
         f"▸ <b>Wᴏʀᴅ Rᴇᴘʟᴀᴄᴇᴍᴇɴᴛꜱ :</b> <code>{replace_words or 'None'}</code>\n\n"
         "<b>Cᴏᴍᴍᴀɴᴅꜱ :</b>\n"
@@ -830,7 +830,7 @@ async def set_view_dump_cb(client, query: CallbackQuery):
     dump = await db.get_dump_channel(user_id)
     text = (
         "<b>◈ Pʀɪᴠᴀᴛᴇ Dᴜᴍᴘ Cʜᴀɴɴᴇʟ 📦</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Dᴜᴍᴘ Cʜᴀɴɴᴇʟ :</b> <code>{dump or 'Not Set'}</code>\n\n"
         "<b>Cᴏᴍᴍᴀɴᴅꜱ :</b>\n"
         "• <code>/set_dump -100xxxxxxxxxx</code>\n"
@@ -983,7 +983,7 @@ async def see_cleaner_cmd(client, message):
 
     text = (
         "<b>◈ Aᴄᴛɪᴠᴇ Wᴏʀᴅ Cʟᴇᴀɴᴇʀ Sᴇᴛᴛɪɴɢꜱ 🧹</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Wᴏʀᴅꜱ Tᴏ Rᴇᴍᴏᴠᴇ :</b> <code>{clean_words or 'None'}</code>\n"
         f"▸ <b>Wᴏʀᴅ Rᴇᴘʟᴀᴄᴇᴍᴇɴᴛꜱ :</b> <code>{replace_words or 'None'}</code>\n\n"
         "<i>To reset cleaner rules: /del_cleaner</i>\n\n⚡ @Nex_bots"
@@ -1248,7 +1248,7 @@ async def streams_inspector_cmd(client, message):
     if not reply_msg or not (reply_msg.video or reply_msg.document):
         return await message.reply_text(
             "<b>◈ Sᴛʀᴇᴀᴍ Iɴꜱᴘᴇᴄᴛᴏʀ 🎧</b>\n"
-            "───────────────\n"
+            "\n"
             "▸ <b>Hᴏᴡ ᴛᴏ ᴜꜱᴇ :</b>\n"
             "Reply to any video with <code>/streams</code> to view all audio & subtitle tracks!\n\n"
             "▸ <b>Oᴘᴛɪᴏɴꜱ :</b>\n"
@@ -1316,7 +1316,7 @@ async def streams_inspector_cmd(client, message):
 
         res_text = (
             "<b>◈ Mᴇᴅɪᴀ Sᴛʀᴇᴀᴍꜱ Dᴇᴛᴇᴄᴛᴇᴅ 🎧</b>\n"
-            "───────────────\n"
+            "\n"
             f"🎥 <b>Video Streams:</b>\n{v_list}\n\n"
             f"🎵 <b>Audio Streams:</b>\n{a_list}\n\n"
             f"💬 <b>Subtitle Streams:</b>\n{s_list}\n\n"
@@ -1338,7 +1338,7 @@ async def remux_command(client, message):
     if not reply_msg or not (reply_msg.video or reply_msg.document):
         return await message.reply_text(
             "<b>◈ Lᴏꜱꜱʟᴇꜱꜱ Rᴇᴍᴜxᴇʀ 🔄</b>\n"
-            "───────────────\n"
+            "\n"
             "▸ <b>Hᴏᴡ ᴛᴏ ᴜꜱᴇ :</b>\n"
             "Reply to any video with <code>/remux</code> to switch containers (<b>MKV ⇄ MP4</b>) losslessly in seconds without CPU re-encoding!",
             reply_parameters=ReplyParameters(message_id=message.id),
@@ -1413,7 +1413,7 @@ async def screenshot_sheet_cmd(client, message):
     if not reply_msg or not (reply_msg.video or reply_msg.document):
         return await message.reply_text(
             "<b>◈ 3x3 Sᴄʀᴇᴇɴꜱʜᴏᴛ Gʀɪᴅ 📸</b>\n"
-            "───────────────\n"
+            "\n"
             "▸ <b>Hᴏᴡ ᴛᴏ ᴜꜱᴇ :</b>\n"
             "Reply to any video with <code>/sheet</code> to generate an instant 3x3 high-definition screenshot preview sheet!",
             reply_parameters=ReplyParameters(message_id=message.id),
@@ -1467,7 +1467,7 @@ async def archive_extract_cmd(client, message):
     if not reply_msg or not (reply_msg.document):
         return await message.reply_text(
             "<b>◈ Aʀᴄʜɪᴠᴇ Exᴛʀᴀᴄᴛᴏʀ 📦</b>\n"
-            "───────────────\n"
+            "\n"
             "▸ <b>Hᴏᴡ ᴛᴏ ᴜꜱᴇ :</b>\n"
             "Reply to any <code>.zip</code>, <code>.rar</code>, <code>.7z</code> or <code>.tar</code> archive with <code>/extract</code> to unpack and download all files!",
             reply_parameters=ReplyParameters(message_id=message.id),
@@ -1557,7 +1557,7 @@ async def archive_pack_cmd(client, message):
     if not reply_msg or not (reply_msg.document or reply_msg.video or reply_msg.audio):
         return await message.reply_text(
             "<b>◈ ZIP Fɪʟᴇ Pᴀᴄᴋᴇʀ 🗜️</b>\n"
-            "───────────────\n"
+            "\n"
             "▸ <b>Hᴏᴡ ᴛᴏ ᴜꜱᴇ :</b>\n"
             "Reply to any file with <code>/zip</code> to compress it into a clean <code>.zip</code> archive!",
             reply_parameters=ReplyParameters(message_id=message.id),
@@ -1618,7 +1618,7 @@ async def episode_template_cmd(client, message):
         curr = await db.get_template(user_id)
         return await message.reply_text(
             "<b>◈ Eᴘɪꜱᴏᴅᴇ Tᴇᴍᴘʟᴀᴛᴇ 🏷️</b>\n"
-            "───────────────\n"
+            "\n"
             f"▸ <b>Cᴜʀʀᴇɴᴛ :</b> <code>{curr or 'Not Set (Default)'}</code>\n\n"
             "▸ <b>Hᴏᴡ ᴛᴏ ꜱᴇᴛ :</b>\n"
             "<code>/template {title} - S{season:02d}E{episode:02d} [{quality}]</code>\n\n"

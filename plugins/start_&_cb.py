@@ -73,7 +73,7 @@ async def build_referral_panel(client: Client, user_id: int):
 
     text = (
         "<b>◈ Rᴇꜰᴇʀ & Eᴀʀɴ Fʀᴇᴇ VIP 🎁</b>\n"
-        "───────────────\n"
+        "\n"
         "Share your invite link with friends!\n"
         f"🎯 <b>Rᴜʟᴇ :</b> Invite {req} = {reward_days} Days {tier_name} VIP!\n\n"
         f"▸ <b>Pʀᴏɢʀᴇꜱꜱ :</b> <code>{pts} / {req}</code> Invites\n"
@@ -81,7 +81,7 @@ async def build_referral_panel(client: Client, user_id: int):
         f"▸ <b>VIP Eᴀʀɴᴇᴅ :</b> <code>{days_won} Days</code>\n\n"
         "🔗 <b>Yᴏᴜʀ Pᴇʀꜱᴏɴᴀʟ Iɴᴠɪᴛᴇ Lɪɴᴋ :</b>\n"
         f"<code>{ref_link}</code>\n"
-        "───────────────\n"
+        "\n"
         "⚡ @Nex_bots | 💬 Sᴜᴘᴘᴏʀᴛ : @NexCRSupportbot"
     )
 
@@ -109,7 +109,7 @@ async def build_leaderboard_view(viewer_id: int):
 
     lines = [
         "<b>◈ Tᴏᴘ Rᴇɴᴀᴍᴇʀꜱ Lᴇᴀᴅᴇʀʙᴏᴀʀᴅ 🏆</b>\n"
-        "───────────────"
+        ""
     ]
 
     if not top_users:
@@ -153,7 +153,7 @@ async def build_server_diagnostics(back_cb: str = "start"):
 
     text = (
         "<b>◈ Lɪᴠᴇ Sᴇʀᴠᴇʀ Dɪᴀɢɴᴏꜱᴛɪᴄꜱ 📊</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Bᴏᴛ Uᴘᴛɪᴍᴇ :</b> <code>{uptime}</code>\n"
         f"▸ <b>CPU Lᴏᴀᴅ :</b> <code>{cpu}%</code>\n"
         f"▸ <b>RAM Uꜱᴇᴅ :</b> <code>{ram}%</code>\n"
@@ -161,7 +161,7 @@ async def build_server_diagnostics(back_cb: str = "start"):
         f"▸ <b>Nᴇᴛ Sᴇɴᴛ :</b> <code>{sent}</code>\n"
         f"▸ <b>Nᴇᴛ Rᴇᴄᴠ :</b> <code>{recv}</code>\n"
         f"▸ <b>Pʏᴛʜᴏɴ :</b> <code>v{py_ver}</code> | <b>Pyrogram :</b> <code>v{__version__}</code>\n"
-        "───────────────\n"
+        "\n"
         "⚡ @Nex_bots | 💬 Sᴜᴘᴘᴏʀᴛ : @NexCRSupportbot"
     )
 
@@ -255,6 +255,7 @@ async def leaderboard_cmd(client, message):
 async def cb_handler(client, query: CallbackQuery):
     data = query.data 
     if data == "start":
+        await query.answer()
         button = build_start_keyboard(query.from_user.id)
         await edit_message_content(
             query.message,
@@ -262,18 +263,19 @@ async def cb_handler(client, query: CallbackQuery):
             reply_markup=button
         )
     elif data == "cb_referral":
+        await query.answer()
         text, markup = await build_referral_panel(client, query.from_user.id)
         await edit_message_content(query.message, text=text, reply_markup=markup)
-        await query.answer()
     elif data == "cb_leaderboard":
+        await query.answer("Leaderboard updated! 🏆")
         text, markup = await build_leaderboard_view(query.from_user.id)
         await edit_message_content(query.message, text=text, reply_markup=markup)
-        await query.answer("Leaderboard updated! 🏆")
     elif data == "render":
+        await query.answer("Diagnostics refreshed! 📊")
         text, markup = await build_server_diagnostics(back_cb="start")
         await edit_message_content(query.message, text=text, reply_markup=markup)
-        await query.answer("Diagnostics refreshed! 📊")
     elif data == "help":
+        await query.answer()
         await edit_message_content(
             query.message,
             text=Txt.HELP_TXT,
@@ -285,16 +287,17 @@ async def cb_handler(client, query: CallbackQuery):
             ])
         )
     elif data == "about":
+        await query.answer()
         await edit_message_content(
             query.message,
             text=Txt.ABOUT_TXT,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🤝 VᴇɴᴏᴍBᴏᴛᴢ", url="https://t.me/VenomBotz"),
-                 InlineKeyboardButton("📢 Uᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots")],
-                [InlineKeyboardButton("💬 Sᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot"),
-                 InlineKeyboardButton("🖥️ Sᴇʀᴠᴇʀ Iɴꜰᴏ", callback_data="render")],
-                [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start"),
-                 InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
+                [InlineKeyboardButton("🤝 Sᴘᴇᴄɪᴀʟ Fʀɪᴇɴᴅ @VenomBotz", url="https://t.me/VenomBotz")],
+                [InlineKeyboardButton("📢 Uᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots"),
+                 InlineKeyboardButton("💬 Sᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot")],
+                [InlineKeyboardButton("🖥️ Sᴇʀᴠᴇʀ Iɴꜰᴏ", callback_data="render"),
+                 InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start")],
+                [InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
             ]),
             disable_web_page_preview=True
         )
@@ -317,12 +320,12 @@ async def about_cmd(client, message):
     await message.reply_text(
         text=Txt.ABOUT_TXT,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤝 VᴇɴᴏᴍBᴏᴛᴢ", url="https://t.me/VenomBotz"),
-             InlineKeyboardButton("📢 Uᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots")],
-            [InlineKeyboardButton("💬 Sᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot"),
-             InlineKeyboardButton("🖥️ Sᴇʀᴠᴇʀ Iɴꜰᴏ", callback_data="render")],
-            [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start"),
-             InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
+            [InlineKeyboardButton("🤝 Sᴘᴇᴄɪᴀʟ Fʀɪᴇɴᴅ @VenomBotz", url="https://t.me/VenomBotz")],
+            [InlineKeyboardButton("📢 Uᴘᴅᴀᴛᴇꜱ", url="https://t.me/Nex_bots"),
+             InlineKeyboardButton("💬 Sᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot")],
+            [InlineKeyboardButton("🖥️ Sᴇʀᴠᴇʀ Iɴꜰᴏ", callback_data="render"),
+             InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start")],
+            [InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
         ]),
         disable_web_page_preview=True
     )

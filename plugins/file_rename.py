@@ -281,12 +281,12 @@ async def rename_start(client, message):
 
     media_info_text = (
         "<b>◈ NᴇX Mᴇᴅɪᴀ Iɴꜰᴏ 🗂️</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Fɪʟᴇɴᴀᴍᴇ :</b> <code>{filename}</code>\n"
         f"▸ <b>Sɪᴢᴇ :</b> <code>{filesize}</code>\n"
         f"▸ <b>Tʏᴘᴇ :</b> <code>.{file_extension}</code> ({mime_type})\n"
         f"▸ <b>DC ID :</b> <code>{dcid}</code>\n"
-        "───────────────\n"
+        "\n"
         "<i>Select an action below:</i>"
     )
 
@@ -632,7 +632,7 @@ async def extract_streams_cb(client, query: CallbackQuery):
     await query.answer("Opening Stream Inspector... 🎵")
     await query.message.reply_text(
         "<b>◈ Sᴛʀᴇᴀᴍ Iɴꜱᴘᴇᴄᴛᴏʀ 🎵</b>\n"
-        "───────────────\n"
+        "\n"
         "▸ Reply to the video file with:\n"
         "• <code>/streams</code> : View all audio & subtitle tracks\n"
         "• <code>/streams strip_subs</code> : Remove all subtitles\n"
@@ -646,7 +646,7 @@ async def remux_action_cb(client, query: CallbackQuery):
     await query.answer("Opening Container Remuxer... 🔄")
     await query.message.reply_text(
         "<b>◈ Lᴏꜱꜱʟᴇꜱꜱ Rᴇᴍᴜxᴇʀ 🔄</b>\n"
-        "───────────────\n"
+        "\n"
         "▸ Reply to the video file with:\n"
         "• <code>/remux</code> : Convert MKV ⇄ MP4 losslessly\n"
         "(Lossless conversion in seconds with zero re-encoding!)",
@@ -699,7 +699,7 @@ async def refunc(client, message):
             t, m = await build_watermark_view(user_id)
             return await client.send_message(
                 chat_id=user_id,
-                text=f"✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n───────────────\n▸ <b>Tᴀɢ :</b> <code>{wm_text}</code>\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+                text=f"✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tᴀɢ :</b> <code>{wm_text}</code>\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
                 reply_markup=m
             )
 
@@ -723,7 +723,7 @@ async def refunc(client, message):
             t, m = await build_watermark_view(user_id)
             return await client.send_message(
                 chat_id=user_id,
-                text="✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n───────────────\n▸ <b>Tʏᴘᴇ :</b> Iᴍᴀɢᴇ Lᴏɢᴏ 🖼️\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+                text="✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tʏᴘᴇ :</b> Iᴍᴀɢᴇ Lᴏɢᴏ 🖼️\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
                 reply_markup=m
             )
 
@@ -779,7 +779,7 @@ async def refunc(client, message):
         if upload_mode in ["Document", "Video", "Audio"]:
             prompt_msg = await client.send_message(
                 chat_id=message.chat.id,
-                text=f"<b>◈ Pʀᴏᴄᴇꜱꜱɪɴɢ Dᴇꜰᴀᴜʟᴛ Mᴏᴅᴇ ({upload_mode}) ⚡</b>\n───────────────\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
+                text=f"<b>◈ Pʀᴏᴄᴇꜱꜱɪɴɢ Dᴇꜰᴀᴜʟᴛ Mᴏᴅᴇ ({upload_mode}) ⚡</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
                 **safe_reply_params(file_msg.id)
             )
             class MockCallback:
@@ -799,7 +799,7 @@ async def refunc(client, message):
 
         await client.send_message(
             chat_id=message.chat.id,
-            text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n───────────────\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
+            text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
             reply_markup=InlineKeyboardMarkup(buttons),
             **safe_reply_params(file_msg.id)
         )
@@ -892,7 +892,7 @@ async def route_to_extras_or_execute(client, update, new_filename: str, upload_t
 
         prompt_text = (
             "<b>◈ Mᴇᴅɪᴀ Exᴛʀᴀꜱ Cᴏɴꜰɪʀᴍᴀᴛɪᴏɴ 🎬</b>\n"
-            "───────────────\n"
+            "\n"
             f"▸ <b>Tᴀʀɢᴇᴛ Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
             f"▸ <b>🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ :</b> <code>{sample_dur}s</code>\n"
             f"▸ <b>📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ :</b> <code>{ss_count} frames</code>\n\n"

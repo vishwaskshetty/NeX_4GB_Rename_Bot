@@ -57,7 +57,7 @@ async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 
 
     text = (
         "<b>◈ NᴇX Pʀᴇᴍɪᴜᴍ Pʟᴀɴꜱ 💎</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         "🥈 <b>1. Sɪʟᴠᴇʀ Pʟᴀɴ (Sᴛᴀʀᴛᴇʀ)</b>\n"
         f"▸ <b>Pʀɪᴄᴇ :</b> ₹{p1_inr}/mo  |  {p1_stars} ⭐  |  ${p1_usd:.2f}\n"
         "▸ <b>Mᴀx Fɪʟᴇ :</b> 4.00 GB <i>(Top Speed)</i>\n"
@@ -75,12 +75,12 @@ async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 
         "▸ <b>Qᴜᴏᴛᴀ :</b> Unlimited Daily Bandwidth\n"
         "▸ <b>Qᴜᴇᴜᴇ :</b> 4 Parallel Tasks (15 Queued)\n"
         "▸ <b>Aʟʟ Tᴏᴏʟꜱ :</b> Audio/Sub Remover, Remux & Archive\n\n"
-        "───────────────\n"
+        "\n"
         "🎯 <b>Yᴏᴜʀ Sᴇʟᴇᴄᴛᴇᴅ Cʜᴇᴄᴋᴏᴜᴛ :</b>\n"
         f"▸ <b>Sᴇʟᴇᴄᴛᴇᴅ Tɪᴇʀ :</b> {selected_plan_name}\n"
         f"▸ <b>Dᴜʀᴀᴛɪᴏɴ :</b> {months} Month(s) ({days} Days)\n"
         f"▸ <b>Tᴏᴛᴀʟ Pʀɪᴄᴇ :</b> <b>₹{total_inr}</b>  |  <b>{total_stars} ⭐</b>  |  <b>${total_usd:.2f}</b>\n"
-        "───────────────"
+        ""
     )
 
     btn_s = f"{'✅ ' if selected_tier == 1 else ''}🥈 Sɪʟᴠᴇʀ"
@@ -165,16 +165,16 @@ async def build_upi_payment_view(tier: int = 2, months: int = 1, base_inr: int =
 
     text = (
         "<b>◈ UPI Pᴀʏᴍᴇɴᴛ 🇮🇳</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ 💎 <b>Pʟᴀɴ :</b> {t_name} ({month_str})\n"
         f"▸ 📅 <b>Dᴜʀᴀᴛɪᴏɴ :</b> {days} Days\n"
         f"▸ 💵 <b>Aᴍᴏᴜɴᴛ :</b> <b>₹{inr_price} INR</b>\n"
         f"▸ 💳 <b>UPI ID :</b> <code>{upi_id}</code>\n"
-        "───────────────\n"
+        "\n"
         f"1. Send ₹{inr_price} to <code>{upi_id}</code> via GPay / PhonePe / Paytm / BHIM\n"
         "2. Take a screenshot showing UTR/Ref number\n"
         "3. Send screenshot to @NexCRSupportbot\n"
-        "───────────────\n\n"
+        "\n\n"
         "<i>⚡ Active in 5-15 mins upon verification!</i>"
     )
     markup = InlineKeyboardMarkup([
@@ -206,16 +206,16 @@ async def build_usd_payment_view(tier: int = 2, months: int = 1, base_inr: int =
 
     text = (
         "<b>◈ USD Pᴀʏᴍᴇɴᴛ 💵</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ 💎 <b>Pʟᴀɴ :</b> {t_name} ({month_str})\n"
         f"▸ 📅 <b>Dᴜʀᴀᴛɪᴏɴ :</b> {days} Days\n"
         f"▸ 💵 <b>Pʀɪᴄᴇ (USD) :</b> <b>${usd_price:.2f}</b>\n"
-        "───────────────\n"
+        "\n"
         "International payments accepted via:\n"
         "• Crypto (USDT TRC20 / TON / BTC)\n"
         "• PayPal / International Cards\n\n"
         "Contact @NexCRSupportbot to complete!\n"
-        "───────────────"
+        ""
     )
     markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("💬 Cᴏɴᴛᴀᴄᴛ Sᴜᴘᴘᴏʀᴛ ᴛᴏ Pᴀʏ", url="https://t.me/NexCRSupportbot")],
@@ -268,7 +268,7 @@ async def build_profile_card(user_id: int):
 
     text = (
         "<b>◈ NᴇX Uꜱᴇʀ Pʀᴏꜰɪʟᴇ 👤</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Uꜱᴇʀ ID :</b> <code>{user_id}</code>\n"
         f"▸ <b>Pʟᴀɴ :</b> <b>{badge}</b>\n"
         f"▸ <b>Exᴘɪʀʏ :</b> <code>{expiry_str}</code>\n"
@@ -303,7 +303,7 @@ async def build_timezone_menu(user_id: int):
     now_str = format_user_time(time.time(), current_tz)
     text = (
         "<b>◈ Tɪᴍᴇᴢᴏɴᴇ Cᴏɴꜰɪɢᴜʀᴀᴛɪᴏɴ 🌍</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>Aᴄᴛɪᴠᴇ Tɪᴍᴇᴢᴏɴᴇ :</b> <code>{current_tz}</code>\n"
         f"▸ <b>Cᴜʀʀᴇɴᴛ Lᴏᴄᴀʟ Tɪᴍᴇ :</b> <code>{now_str}</code>\n\n"
         "<i>Select a region below or type <code>/timezone Region/City</code>:</i>\n\n"

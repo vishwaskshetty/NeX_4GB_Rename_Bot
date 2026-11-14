@@ -71,7 +71,7 @@ async def unauthorized_owner_cmd(client, message):
     await send_security_alert(client, user, f"Command: {message.text}")
 
 
-@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_page_|cb_prem_wiz_|cb_pwiz_|cb_cwiz_|cb_oref_|cb_oprice_|cb_otrial_|cb_oquota_|cb_otoggle_|cb_opay_)") & ~filters.user(Config.ADMIN), group=1)
+@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_|cb_pwiz_|cb_cwiz_|cb_oref_|cb_oprice_|cb_otrial_|cb_oquota_|cb_otoggle_|cb_opay_|cb_upgrade_prem_|cb_extend_prem_|cb_revoke_prem_|cb_toggle_ban_|cb_grant_anyway_)") & ~filters.user(Config.ADMIN), group=1)
 async def unauthorized_owner_cb(client, query: CallbackQuery):
     await query.answer("🚨 SECURITY ALERT: Unauthorized Access! This action has been logged.", show_alert=True)
     await send_security_alert(client, query.from_user, f"Callback: {query.data}")
@@ -119,8 +119,7 @@ async def build_owner_panel(client: Client):
     today_bytes = rename_stats.get("today_bytes", 0)
 
     text = (
-        "<b>◈ NᴇX Oᴡɴᴇʀ Cᴏɴᴛʀᴏʟ Pᴀɴᴇʟ 👑</b>\n"
-        "───────────────\n\n"
+        "<b>◈ NᴇX Oᴡɴᴇʀ Cᴏɴᴛʀᴏʟ Pᴀɴᴇʟ 👑</b>\n\n"
         f"◈ <b>🌐 Mode :</b> <code>{mode_str}</code> | <b>🛠️ Maint :</b> <code>{maint_str}</code>\n"
         f"◈ <b>🛡️ Lock :</b> <code>{protect_str}</code> | <b>📢 FSub :</b> <code>{fsub_mode_str}</code>\n"
         f"◈ <b>🚀 4GB Client :</b> <code>{engine_str}</code>\n"
@@ -135,6 +134,10 @@ async def build_owner_panel(client: Client):
     )
 
     keyboard = [
+        [
+            InlineKeyboardButton(f"👥 Aʟʟ Uꜱᴇʀꜱ ({total_users})", callback_data="cb_owner_users_0"),
+            InlineKeyboardButton(f"💎 Pʀᴇᴍɪᴜᴍ ({total_prem})", callback_data="cb_prem_page_0")
+        ],
         [
             InlineKeyboardButton(f"🌐 Mᴏᴅᴇ: {mode_str}", callback_data="cb_owner_toggle_mode"),
             InlineKeyboardButton(f"🛠️ Mᴀɪɴᴛ: {maint_str}", callback_data="cb_owner_toggle_maint")
@@ -152,31 +155,30 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton("📢 FSᴜʙ Cʜᴀɴɴᴇʟ", callback_data="cb_owner_fsub")
         ],
         [
-            InlineKeyboardButton(f"💎 Pʀᴇᴍɪᴜᴍ ({total_prem})", callback_data="cb_prem_page_0"),
-            InlineKeyboardButton(f"🛡️ Aᴜᴛʜ Uꜱᴇʀꜱ ({len(auth_users)})", callback_data="cb_owner_auth")
+            InlineKeyboardButton(f"🛡️ Aᴜᴛʜ Uꜱᴇʀꜱ ({len(auth_users)})", callback_data="cb_owner_auth"),
+            InlineKeyboardButton(f"🎟️ Cᴏᴜᴘᴏɴꜱ ({len(coupons)})", callback_data="cb_owner_coupons")
         ],
         [
-            InlineKeyboardButton(f"🎟️ Cᴏᴜᴘᴏɴꜱ ({len(coupons)})", callback_data="cb_owner_coupons"),
-            InlineKeyboardButton(f"🚫 Bᴀɴɴᴇᴅ ({len(banned_users)})", callback_data="cb_owner_banned")
+            InlineKeyboardButton(f"🚫 Bᴀɴɴᴇᴅ ({len(banned_users)})", callback_data="cb_owner_banned"),
+            InlineKeyboardButton("🩺 Hᴇᴀʟᴛʜ Dɪᴀɢɴᴏꜱᴛɪᴄ", callback_data="cb_owner_health")
         ],
         [
-            InlineKeyboardButton("🩺 Hᴇᴀʟᴛʜ Dɪᴀɢɴᴏꜱᴛɪᴄ", callback_data="cb_owner_health"),
-            InlineKeyboardButton("📊 Sᴇʀᴠᴇʀ Sᴛᴀᴛꜱ", callback_data="cb_owner_stats")
+            InlineKeyboardButton("📊 Sᴇʀᴠᴇʀ Sᴛᴀᴛꜱ", callback_data="cb_owner_stats"),
+            InlineKeyboardButton("📜 Aᴄᴛɪᴠɪᴛʏ Lᴏɢꜱ", callback_data="cb_owner_logs")
         ],
         [
-            InlineKeyboardButton("📜 Aᴄᴛɪᴠɪᴛʏ Lᴏɢꜱ", callback_data="cb_owner_logs"),
-            InlineKeyboardButton("📈 Aɴᴀʟʏᴛɪᴄꜱ", callback_data="cb_owner_analytics")
-        ],
-        [
-            InlineKeyboardButton("🧹 Cʟᴇᴀʀ Sᴛᴜᴄᴋ Tᴀꜱᴋꜱ", callback_data="cb_owner_reset_stuck"),
-            InlineKeyboardButton("🔄 Rᴇꜱᴛᴀʀᴛ Bᴏᴛ", callback_data="cb_owner_restart")
+            InlineKeyboardButton("📈 Aɴᴀʟʏᴛɪᴄꜱ", callback_data="cb_owner_analytics"),
+            InlineKeyboardButton("🧹 Cʟᴇᴀʀ Sᴛᴜᴄᴋ Tᴀꜱᴋꜱ", callback_data="cb_owner_reset_stuck")
         ],
         [
             InlineKeyboardButton("📋 Cᴏᴍᴍᴀɴᴅꜱ Lɪꜱᴛ", callback_data="cb_owner_cmds"),
             InlineKeyboardButton("📦 Dᴜᴍᴘꜱ & Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")
         ],
         [
-            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start"),
+            InlineKeyboardButton("🔄 Rᴇꜱᴛᴀʀᴛ Bᴏᴛ", callback_data="cb_owner_restart"),
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start")
+        ],
+        [
             InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
         ]
     ]
@@ -189,7 +191,7 @@ async def build_activity_logs_view():
     logs = await db.get_activity_logs(15)
     text = (
         "<b>◈ Lɪᴠᴇ Aᴄᴛɪᴠɪᴛʏ Lᴏɢꜱ (Lᴀᴛᴇꜱᴛ 15) 📜</b>\n"
-        "───────────────\n\n"
+        "\n\n"
     )
     if not logs:
         text += "<i>No activity logged yet.</i>\n\n"
@@ -301,7 +303,7 @@ async def total_users_cmd(client, message):
     
     text = (
         "<b>◈ NᴇX Rᴇɢɪꜱᴛᴇʀᴇᴅ Bᴏᴛ Uꜱᴇʀꜱ 👥</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Total Registered Users :</b> <code>{total}</code>\n"
         f"◈ <b>Active 4GB Premium Users :</b> <code>{prem_cnt}</code>\n"
         f"◈ <b>Authorized Users (Private) :</b> <code>{auth_cnt}</code>\n"
@@ -445,7 +447,7 @@ async def ban_list_cmd(client, message):
     
     text = (
         "<b>◈ Bᴀɴɴᴇᴅ Uꜱᴇʀꜱ Dɪʀᴇᴄᴛᴏʀʏ 🚫</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Total Banned Users :</b> <code>{len(banned)}</code>\n\n"
     )
     for idx, uid in enumerate(banned[:30], 1):
@@ -565,64 +567,215 @@ async def cb_owner_toggle_mode(client, query: CallbackQuery):
     await edit_message_content(query.message, text, reply_markup=markup)
 
 
-# ==================== INTERACTIVE PREMIUM MANAGER ====================
+# ==================== INTERACTIVE USER & PREMIUM MANAGERS ====================
 
-@Client.on_callback_query(filters.regex(r"^cb_prem_page_(\d+)$"))
-async def cb_prem_page(client, query: CallbackQuery):
-    if query.from_user.id not in Config.ADMIN:
-        return await query.answer("❌ Owner only access!", show_alert=True)
-    
-    page = int(query.matches[0].group(1))
+def format_time_remaining(expiry_ts: float) -> str:
+    rem = max(0, int(expiry_ts - time.time()))
+    if rem <= 0:
+        return "Expired"
+    days, rem = divmod(rem, 86400)
+    hours, rem = divmod(rem, 3600)
+    mins, _ = divmod(rem, 60)
+    if days > 0:
+        return f"{days}d {hours}h left"
+    elif hours > 0:
+        return f"{hours}h {mins}m left"
+    else:
+        return f"{mins}m left"
+
+
+async def build_owner_users_view(page: int = 0):
+    stats = await db.get_users_detailed_stats()
+    page_size = 4
+    total, users = await db.get_users_page(page, page_size)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(page, total_pages - 1))
+
+    text = (
+        f"<b>◈ Aʟʟ Rᴇɢɪꜱᴛᴇʀᴇᴅ Uꜱᴇʀꜱ 👥</b> (Pᴀɢᴇ {page+1}/{total_pages})\n\n"
+        f"◈ <b>Tᴏᴛᴀʟ :</b> <code>{stats['total_users']}</code> | <b>Aᴄᴛɪᴠᴇ :</b> <code>{stats['active_today']}</code>\n"
+        f"◈ <b>Fʀᴇᴇ :</b> <code>{stats['free_users']}</code> | <b>Pʀᴇᴍɪᴜᴍ :</b> <code>{stats['prem_users']}</code>\n"
+        f"◈ <b>Bᴀɴɴᴇᴅ :</b> <code>{stats['banned_users']}</code> | <b>Tᴏᴛᴀʟ B/W :</b> <code>{humanbytes(stats['total_bandwidth'])}</code>\n\n"
+    )
+    if not users:
+        text += "<i>No registered users found.</i>\n\n"
+    else:
+        now = time.time()
+        for u in users:
+            uid = u["_id"]
+            fn = u.get("first_name", "User")
+            un = f"@{u['username']}" if u.get("username") else "No username"
+            tier = int(u.get("premium_tier", 0) or 0)
+            exp = float(u.get("premium_expiry", 0) or 0)
+            if uid in Config.ADMIN:
+                tier_badge = "👑 Owner (VIP)"
+            elif exp > now and tier > 0:
+                tier_badge = TIER_NAMES.get(tier, "VIP")
+            else:
+                tier_badge = "Free"
+            
+            daily_used = u.get("daily_bytes_used", 0)
+            files = u.get("files_renamed_total", 0)
+            tot_bytes = u.get("bytes_used_total", 0)
+            refs = u.get("total_referrals", 0)
+
+            text += (
+                f"▸ <b>{fn}</b> ({un}) | <code>{uid}</code>\n"
+                f"  <b>Pʟᴀɴ :</b> <code>{tier_badge}</code> | <b>Qᴜᴏᴛᴀ :</b> <code>{humanbytes(daily_used)}</code>\n"
+                f"  <b>Fɪʟᴇꜱ :</b> <code>{files}</code> ({humanbytes(tot_bytes)}) | <b>Rᴇꜰꜱ :</b> <code>{refs}</code>\n\n"
+            )
+
+    buttons = []
+    nav_row = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Pʀᴇᴠ", callback_data=f"cb_owner_users_{page-1}"))
+    nav_row.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="cb_owner_users_refresh"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Nᴇxᴛ ➡️", callback_data=f"cb_owner_users_{page+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    buttons.append([
+        InlineKeyboardButton("🔍 Sᴇᴀʀᴄʜ ʙʏ ID", callback_data="cb_owner_search_user"),
+        InlineKeyboardButton("📄 Eₓᴘᴏʀᴛ CSV", callback_data="cb_owner_export_users")
+    ])
+    buttons.append([
+        InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Oᴡɴᴇʀ", callback_data="owner_panel"),
+        InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
+    ])
+    return text, InlineKeyboardMarkup(buttons)
+
+
+async def build_owner_premium_view(page: int = 0):
     users = await db.get_all_premium_users()
     page_size = 4
     total_pages = max(1, (len(users) + page_size - 1) // page_size)
-    page = min(page, total_pages - 1)
+    page = max(0, min(page, total_pages - 1))
 
     start_idx = page * page_size
     current_users = users[start_idx:start_idx + page_size]
 
     text = (
-        f"💎 <b><u>Active Premium Users</u></b> (Page {page+1}/{total_pages})\n\n"
-        f"• <b>Total Active:</b> <code>{len(users)}</code>\n\n"
+        f"<b>◈ Pʀᴇᴍɪᴜᴍ Uꜱᴇʀꜱ Fᴜʟʟ Dᴇᴛᴀɪʟꜱ 💎</b> (Pᴀɢᴇ {page+1}/{total_pages})\n\n"
+        f"◈ <b>Tᴏᴛᴀʟ Aᴄᴛɪᴠᴇ VIP :</b> <code>{len(users)}</code>\n\n"
     )
     if not current_users:
         text += "<i>No active premium users currently.</i>\n\n"
     else:
         for u in current_users:
+            uid = u['user_id']
+            fn = u.get("first_name", "User")
+            un = f"@{u['username']}" if u.get("username") else "No username"
             exp_str = format_user_time(u['expiry'])
-            text += f"◈ <code>{u['user_id']}</code> | {u['plan_name']}\n  Exp: <code>{exp_str}</code>\n\n"
+            rem_str = format_time_remaining(u['expiry'])
+            files = u.get("files_renamed_total", 0)
+            tot_bytes = u.get("bytes_used_total", 0)
 
-    text += "⚡ @Nex_bots"
+            text += (
+                f"▸ <b>{fn}</b> ({un}) | <code>{uid}</code>\n"
+                f"  <b>Tɪᴇʀ :</b> <code>{u['plan_name']}</code> | <b>Lᴇꜰᴛ :</b> <code>{rem_str}</code>\n"
+                f"  <b>Exᴘ :</b> <code>{exp_str}</code>\n"
+                f"  <b>Fɪʟᴇꜱ :</b> <code>{files}</code> | <b>Dᴀᴛᴀ :</b> <code>{humanbytes(tot_bytes)}</code>\n\n"
+            )
 
     buttons = []
-    # Quick action rows per user
     for u in current_users:
         uid = u['user_id']
         buttons.append([
-            InlineKeyboardButton(f"⬆️ Diamond", callback_data=f"cb_upgrade_prem_{uid}_{page}"),
+            InlineKeyboardButton(f"💎 Dɪᴀᴍᴏɴᴅ", callback_data=f"cb_upgrade_prem_{uid}_{page}"),
             InlineKeyboardButton(f"➕ +30D", callback_data=f"cb_extend_prem_{uid}_30_{page}"),
             InlineKeyboardButton(f"➕ +90D", callback_data=f"cb_extend_prem_{uid}_90_{page}"),
-            InlineKeyboardButton(f"❌ Revoke", callback_data=f"cb_revoke_prem_{uid}_{page}")
+            InlineKeyboardButton(f"❌ Rᴇᴠᴏᴋᴇ", callback_data=f"cb_revoke_prem_{uid}_{page}")
         ])
 
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"cb_prem_page_{page-1}"))
+        nav_row.append(InlineKeyboardButton("⬅️ Pʀᴇᴠ", callback_data=f"cb_prem_page_{page-1}"))
+    nav_row.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="cb_prem_refresh"))
     if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"cb_prem_page_{page+1}"))
+        nav_row.append(InlineKeyboardButton("Nᴇxᴛ ➡️", callback_data=f"cb_prem_page_{page+1}"))
     if nav_row:
         buttons.append(nav_row)
 
     buttons.append([
-        InlineKeyboardButton("➕ Add Premium User (Wizard)", callback_data="cb_prem_wiz_start")
+        InlineKeyboardButton("➕ Aᴅᴅ Pʀᴇᴍɪᴜᴍ Wɪᴢᴀʀᴅ", callback_data="cb_prem_wiz_start")
     ])
     buttons.append([
-        InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
-        InlineKeyboardButton("❌ Close", callback_data="close")
+        InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Oᴡɴᴇʀ", callback_data="owner_panel"),
+        InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
     ])
+    return text, InlineKeyboardMarkup(buttons)
 
-    await edit_message_content(query.message, text, reply_markup=InlineKeyboardMarkup(buttons))
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_users_(\d+)$"))
+async def cb_owner_users_page(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    page = int(query.matches[0].group(1))
+    text, markup = await build_owner_users_view(page)
+    await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_users_refresh$"))
+async def cb_owner_users_refresh_handler(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    text, markup = await build_owner_users_view(0)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Users list refreshed! 👥")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_search_user$"))
+async def cb_owner_search_user_handler(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    OWNER_STATE[query.from_user.id] = {"action": "search_user_id"}
+    text = (
+        "<b>◈ Sᴇᴀʀᴄʜ Uꜱᴇʀ ʙʏ ID 🔍</b>\n\n"
+        "Send the numeric <b>Telegram User ID</b> to inspect:\n\n"
+        "<i>Or tap Cancel below to return.</i>"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ Cᴀɴᴄᴇʟ", callback_data="cb_owner_users_0")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_export_users$"))
+async def cb_owner_export_users_handler(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    await query.answer("Generating CSV export... ⏳")
+    csv_data = await db.export_all_users_csv()
+    import io
+    bio = io.BytesIO(csv_data.encode("utf-8"))
+    bio.name = f"nex_users_export_{int(time.time())}.csv"
+    await client.send_document(
+        chat_id=query.from_user.id,
+        document=bio,
+        caption="<b>◈ NᴇX Uꜱᴇʀꜱ Eₓᴘᴏʀᴛ (.CSV) 📄</b>\n\nFull registered users list and stats.\n⚡ @Nex_bots"
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^cb_prem_page_(\d+)$"))
+async def cb_prem_page(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    page = int(query.matches[0].group(1))
+    text, markup = await build_owner_premium_view(page)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_prem_refresh$"))
+async def cb_prem_refresh_handler(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    text, markup = await build_owner_premium_view(0)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Premium users refreshed! 💎")
 
 
 @Client.on_callback_query(filters.regex(r"^cb_revoke_prem_(\d+)_(\d+)$"))
@@ -663,6 +816,40 @@ async def cb_extend_prem(client, query: CallbackQuery):
     await query.answer(f"Extended {target_id} by {days} days!", show_alert=True)
     query.matches = [type("MockMatch", (), {"group": lambda s, idx: page})()]
     await cb_prem_page(client, query)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_toggle_ban_(\d+)$"))
+async def cb_toggle_ban_handler(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    target_id = int(query.matches[0].group(1))
+    if target_id in Config.ADMIN:
+        return await query.answer("❌ Cannot ban an admin/owner!", show_alert=True)
+    is_ban = await db.is_banned(target_id)
+    if is_ban:
+        await db.unban_user(target_id)
+        await query.answer(f"User {target_id} unbanned! 🟢", show_alert=True)
+    else:
+        await db.ban_user(target_id)
+        await query.answer(f"User {target_id} banned! 🔴", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_grant_anyway_(\d+)$"))
+async def cb_grant_anyway_handler(client, query: CallbackQuery):
+    if query.from_user.id not in Config.ADMIN:
+        return await query.answer("❌ Owner only access!", show_alert=True)
+    target_id = int(query.matches[0].group(1))
+    OWNER_STATE[query.from_user.id] = {"action": "prem_tier", "target_id": target_id}
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🥈 Silver Tier", callback_data="cb_pwiz_tier_1"),
+            InlineKeyboardButton("🥇 Gold Tier", callback_data="cb_pwiz_tier_2")
+        ],
+        [InlineKeyboardButton("💎 Diamond VIP Tier", callback_data="cb_pwiz_tier_3")],
+        [InlineKeyboardButton("❌ Cancel Wizard", callback_data="cb_owner_cancel_state")]
+    ])
+    await edit_message_content(query.message, f"Select Tier for <code>{target_id}</code>:", reply_markup=markup)
+    await query.answer()
 
 
 # ➕ Add Premium User Wizard
@@ -775,7 +962,7 @@ async def cb_owner_coupons(client, query: CallbackQuery):
     coupons = await _safe(db.get_all_coupons(), default={})
     text = (
         "<b>◈ NᴇX Cᴏᴜᴘᴏɴ Mᴀɴᴀɢᴇʀ 🎟️</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Active Coupons :</b> <code>{len(coupons)}</code>\n\n"
     )
     if not coupons:
@@ -987,7 +1174,7 @@ async def cb_owner_auth(client, query: CallbackQuery):
     users = await _safe(db.get_auth_users(), default=[])
     text = (
         "<b>◈ Aᴜᴛʜᴏʀɪᴢᴇᴅ Uꜱᴇʀꜱ (Pʀɪᴠᴀᴛᴇ Mᴏᴅᴇ) 🛡️</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Total Count :</b> <code>{len(users)}</code>\n\n"
     )
     if users:
@@ -1038,7 +1225,7 @@ async def cb_owner_banned(client, query: CallbackQuery):
     users = await _safe(db.get_banned_users(), default=[])
     text = (
         "<b>◈ Bᴀɴɴᴇᴅ Uꜱᴇʀꜱ Dɪʀᴇᴄᴛᴏʀʏ 🚫</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Total Banned :</b> <code>{len(users)}</code>\n\n"
     )
     if users:
@@ -1158,7 +1345,80 @@ async def owner_state_input_handler(client: Client, message: Message):
     if not input_text:
         return await message.reply_text("⚠️ Please send valid text or ID.")
 
-    if action == "prem_uid":
+    if action == "search_user_id":
+        OWNER_STATE.pop(admin_id, None)
+        try:
+            target_id = int(input_text)
+        except ValueError:
+            return await message.reply_text("❌ <b>Invalid ID!</b> Please enter a valid numeric Telegram User ID.")
+
+        u = await db.col.find_one({'_id': target_id})
+        if not u:
+            return await message.reply_text(
+                f"❌ <b>User Not Found!</b> ID <code>{target_id}</code> has never started the bot.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ Grant Premium Anyway", callback_data=f"cb_grant_anyway_{target_id}")],
+                    [InlineKeyboardButton("⬅️ Back to Users", callback_data="cb_owner_users_0")]
+                ])
+            )
+
+        fn = u.get("first_name", "User")
+        un = f"@{u['username']}" if u.get("username") else "No username"
+        tier = int(u.get("premium_tier", 0) or 0)
+        exp = float(u.get("premium_expiry", 0) or 0)
+        now = time.time()
+        is_p = (exp > now and tier > 0) or (target_id in Config.ADMIN)
+        if target_id in Config.ADMIN:
+            plan_str = "👑 Owner (VIP)"
+            exp_str = "Lifetime"
+            left_str = "Permanent"
+        elif is_p:
+            plan_str = TIER_NAMES.get(tier, "VIP")
+            exp_str = format_user_time(exp)
+            left_str = format_time_remaining(exp)
+        else:
+            plan_str = "Free Tier"
+            exp_str = "N/A"
+            left_str = "0d 0h"
+
+        daily_used = u.get("daily_bytes_used", 0)
+        daily_files = u.get("daily_files_used", 0)
+        tot_files = u.get("files_renamed_total", 0)
+        tot_bytes = u.get("bytes_used_total", 0)
+        refs = u.get("total_referrals", 0)
+        banned = await db.is_banned(target_id)
+        ban_status = "Banned 🔴" if banned else "Active 🟢"
+
+        text = (
+            f"<b>◈ Uꜱᴇʀ Iɴꜱᴘᴇᴄᴛɪᴏɴ : {fn} 👤</b>\n\n"
+            f"▸ <b>User ID :</b> <code>{target_id}</code>\n"
+            f"▸ <b>Username :</b> {un}\n"
+            f"▸ <b>Status :</b> <code>{ban_status}</code>\n"
+            f"▸ <b>Active Plan :</b> <code>{plan_str}</code>\n"
+            f"▸ <b>Expiry :</b> <code>{exp_str}</code> (<code>{left_str}</code>)\n\n"
+            f"▸ <b>Daily Files / Quota :</b> <code>{daily_files}</code> | <code>{humanbytes(daily_used)}</code>\n"
+            f"▸ <b>Lifetime Renamed :</b> <code>{tot_files} files</code>\n"
+            f"▸ <b>Lifetime Bandwidth :</b> <code>{humanbytes(tot_bytes)}</code>\n"
+            f"▸ <b>Referrals Count :</b> <code>{refs} invites</code>\n\n"
+            "⚡ @Nex_bots"
+        )
+        markup = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("💎 Diamond VIP", callback_data=f"cb_upgrade_prem_{target_id}_0"),
+                InlineKeyboardButton("➕ +30 Days", callback_data=f"cb_extend_prem_{target_id}_30_0")
+            ],
+            [
+                InlineKeyboardButton("➖ Revoke VIP", callback_data=f"cb_revoke_prem_{target_id}_0"),
+                InlineKeyboardButton("🚫 Ban/Unban", callback_data=f"cb_toggle_ban_{target_id}")
+            ],
+            [
+                InlineKeyboardButton("⬅️ Back to Users", callback_data="cb_owner_users_0"),
+                InlineKeyboardButton("👑 Owner Panel", callback_data="owner_panel")
+            ]
+        ])
+        return await message.reply_text(text, reply_markup=markup)
+
+    elif action == "prem_uid":
         try:
             target_id = int(input_text)
         except ValueError:
@@ -1367,7 +1627,7 @@ async def build_fsub_view():
 
     text = (
         "<b>◈ Dʏɴᴀᴍɪᴄ Fᴏʀᴄᴇ-Sᴜʙ Sᴇᴛᴛɪɴɢꜱ 📢</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Channel :</b> <code>{channel}</code>\n"
         f"◈ <b>Mode :</b> <b>{mode_label}</b>\n"
         f"◈ <b>Status :</b> <b>{status_label}</b>\n\n"
@@ -1539,7 +1799,7 @@ async def build_admin_stats_view(client: Client):
 
     text = (
         "<b>◈ NᴇX Tᴇʟᴇᴍᴇᴛʀʏ Dᴀꜱʜʙᴏᴀʀᴅ 📊</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Users :</b> <code>{total_users}</code> | <b>Banned :</b> <code>{len(banned)}</code>\n"
         f"◈ <b>VIPs :</b> <code>{usage.get('total_premium', 0)}</code> "
         f"(🥈{usage.get('silver_users', 0)} 🥇{usage.get('gold_users', 0)} 💎{usage.get('diamond_users', 0)})\n"
@@ -1650,7 +1910,7 @@ async def build_health_report(client: Client):
 
     text = (
         "<b>◈ NᴇX Hᴇᴀʟᴛʜ Dɪᴀɢɴᴏꜱᴛɪᴄ 🩺</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>🤖 Bot MTProto :</b> <code>{bot_ping}</code>\n"
         f"◈ <b>🚀 4GB Client :</b> <code>{prem_status}</code>\n"
         f"◈ <b>🍃 MongoDB Ping :</b> <code>{db_ping}</code>\n"
@@ -1735,13 +1995,13 @@ async def build_owner_pricing_panel():
     p3_usd = round(p3_inr / 84.0, 2)
 
     text = (
-        "<b>◈ Oᴡɴᴇʀ Pʀɪᴄɪɴɢ Eᴅɪᴛᴏʀ 💎</b>\n───────────────\n\n"
-        "🥈 <b>𝟭. 𝗦𝗜𝗟𝗩𝗘𝗥 𝗣𝗟𝗔𝗡 (𝗦𝘁𝗮𝗿𝘁𝗲𝗿)</b>\n"
-        f"┣ Base Rate : <code>₹{p1_inr}/mo</code>  |  <code>{p1_stars} ⭐</code>  |  <code>${p1_usd:.2f}</code>\n\n"
-        "🥇 <b>𝟮. 𝗚𝗢𝗟𝗗 𝗣𝗟𝗔𝗡 (𝗣𝗿𝗼)</b>\n"
-        f"┣ Base Rate : <code>₹{p2_inr}/mo</code>  |  <code>{p2_stars} ⭐</code>  |  <code>${p2_usd:.2f}</code>\n\n"
-        "💎 <b>𝟯. 𝗗𝗜𝗔𝗠𝗢𝗡𝗗 𝗣𝗟𝗔𝗡 (𝗩𝗜𝗣)</b>\n"
-        f"┣ Base Rate : <code>₹{p3_inr}/mo</code>  |  <code>{p3_stars} ⭐</code>  |  <code>${p3_usd:.2f}</code>\n\n"
+        "<b>◈ Oᴡɴᴇʀ Pʀɪᴄɪɴɢ Eᴅɪᴛᴏʀ 💎</b>\n\n"
+        "🥈 <b>1. Sɪʟᴠᴇʀ Pʟᴀɴ (Sᴛᴀʀᴛᴇʀ)</b>\n"
+        f"▸ <b>Bᴀꜱᴇ Rᴀᴛᴇ :</b> <code>₹{p1_inr}/mo</code> | <code>{p1_stars} ⭐</code> | <code>${p1_usd:.2f}</code>\n\n"
+        "🥇 <b>2. Gᴏʟᴅ Pʟᴀɴ (Pʀᴏ)</b>\n"
+        f"▸ <b>Bᴀꜱᴇ Rᴀᴛᴇ :</b> <code>₹{p2_inr}/mo</code> | <code>{p2_stars} ⭐</code> | <code>${p2_usd:.2f}</code>\n\n"
+        "💎 <b>3. Dɪᴀᴍᴏɴᴅ Pʟᴀɴ (VIP)</b>\n"
+        f"▸ <b>Bᴀꜱᴇ Rᴀᴛᴇ :</b> <code>₹{p3_inr}/mo</code> | <code>{p3_stars} ⭐</code> | <code>${p3_usd:.2f}</code>\n\n"
         "<i>Tap a tier button below to edit its 1-month base INR price. Stars & USD auto-sync.</i>\n\n"
         "⚡ @Nex_bots"
     )
@@ -1861,7 +2121,7 @@ async def build_owner_trial_panel():
     
     text = (
         "<b>◈ Fʀᴇᴇ Tʀɪᴀʟ Cᴏɴꜰɪɢᴜʀᴀᴛɪᴏɴ 🎁</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Trial Status :</b> <code>{t_status}</code>\n"
         f"◈ <b>Trial Duration :</b> <code>{t_days} Days</code>\n"
         f"◈ <b>Total Trials Claimed :</b> <code>{trials_claimed}</code>\n\n"
@@ -1937,7 +2197,7 @@ async def build_owner_quota_panel():
 
     text = (
         "<b>◈ Qᴜᴏᴛᴀ & Cᴏɴᴄᴜʀʀᴇɴᴄʏ Mᴀɴᴀɢᴇʀ ⚡</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Free Daily Quota :</b> <code>{free_gb} GB/day</code>\n"
         f"◈ <b>Free Concurrency :</b> <code>{f_conc} parallel task(s)</code>\n"
         f"◈ <b>Premium Concurrency :</b> <code>{p_conc} parallel task(s)</code>\n\n"
@@ -2013,7 +2273,7 @@ async def build_owner_toggles_panel():
 
     text = (
         "<b>◈ Bᴏᴛ Fᴇᴀᴛᴜʀᴇ Tᴏɢɢʟᴇꜱ ⚙️</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>🎬 Sample Video :</b> <code>{'ON 🟢' if sample_on else 'OFF 🔴'}</code>\n"
         f"◈ <b>📸 Screenshots :</b> <code>{'ON 🟢' if ss_on else 'OFF 🔴'}</code>\n"
         f"◈ <b>⚡ RAM-Disk Accel :</b> <code>{'ON 🟢' if ramdisk_on else 'OFF 🔴'}</code>\n"
@@ -2095,7 +2355,7 @@ async def build_owner_payment_panel():
 
     text = (
         "<b>◈ Pᴀʏᴍᴇɴᴛ & Sᴜᴘᴘᴏʀᴛ Cᴏɴꜰɪɢ 💳</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Active UPI ID :</b> <code>{upi_id}</code>\n"
         f"◈ <b>Payment QR Pic :</b> <code>{qr_url[:40]}...</code>\n"
         f"◈ <b>Support Contact :</b> @{contact}\n\n"
@@ -2162,7 +2422,7 @@ async def build_owner_referral_panel():
 
     text = (
         "<b>◈ Rᴇꜰᴇʀʀᴀʟ Sʏꜱᴛᴇᴍ Cᴏɴᴛʀᴏʟ 🎁</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         f"◈ <b>Status :</b> <code>{status_str}</code>\n"
         f"◈ <b>Target :</b> <code>{req} Invites</code>\n"
         f"◈ <b>Reward :</b> <b>{days} Days {tier_name}</b>\n\n"
@@ -2288,7 +2548,7 @@ async def cb_owner_restart(client, query: CallbackQuery):
 async def cb_owner_cmds_view(client, query: CallbackQuery):
     text = (
         "<b>◈ NᴇX Bᴏᴛ Cᴏᴍᴍᴀɴᴅꜱ Cʜᴇᴀᴛ-Sʜᴇᴇᴛ 📋</b>\n"
-        "───────────────\n\n"
+        "\n\n"
         "👑 <b>Owner Commands:</b>\n"
         "• <code>/owner</code> | <code>/admin</code> - Open Control Panel\n"
         "• <code>/mode</code> [pub|priv] | <code>/maintenance</code> - Modes\n"

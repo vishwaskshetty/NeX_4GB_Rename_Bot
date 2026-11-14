@@ -273,27 +273,41 @@ async def send_log(b, u):
             pass
 
 
-async def edit_message_content(message, text, reply_markup=None, parse_mode=None):
+async def edit_message_content(query_or_msg, text: str, reply_markup=None, disable_web_page_preview: bool = True, **kwargs):
     """
     Safely edits a message's content whether it is a regular text message
     or a media message (e.g. photo from START_PIC), avoiding caption/text mismatch errors,
-    FloodWait, and MessageNotModified.
+    FloodWait, and MessageNotModified. Accepts both CallbackQuery and Message objects.
     """
+    if not query_or_msg:
+        return None
+    message = getattr(query_or_msg, "message", query_or_msg)
     if not message:
         return None
+
+    parse_mode = kwargs.get("parse_mode", None)
     is_media = bool(getattr(message, "photo", None) or getattr(message, "media", None))
+
     for attempt in range(2):
         try:
             if is_media:
-                kwargs = {"caption": text, "reply_markup": reply_markup}
+                c_kwargs = {"caption": text, "reply_markup": reply_markup}
                 if parse_mode:
-                    kwargs["parse_mode"] = parse_mode
-                return await message.edit_caption(**kwargs)
+                    c_kwargs["parse_mode"] = parse_mode
+                return await message.edit_caption(**c_kwargs)
             else:
-                kwargs = {"text": text, "reply_markup": reply_markup}
+                t_kwargs = {
+                    "text": text,
+                    "reply_markup": reply_markup,
+                    "disable_web_page_preview": disable_web_page_preview
+                }
                 if parse_mode:
-                    kwargs["parse_mode"] = parse_mode
-                return await message.edit_text(**kwargs)
+                    t_kwargs["parse_mode"] = parse_mode
+                try:
+                    return await message.edit_text(**t_kwargs)
+                except TypeError:
+                    t_kwargs.pop("disable_web_page_preview", None)
+                    return await message.edit_text(**t_kwargs)
         except MessageNotModified:
             return message
         except FloodWait as e:
@@ -302,15 +316,23 @@ async def edit_message_content(message, text, reply_markup=None, parse_mode=None
             # Swap media / text on mismatch
             try:
                 if is_media:
-                    kwargs = {"text": text, "reply_markup": reply_markup}
+                    t_kwargs = {
+                        "text": text,
+                        "reply_markup": reply_markup,
+                        "disable_web_page_preview": disable_web_page_preview
+                    }
                     if parse_mode:
-                        kwargs["parse_mode"] = parse_mode
-                    return await message.edit_text(**kwargs)
+                        t_kwargs["parse_mode"] = parse_mode
+                    try:
+                        return await message.edit_text(**t_kwargs)
+                    except TypeError:
+                        t_kwargs.pop("disable_web_page_preview", None)
+                        return await message.edit_text(**t_kwargs)
                 else:
-                    kwargs = {"caption": text, "reply_markup": reply_markup}
+                    c_kwargs = {"caption": text, "reply_markup": reply_markup}
                     if parse_mode:
-                        kwargs["parse_mode"] = parse_mode
-                    return await message.edit_caption(**kwargs)
+                        c_kwargs["parse_mode"] = parse_mode
+                    return await message.edit_caption(**c_kwargs)
             except MessageNotModified:
                 return message
             except FloodWait as e:

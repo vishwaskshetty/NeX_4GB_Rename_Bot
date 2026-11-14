@@ -574,13 +574,68 @@ class Database:
         async for doc in cursor:
             expiry = float(doc.get("premium_expiry", 0) or 0)
             if expiry > now:
+                tier = int(doc.get("premium_tier", 1))
+                plan_name = doc.get("plan_name", TIER_NAMES.get(tier, "Premium"))
+                if doc.get("trial_claimed") and tier == 1 and (expiry - now) <= 4 * 86400:
+                    plan_display = "🎁 Free Trial"
+                else:
+                    plan_display = TIER_NAMES.get(tier, plan_name)
                 results.append({
                     "user_id": doc["_id"],
-                    "tier": int(doc.get("premium_tier", 1)),
-                    "plan_name": doc.get("plan_name", TIER_NAMES.get(doc.get("premium_tier", 1), "Premium")),
-                    "expiry": expiry
+                    "first_name": doc.get("first_name", "User"),
+                    "username": doc.get("username", ""),
+                    "tier": tier,
+                    "plan_name": plan_display,
+                    "expiry": expiry,
+                    "files_renamed_total": doc.get("files_renamed_total", 0),
+                    "bytes_used_total": doc.get("bytes_used_total", 0),
+                    "daily_bytes_used": doc.get("daily_bytes_used", 0)
                 })
         return results
+
+    async def get_users_detailed_stats(self) -> dict:
+        total_users = await self.col.count_documents({})
+        now = time.time()
+        today_str = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%Y-%m-%d")
+        active_today = await self.col.count_documents({"last_reset_date": today_str})
+        prem_users = await self.col.count_documents({"premium_tier": {"$gt": 0}, "premium_expiry": {"$gt": now}})
+        free_users = max(0, total_users - prem_users)
+        cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
+        banned_users = len(cfg.get('banned_users', []))
+        rename_stats = await self.get_global_rename_stats()
+        tot_bytes = rename_stats.get("total_bytes", 0)
+        return {
+            "total_users": total_users,
+            "active_today": active_today,
+            "free_users": free_users,
+            "prem_users": prem_users,
+            "banned_users": banned_users,
+            "total_bandwidth": tot_bytes
+        }
+
+    async def get_users_page(self, page: int = 0, page_size: int = 4) -> tuple:
+        total = await self.col.count_documents({})
+        cursor = self.col.find({}).sort("_id", -1).skip(page * page_size).limit(page_size)
+        users = await cursor.to_list(length=page_size)
+        return total, users
+
+    async def export_all_users_csv(self) -> str:
+        now = time.time()
+        cursor = self.col.find({}).sort("_id", 1)
+        lines = ["User_ID,First_Name,Username,Plan,Expiry,Total_Files,Total_GB,Referrals"]
+        async for doc in cursor:
+            uid = doc.get("_id")
+            fn = str(doc.get("first_name", "")).replace(",", " ")
+            un = str(doc.get("username", "")).replace(",", " ")
+            tier = int(doc.get("premium_tier", 0) or 0)
+            exp = float(doc.get("premium_expiry", 0) or 0)
+            plan = TIER_NAMES.get(tier, "Free") if exp > now else "Free"
+            exp_str = datetime.fromtimestamp(exp, pytz.utc).strftime("%Y-%m-%d %H:%M UTC") if exp > now else "N/A"
+            files = doc.get("files_renamed_total", 0)
+            gb = round(doc.get("bytes_used_total", 0) / (1024**3), 2)
+            refs = doc.get("total_referrals", 0)
+            lines.append(f"{uid},{fn},{un},{plan},{exp_str},{files},{gb},{refs}")
+        return "\n".join(lines)
 
     # ==================== 1-TIME 3-DAY FREE TRIAL ====================
 

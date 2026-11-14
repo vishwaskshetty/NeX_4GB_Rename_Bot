@@ -12,6 +12,9 @@ from helper.database import db
 
 _DB_TIMEOUT = 5  # seconds – max wait for any MongoDB call before fallback
 USER_FLOOD_TRACK = {}
+_FSUB_CACHE = {}  # (user_id, channel) -> (bool, expires_at)
+_FSUB_CACHE_TTL = 300.0  # 5 minutes for subscribed users
+_FSUB_FAIL_TTL = 10.0   # 10 seconds for non-subscribed so retry is fast
 
 
 async def _safe(coro, default=None):
@@ -28,6 +31,15 @@ async def is_subscribed(client: Client, user_id: int, channel=None) -> bool:
         return True
     if user_id in Config.ADMIN:
         return True
+
+    cache_key = (int(user_id), str(target_channel))
+    now = time.time()
+    cached = _FSUB_CACHE.get(cache_key)
+    if cached:
+        is_sub, exp = cached
+        if now < exp:
+            return is_sub
+
     try:
         chat_id = int(target_channel) if str(target_channel).startswith("-100") else target_channel
         member = await asyncio.wait_for(
@@ -40,9 +52,12 @@ async def is_subscribed(client: Client, user_id: int, channel=None) -> bool:
             ChatMemberStatus.MEMBER,
             ChatMemberStatus.RESTRICTED
         ]:
+            _FSUB_CACHE[cache_key] = (True, now + _FSUB_CACHE_TTL)
             return True
+        _FSUB_CACHE[cache_key] = (False, now + _FSUB_FAIL_TTL)
         return False
     except UserNotParticipant:
+        _FSUB_CACHE[cache_key] = (False, now + _FSUB_FAIL_TTL)
         return False
     except Exception:
         return True  # fail-open for resilience
