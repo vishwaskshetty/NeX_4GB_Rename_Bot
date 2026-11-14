@@ -6,7 +6,7 @@ import shutil
 from pyrogram import Client, filters, enums, __version__
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from helper.database import db, TIER_NAMES
-from config import Config, Txt  
+from config import Config, Txt, parse_channel_id  
 from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content
 
 _DB_TIMEOUT = 5  # seconds – guard so DB never blocks message handlers
@@ -184,6 +184,23 @@ async def start(client, message):
     # Non-blocking add_user: skip on timeout so /start is instant
     await _safe(db.add_user(client, message))
 
+    # Log new user arrival to LOG_CHANNEL
+    if is_new and Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
+        try:
+            log_ch = parse_channel_id(Config.LOG_CHANNEL)
+            total_u = await _safe(db.total_users_count(), default=0)
+            u_text = (
+                "🆕 <b><u>New User Started Bot!</u></b>\n\n"
+                f"👤 <b>User :</b> {user.mention} (<code>{user_id}</code>)\n"
+                f"🏷 <b>Username :</b> @{user.username or 'No Username'}\n"
+                f"📊 <b>Total Users :</b> <code>{total_u}</code>\n"
+                f"⏰ <b>Time :</b> <code>{time.strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n"
+                "⚡ @Nex_bots"
+            )
+            asyncio.create_task(client.send_message(log_ch, u_text))
+        except Exception:
+            pass
+
     # Process Referral Deep Link
     text_parts = message.text.split(maxsplit=1)
     if len(text_parts) > 1 and is_new:
@@ -212,7 +229,7 @@ async def start(client, message):
                     if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
                         try:
                             await client.send_message(
-                                Config.LOG_CHANNEL,
+                                parse_channel_id(Config.LOG_CHANNEL),
                                 f"🎁 <b>Referral Milestone Reward!</b>\n\n"
                                 f"👤 <b>Inviter:</b> <code>{inviter_id}</code>\n"
                                 f"💎 <b>Reward:</b> {r_days} Days of {t_name}\n"

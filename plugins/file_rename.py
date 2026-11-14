@@ -50,7 +50,7 @@ from helper.ffmpeg_utils import (
     apply_video_watermark
 )
 from helper.database import db, TIER_LIMITS
-from config import Config
+from config import Config, parse_channel_id
 from bot import app_4gb
 
 # Global concurrency queue lock - Max 10 heavy operations at once
@@ -67,17 +67,18 @@ USER_RENAME_CACHE = {}
 
 def get_optimal_work_dir(user_id: int, file_size: int = 0, is_remux_needed: bool = False) -> str:
     """
-    Returns a high-speed RAM-disk path (/dev/shm/nex_tasks/...) if running on Linux
-    and /dev/shm has sufficient free space (> 1.3 * file_size for direct rename, > 2.2 * file_size for remuxing).
-    Otherwise falls back to SSD 'downloads/...'.
+    Routes small files (<= 1.8GB) to high-speed RAM-disk /dev/shm if sufficient free space (> 2.0x file size).
+    Routes all large files (1.8GB - 4.0GB) directly to fast NVMe SSD (downloads/...) with 64MB buffer
+    so /dev/shm never exhausts memory mid-transfer.
     """
     ts = int(time.time())
     pid = os.getpid()
     sub = f"{user_id}_{ts}_{pid}"
-    if os.name != 'nt' and os.path.exists('/dev/shm'):
+    max_shm_size = int(1.8 * 1024 * 1024 * 1024)  # 1.8 GB max for RAM-disk
+    if os.name != 'nt' and os.path.exists('/dev/shm') and (file_size <= max_shm_size or file_size == 0):
         try:
             shm_usage = shutil.disk_usage('/dev/shm')
-            multiplier = 2.2 if is_remux_needed else 1.3
+            multiplier = 2.2 if is_remux_needed else 2.0
             needed = int(file_size * multiplier) if file_size > 0 else (100 * 1024 * 1024)
             if shm_usage.free > needed:
                 path = f"/dev/shm/nex_tasks/{sub}"
@@ -1270,9 +1271,9 @@ async def execute_rename_pipeline(
             # Check Bot Content Protection status
             protect_content = await db.get_protect_content()
 
-            # 6. Determine 4GB Routing & Dump Channel
+            # 6. Determine 4GB Routing & Bridge Channel
             user_dump = await db.get_dump_channel(user_id)
-            dump_channel = user_dump or Config.FILES_CHANNEL or Config.LOG_CHANNEL
+            bridge_channel = parse_channel_id(user_dump or Config.DUMP_CHANNEL or Config.FILES_CHANNEL or Config.LOG_CHANNEL)
 
             is_4gb = actual_file_size > (1.95 * 1024 * 1024 * 1024)
             client_4gb = getattr(client, "app_4gb", None) or app_4gb
@@ -1282,6 +1283,7 @@ async def execute_rename_pipeline(
             await ms.edit(upload_mode_tag)
             upload_start = time.time()
             user_sent_msgs = []
+            sent_msg = None
 
             # Multi-Socket Parallel MTProto Upload (50-100+ MB/s)
             uploaded_file = None
@@ -1306,75 +1308,100 @@ async def execute_rename_pipeline(
             try:
                 # 4GB Upload Flow (> 1.95GB)
                 if is_4gb and client_4gb:
-                    upload_target = int(dump_channel) if (dump_channel and int(dump_channel) != 0) else user_id
+                    # Stage 1: Primary (Bridge Copy) - upload to bridge/dump channel via app_4gb and copy to user DM via Bot client
+                    if bridge_channel and bridge_channel != 0:
+                        try:
+                            if upload_type == "document":
+                                bridge_msg = await uploader.send_document(
+                                    chat_id=bridge_channel,
+                                    document=upload_payload,
+                                    file_name=new_filename,
+                                    thumb=ph_path,
+                                    caption=caption,
+                                    progress=upload_progress,
+                                    progress_args=upload_progress_args
+                                )
+                            elif upload_type == "video":
+                                bridge_msg = await uploader.send_video(
+                                    chat_id=bridge_channel,
+                                    video=upload_payload,
+                                    file_name=new_filename,
+                                    caption=caption,
+                                    thumb=ph_path,
+                                    duration=duration,
+                                    width=width,
+                                    height=height,
+                                    supports_streaming=True,
+                                    progress=upload_progress,
+                                    progress_args=upload_progress_args
+                                )
+                            elif upload_type == "audio":
+                                bridge_msg = await uploader.send_audio(
+                                    chat_id=bridge_channel,
+                                    audio=upload_payload,
+                                    file_name=new_filename,
+                                    caption=caption,
+                                    thumb=ph_path,
+                                    duration=duration,
+                                    progress=upload_progress,
+                                    progress_args=upload_progress_args
+                                )
 
-                    if upload_type == "document":
-                        sent_msg = await uploader.send_document(
-                            chat_id=upload_target,
-                            document=upload_payload,
-                            file_name=new_filename,
-                            thumb=ph_path,
-                            caption=caption,
-                            protect_content=protect_content if upload_target == user_id else False,
-                            progress=upload_progress,
-                            progress_args=upload_progress_args
-                        )
-                    elif upload_type == "video":
-                        sent_msg = await uploader.send_video(
-                            chat_id=upload_target,
-                            video=upload_payload,
-                            file_name=new_filename,
-                            caption=caption,
-                            thumb=ph_path,
-                            duration=duration,
-                            width=width,
-                            height=height,
-                            supports_streaming=True,
-                            protect_content=protect_content if upload_target == user_id else False,
-                            progress=upload_progress,
-                            progress_args=upload_progress_args
-                        )
-                    elif upload_type == "audio":
-                        sent_msg = await uploader.send_audio(
-                            chat_id=upload_target,
-                            audio=upload_payload,
-                            file_name=new_filename,
-                            caption=caption,
-                            thumb=ph_path,
-                            duration=duration,
-                            protect_content=protect_content if upload_target == user_id else False,
-                            progress=upload_progress,
-                            progress_args=upload_progress_args
-                        )
+                            # Bot client copies the 4GB media message from bridge channel directly to the user!
+                            sent_msg = await client.copy_message(
+                                chat_id=user_id,
+                                from_chat_id=bridge_channel,
+                                message_id=bridge_msg.id,
+                                caption=caption,
+                                protect_content=protect_content
+                            )
+                        except Exception as bridge_err:
+                            print(f"Bridge copy delivery failed ({bridge_err}). Trying fallback direct delivery...")
+                            sent_msg = None
 
-                    if upload_target == user_id:
-                        user_sent_msgs.append(sent_msg.id)
-                        target_msg_id = sent_msg.id
-                    else:
-                        # Copy to user DM if uploaded via dump channel
-                        copied = await client.copy_message(
-                            chat_id=user_id,
-                            from_chat_id=upload_target,
-                            message_id=sent_msg.id,
-                            caption=caption,
-                            protect_content=protect_content
-                        )
-                        user_sent_msgs.append(copied.id)
-                        target_msg_id = copied.id
+                    # Stage 2: Fallback (Direct app_4gb Delivery) if bridge copy failed or no bridge channel
+                    if not sent_msg:
+                        if upload_type == "document":
+                            sent_msg = await uploader.send_document(
+                                chat_id=user_id,
+                                document=upload_payload,
+                                file_name=new_filename,
+                                thumb=ph_path,
+                                caption=caption,
+                                protect_content=protect_content,
+                                progress=upload_progress,
+                                progress_args=upload_progress_args
+                            )
+                        elif upload_type == "video":
+                            sent_msg = await uploader.send_video(
+                                chat_id=user_id,
+                                video=upload_payload,
+                                file_name=new_filename,
+                                caption=caption,
+                                thumb=ph_path,
+                                duration=duration,
+                                width=width,
+                                height=height,
+                                supports_streaming=True,
+                                protect_content=protect_content,
+                                progress=upload_progress,
+                                progress_args=upload_progress_args
+                            )
+                        elif upload_type == "audio":
+                            sent_msg = await uploader.send_audio(
+                                chat_id=user_id,
+                                audio=upload_payload,
+                                file_name=new_filename,
+                                caption=caption,
+                                thumb=ph_path,
+                                duration=duration,
+                                protect_content=protect_content,
+                                progress=upload_progress,
+                                progress_args=upload_progress_args
+                            )
 
-                    # Send 15-Minute Copyright Auto-Delete notice as a SEPARATE reply message
-                    warn_text = "⏳ **Note:** This file will be automatically deleted in **15 minutes** due to copyright protection. Please forward it to your **Saved Messages**!"
-                    try:
-                        warn_msg = await client.send_message(
-                            chat_id=user_id,
-                            text=warn_text,
-                            reply_parameters=ReplyParameters(message_id=target_msg_id)
-                        )
-                        user_sent_msgs.append(warn_msg.id)
-                    except Exception:
-                        pass
                 else:
-                    # Standard Upload Flow (<= 1.95GB)
+                    # Standard Upload Flow (<= 1.95GB) - direct to user chat via Bot client
                     if upload_type == "document":
                         sent_msg = await client.send_document(
                             chat_id=user_id,
@@ -1414,32 +1441,40 @@ async def execute_rename_pipeline(
                             progress_args=upload_progress_args
                         )
 
-                    user_sent_msgs.append(sent_msg.id)
+                # Strict Verification: sent_msg MUST be a valid message delivered to the user
+                if not sent_msg or not hasattr(sent_msg, "id"):
+                    return await ms.edit("❌ <b>Delivery Failed: Renamed file could not be delivered to your chat. Please contact support.</b>")
 
-                    # Send 15-Minute Copyright Auto-Delete notice as a SEPARATE reply message
-                    warn_text = "⏳ **Note:** This file will be automatically deleted in **15 minutes** due to copyright protection. Please forward it to your **Saved Messages**!"
-                    try:
-                        warn_msg = await client.send_message(
-                            chat_id=user_id,
-                            text=warn_text,
-                            reply_parameters=ReplyParameters(message_id=sent_msg.id)
-                        )
-                        user_sent_msgs.append(warn_msg.id)
-                    except Exception:
-                        pass
+                user_sent_msgs.append(sent_msg.id)
 
-                    # Track usage statistics
+                # Send 15-Minute Copyright Auto-Delete notice as a SEPARATE reply message
+                warn_text = "⏳ **Note:** This file will be automatically deleted in **15 minutes** due to copyright protection. Please forward it to your **Saved Messages**!"
+                try:
+                    warn_msg = await client.send_message(
+                        chat_id=user_id,
+                        text=warn_text,
+                        reply_parameters=ReplyParameters(message_id=sent_msg.id)
+                    )
+                    user_sent_msgs.append(warn_msg.id)
+                except Exception:
+                    pass
+
+                # Track usage statistics
+                try:
+                    await db.add_usage(user_id, actual_file_size)
+                except Exception as e:
+                    print(f"Usage tracking error: {e}")
+
+                # Automatic File Channel / Dump Channel Forwarding for ALL successful renames
+                dump_target = parse_channel_id(Config.DUMP_CHANNEL or Config.FILES_CHANNEL)
+                if dump_target and dump_target != 0 and dump_target != user_id:
                     try:
-                        await db.add_usage(user_id, actual_file_size)
+                        user_mention = getattr(status_target.from_user, "mention", f"User {user_id}") if hasattr(status_target, "from_user") and status_target.from_user else f"<code>{user_id}</code>"
+                        orig_name = getattr(file_msg, "name", None) or getattr(file_msg, "file_name", None) or (file_msg.document and file_msg.document.file_name) or (file_msg.video and file_msg.video.file_name) or new_filename
+                        dump_caption = f"{caption}\n\n👤 <b>Uꜱᴇʀ :</b> {user_mention} (<code>{user_id}</code>)\n📂 <b>Oʀɪɢɪɴᴀʟ :</b> <code>{orig_name}</code>"
+                        await sent_msg.copy(chat_id=dump_target, caption=dump_caption)
                     except Exception as e:
-                        print(f"Usage tracking error: {e}")
-
-                    # Backup copy to dump channel if configured
-                    if dump_channel and int(dump_channel) != 0 and int(dump_channel) != user_id:
-                        try:
-                            await sent_msg.copy(chat_id=int(dump_channel))
-                        except Exception as e:
-                            print(f"Dump channel backup error: {e}")
+                        print(f"Dump channel backup error: {e}")
 
             except StopTransmission:
                 return await ms.edit("❌ <b>Upload Cancelled by User!</b>\n\n⚡ @Nex_bots")
@@ -1539,7 +1574,7 @@ async def execute_rename_pipeline(
 
             # Auto-delete original incoming/forwarded media message as soon as rename finishes
             try:
-                if 'file_msg' in locals() and file_msg:
+                if 'file_msg' in locals() and file_msg and getattr(file_msg, "id", None) not in user_sent_msgs:
                     await file_msg.delete()
             except Exception:
                 pass

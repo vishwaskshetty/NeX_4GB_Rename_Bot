@@ -32,16 +32,16 @@ async def _fast_save_file(self, path, *args, **kwargs):
 Client.save_file = _fast_save_file
 
 # High-Speed MTProto Configuration: Multi-Socket chunk streaming with parallel worker coroutines
-CHUNK_SIZE = 1024 * 1024             # 1MB per chunk for parallel download
+CHUNK_SIZE = 512 * 1024              # 512KB per chunk for optimal parallel MTProto throughput
 UPLOAD_PART_SIZE = 512 * 1024        # 512KB per part for parallel upload (MTProto limit)
-CONCURRENT_WORKERS_PREM = 20         # 20 concurrent MTProto streams for Premium users (60-100+ MB/s)
+CONCURRENT_WORKERS_PREM = 20         # 20 concurrent MTProto worker streams for Premium users (60-100+ MB/s)
 CONCURRENT_WORKERS_FREE = 10         # 10 concurrent MTProto streams for Free users (30-45+ MB/s)
 CONCURRENT_WORKERS = 16              # Default max concurrent streams
 BUFFER_SIZE = 64 * 1024 * 1024       # 64MB RAM write/read buffer for zero disk latency
 
 
 async def get_media_session(client: Client, dc_id: int) -> Session:
-    """Retrieves or initializes an authorized media session for the specified DC with strict timeout."""
+    """Retrieves or initializes the primary authorized media session for the specified DC with strict timeout."""
     session = client.media_sessions.get(dc_id)
     if not session:
         test_mode = await asyncio.wait_for(client.storage.test_mode(), timeout=5.0)
@@ -83,10 +83,10 @@ async def get_media_session(client: Client, dc_id: int) -> Session:
     return session
 
 
-async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 4) -> List[Session]:
+async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 8) -> List[Session]:
     """
-    Returns a pool of authorized media sessions for the specified DC to enable
-    multi-socket parallel MTProto streaming (bypassing single-connection TCP caps).
+    Returns a pool of up to pool_size authorized independent media sessions for the specified DC
+    to enable true multi-socket parallel MTProto streaming (bypassing the single-connection TCP limit).
     """
     if not hasattr(client, "_multi_media_sessions"):
         client._multi_media_sessions = {}
@@ -110,7 +110,6 @@ async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 4)
 
     if len(pool) < pool_size:
         test_mode = await asyncio.wait_for(client.storage.test_mode(), timeout=5.0)
-        main_dc = await asyncio.wait_for(client.storage.dc_id(), timeout=5.0)
         auth_key = getattr(primary, "auth_key", None)
         if not auth_key:
             auth_key = await client.storage.auth_key()
@@ -119,20 +118,6 @@ async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 4)
             try:
                 extra_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
                 await asyncio.wait_for(extra_session.start(), timeout=5.0)
-                if dc_id != main_dc:
-                    exported_auth = await asyncio.wait_for(
-                        client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id)),
-                        timeout=5.0
-                    )
-                    await asyncio.wait_for(
-                        extra_session.invoke(
-                            raw.functions.auth.ImportAuthorization(
-                                id=exported_auth.id,
-                                bytes=exported_auth.bytes
-                            )
-                        ),
-                        timeout=5.0
-                    )
                 pool.append(extra_session)
             except Exception as e:
                 log.warning(f"Failed to spawn extra session for DC {dc_id}: {e}")
@@ -151,8 +136,8 @@ async def fast_download(
     is_prem: bool = False
 ) -> str:
     """
-    Downloads media using multi-socket parallel MTProto chunk streaming and 64MB buffered file I/O.
-    Achieves 50-100+ MB/s transfers on gigabit cloud connections for all users.
+    Downloads media using multi-socket parallel MTProto chunk streaming with 8 independent TCP sessions
+    and 64MB buffered file I/O. Achieves 50-100+ MB/s transfers on gigabit cloud connections.
     Safely falls back to client.download_media if any DC migration, CDN redirect, or FloodWait occurs.
     """
     # Detect premium status from progress_args if provided
@@ -217,7 +202,7 @@ async def fast_download(
                 thumb_size=thumb_size
             )
 
-        pool_size = 6 if is_prem else 3
+        pool_size = 8 if is_prem else 4
         try:
             sessions = await asyncio.wait_for(get_media_session_pool(client, dc_id, pool_size=pool_size), timeout=8.0)
         except Exception as sess_err:
@@ -229,11 +214,32 @@ async def fast_download(
         for i in range(total_parts):
             queue.put_nowait(i)
 
-        write_queue = asyncio.Queue(maxsize=64)
+        # Pre-allocate file size upfront to avoid filesystem fragmentation during parallel writes
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+            with open(file_path, "wb") as init_fp:
+                if file_size > 0:
+                    init_fp.seek(file_size - 1)
+                    init_fp.write(b'\0')
+        except Exception as init_err:
+            log.warning(f"File pre-allocation note: {init_err}")
+
+        use_pwrite = hasattr(os, "pwrite")
+        fd = None
+        if use_pwrite:
+            try:
+                fd = os.open(file_path, os.O_WRONLY | getattr(os, "O_BINARY", 0))
+            except Exception:
+                fd = None
+                use_pwrite = False
+
+        write_queue = asyncio.Queue(maxsize=64) if not use_pwrite else None
         downloaded_bytes = 0
         error_holder = []
+        lock = asyncio.Lock()
 
         async def worker(worker_id: int):
+            nonlocal downloaded_bytes
             session = sessions[worker_id % len(sessions)]
             while not queue.empty():
                 if error_holder:
@@ -244,7 +250,9 @@ async def fast_download(
                     break
 
                 offset_bytes = part_idx * CHUNK_SIZE
+                chunk_len = min(CHUNK_SIZE, file_size - offset_bytes) if file_size > 0 else CHUNK_SIZE
                 success = False
+
                 for attempt in range(3):
                     if error_holder:
                         break
@@ -261,7 +269,24 @@ async def fast_download(
                             timeout=25.0
                         )
                         if isinstance(r, raw.types.upload.File):
-                            await write_queue.put((part_idx, r.bytes))
+                            if use_pwrite and fd is not None:
+                                os.pwrite(fd, r.bytes, offset_bytes)
+                                async with lock:
+                                    downloaded_bytes += len(r.bytes)
+                                    curr = downloaded_bytes
+                                if progress:
+                                    try:
+                                        if inspect.iscoroutinefunction(progress):
+                                            await progress(min(curr, file_size), file_size, *progress_args)
+                                        else:
+                                            progress(min(curr, file_size), file_size, *progress_args)
+                                    except StopTransmission:
+                                        error_holder.append(StopTransmission("Download Cancelled"))
+                                        break
+                                    except Exception:
+                                        pass
+                            else:
+                                await write_queue.put((part_idx, r.bytes))
                             success = True
                             break
                         else:
@@ -278,8 +303,7 @@ async def fast_download(
 
         async def writer():
             nonlocal downloaded_bytes
-            # 64MB RAM write buffer ensures disk I/O never bottlenecks the network stream
-            with open(file_path, "wb", buffering=BUFFER_SIZE) as fp:
+            with open(file_path, "r+b", buffering=BUFFER_SIZE) as fp:
                 while True:
                     item = await write_queue.get()
                     if item is None:
@@ -302,20 +326,31 @@ async def fast_download(
                         except Exception:
                             pass
 
-        writer_task = asyncio.create_task(writer())
+        writer_task = None
+        if not use_pwrite:
+            writer_task = asyncio.create_task(writer())
+
         worker_limit = CONCURRENT_WORKERS_PREM if is_prem else CONCURRENT_WORKERS_FREE
         worker_count = min(worker_limit, total_parts)
         workers = [asyncio.create_task(worker(i)) for i in range(worker_count)]
 
         await asyncio.gather(*workers)
 
-        if error_holder:
+        if not use_pwrite:
+            if error_holder:
+                await write_queue.put(None)
+                await writer_task
+                raise error_holder[0]
             await write_queue.put(None)
             await writer_task
-            raise error_holder[0]
+        elif fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
 
-        await write_queue.put(None)
-        await writer_task
+        if error_holder:
+            raise error_holder[0]
 
         if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
             return file_path
@@ -347,10 +382,9 @@ async def fast_upload(
     is_prem: bool = False
 ):
     """
-    Uploads media using multi-socket parallel MTProto chunk streaming with a 64MB buffer.
-    Achieves 50-100+ MB/s upload speeds on cloud runners by multiplexing chunk uploads across
-    a pool of independent media sessions. Returns raw.types.InputFileBig (for files > 10MB)
-    or raw.types.InputFile (for files <= 10MB).
+    Uploads media using multi-socket parallel MTProto chunk streaming with 8 independent TCP sessions
+    and a 64MB buffer. Achieves 50-100+ MB/s upload speeds on cloud runners by multiplexing chunk uploads.
+    Returns raw.types.InputFileBig (for files > 10MB) or raw.types.InputFile (for files <= 10MB).
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -371,7 +405,7 @@ async def fast_upload(
     file_name = os.path.basename(file_path)
     file_id = client.rnd_id() if hasattr(client, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
 
-    pool_size = 6 if is_prem else 3
+    pool_size = 8 if is_prem else 4
     worker_limit = CONCURRENT_WORKERS_PREM if is_prem else 8
     worker_count = min(worker_limit, total_parts)
 

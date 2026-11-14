@@ -15,9 +15,9 @@ import asyncio
 from datetime import datetime
 from pytz import timezone
 from pyrogram import Client, __version__
-from pyrogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
+from pyrogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat, ChatPrivileges
 from pyrogram.raw.all import layer
-from config import Config
+from config import Config, parse_channel_id
 from aiohttp import web
 from route import web_server
 import pyrogram.utils
@@ -166,6 +166,28 @@ class Bot(Client):
         self.username = me.username  
         self.uptime = Config.BOT_UPTIME     
 
+        # Sync dynamic channels & force-sub from MongoDB
+        try:
+            bot_settings = await db.get_bot_settings()
+            if bot_settings.get("log_channel"):
+                Config.LOG_CHANNEL = parse_channel_id(bot_settings["log_channel"])
+            elif Config.LOG_CHANNEL:
+                await db.update_bot_settings(log_channel=Config.LOG_CHANNEL)
+
+            if bot_settings.get("dump_channel"):
+                Config.FILES_CHANNEL = parse_channel_id(bot_settings["dump_channel"])
+                Config.DUMP_CHANNEL = Config.FILES_CHANNEL
+                Config.BIN_CHANNEL = Config.FILES_CHANNEL
+            elif Config.FILES_CHANNEL:
+                await db.update_bot_settings(dump_channel=Config.FILES_CHANNEL)
+
+            if bot_settings.get("force_sub"):
+                Config.FORCE_SUB = bot_settings["force_sub"]
+            elif Config.FORCE_SUB:
+                await db.update_bot_settings(force_sub=Config.FORCE_SUB)
+        except Exception as sync_err:
+            print(f"Startup channel sync note: {sync_err}")
+
         # Register Bot Commands Menu in Telegram (Strict Scoping)
         try:
             # 1. Public Command Menu (Default Scope - Visible to All Users with /start #1)
@@ -200,6 +222,56 @@ class Bot(Client):
             except Exception as e:
                 print(f"Error starting 4GB Premium Client: {e}")
 
+        # Check if Log Channel is accessible by bot
+        is_log_valid = False
+        if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
+            try:
+                await self.get_chat(parse_channel_id(Config.LOG_CHANNEL))
+                is_log_valid = True
+            except Exception as ch_err:
+                print(f"Configured Log Channel ({Config.LOG_CHANNEL}) not accessible by bot: {ch_err}")
+                is_log_valid = False
+
+        # Auto-Create 4GB Bridge/Log Channel on Startup if Missing or Inaccessible
+        if not is_log_valid and self.app_4gb and self.app_4gb_started:
+            try:
+                print("Creating auto 'NeX 4GB Cloud Bridge' channel via app_4gb...")
+                created_chat = await self.app_4gb.create_channel(
+                    title="NeX 4GB Cloud Bridge",
+                    description="Auto-generated bridge channel for NeX 4GB Rename Bot transfers."
+                )
+                bridge_id = created_chat.id
+                try:
+                    await self.app_4gb.add_chat_members(bridge_id, me.username)
+                except Exception:
+                    pass
+                try:
+                    await self.app_4gb.promote_chat_member(
+                        bridge_id,
+                        me.username,
+                        privileges=ChatPrivileges(
+                            can_post_messages=True,
+                            can_edit_messages=True,
+                            can_delete_messages=True,
+                            can_invite_users=True,
+                            can_pin_messages=True
+                        )
+                    )
+                except Exception as prom_err:
+                    print(f"Bridge bot admin promotion info: {prom_err}")
+
+                Config.LOG_CHANNEL = bridge_id
+                if not Config.FILES_CHANNEL or Config.FILES_CHANNEL == 0:
+                    Config.FILES_CHANNEL = bridge_id
+                    Config.DUMP_CHANNEL = bridge_id
+                    Config.BIN_CHANNEL = bridge_id
+                    await db.update_bot_settings(log_channel=bridge_id, dump_channel=bridge_id)
+                else:
+                    await db.update_bot_settings(log_channel=bridge_id)
+                print(f"✅ NeX 4GB Cloud Bridge channel created & configured: {bridge_id}")
+            except Exception as create_err:
+                print(f"Failed to auto-create 4GB bridge channel: {create_err}")
+
         print(f"{me.first_name} [NeX 4GB Rename Bot] Is Started.....✨️")
         for admin_id in Config.ADMIN:
             try:
@@ -213,14 +285,16 @@ class Bot(Client):
                 date = curr.strftime('%d %B, %Y')
                 time_str = curr.strftime('%I:%M:%S %p')
                 log_text = (
-                    f"<b>{me.mention} Is Restarted !!</b>\n\n"
-                    f"📅 <b>Date :</b> <code>{date}</code>\n"
-                    f"⏰ <b>Time :</b> <code>{time_str}</code>\n"
-                    f"🌐 <b>Timezone :</b> <code>Asia/Kolkata</code>\n\n"
-                    f"🉐 <b>Version :</b> <code>v{__version__} (Layer {layer})</code>\n"
-                    f"⚡ <b>Powered by :</b> @Nex_bots"
+                    f"⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ Is Sᴛᴀʀᴛᴇᴅ !!</b>\n\n"
+                    f"📅 <b>Dᴀᴛᴇ :</b> <code>{date}</code>\n"
+                    f"⏰ <b>Tɪᴍᴇ :</b> <code>{time_str}</code>\n"
+                    f"🌐 <b>Tɪᴍᴇᴢᴏɴᴇ :</b> <code>Asia/Kolkata</code>\n\n"
+                    f"🉐 <b>Vᴇʀꜱɪᴏɴ :</b> <code>v{__version__} (Layer {layer})</code>\n"
+                    f"📦 <b>Dᴜᴍᴘ Cʜᴀɴɴᴇʟ :</b> <code>{Config.FILES_CHANNEL or 'Bridge'}</code>\n"
+                    f"📢 <b>FSᴜʙ Cʜᴀɴɴᴇʟ :</b> <code>{Config.FORCE_SUB or 'Disabled'}</code>\n"
+                    f"⚡ <b>Pᴏᴡᴇʀᴇᴅ ʙʏ :</b> @Nex_bots"
                 )
-                await self.send_message(Config.LOG_CHANNEL, log_text)
+                await self.send_message(parse_channel_id(Config.LOG_CHANNEL), log_text)
             except Exception as e:
                 print(f"Please Make Sure The Bot Is Admin In Your Log Channel: {e}")
 

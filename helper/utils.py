@@ -5,7 +5,7 @@ import time
 import asyncio
 from datetime import datetime
 from pytz import timezone
-from config import Config, Txt 
+from config import Config, Txt, parse_channel_id 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors import FloodWait, MessageNotModified
 try:

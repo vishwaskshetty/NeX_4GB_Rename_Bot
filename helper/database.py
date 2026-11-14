@@ -2,7 +2,7 @@ import time
 from datetime import datetime
 import motor.motor_asyncio
 import pytz
-from config import Config
+from config import Config, parse_channel_id
 from .utils import send_log
 
 # NeX 4GB Rename Bot - Database Architecture
@@ -1463,9 +1463,19 @@ class Database:
         if cached is not None:
             return cached
         cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
+        raw_log = cfg.get("log_channel") if cfg.get("log_channel") is not None else Config.LOG_CHANNEL
+        raw_dump = cfg.get("dump_channel") or cfg.get("files_channel") if (cfg.get("dump_channel") is not None or cfg.get("files_channel") is not None) else Config.FILES_CHANNEL
+        raw_fsub = cfg.get("force_sub") if cfg.get("force_sub") is not None else Config.FORCE_SUB
+        fsub_enabled = bool(cfg.get("force_sub_enabled", True))
+        fsub_list = cfg.get("force_sub_channels") or ([raw_fsub] if raw_fsub else [])
+
         res = {
             "owner_only": bool(cfg.get("owner_only", Config.OWNER_ONLY)),
-            "force_sub": cfg.get("force_sub", Config.FORCE_SUB),
+            "log_channel": parse_channel_id(raw_log),
+            "dump_channel": parse_channel_id(raw_dump),
+            "force_sub": raw_fsub,
+            "force_sub_enabled": fsub_enabled,
+            "force_sub_channels": fsub_list,
             "free_quota_gb": int(cfg.get("free_quota_gb", 20)),
             "free_concurrency": int(cfg.get("free_concurrency", 1)),
             "prem_concurrency": int(cfg.get("prem_concurrency", 4)),
@@ -1492,6 +1502,25 @@ class Database:
             await self.cfg.update_one({'_id': 'bot_settings'}, {'$set': clean}, upsert=True)
             _cache_invalidate("bot_settings")
         return await self.get_bot_settings()
+
+    async def set_log_channel(self, channel_id):
+        cid = parse_channel_id(channel_id)
+        Config.LOG_CHANNEL = cid
+        return await self.update_bot_settings(log_channel=cid)
+
+    async def set_dump_channel_global(self, channel_id):
+        cid = parse_channel_id(channel_id)
+        Config.FILES_CHANNEL = cid
+        Config.DUMP_CHANNEL = cid
+        Config.BIN_CHANNEL = cid
+        return await self.update_bot_settings(dump_channel=cid)
+
+    async def set_fsub_channel(self, channel):
+        Config.FORCE_SUB = channel
+        return await self.update_bot_settings(force_sub=channel)
+
+    async def set_fsub_enabled(self, status: bool):
+        return await self.update_bot_settings(force_sub_enabled=bool(status))
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

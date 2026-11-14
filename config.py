@@ -8,6 +8,29 @@ load_dotenv()
 
 id_pattern = re.compile(r'^.\d+$') 
 
+
+def parse_channel_id(val):
+    """
+    Cleanly converts numeric channel IDs (like "-1001234567890" or -1001234567890)
+    to int(-1001234567890) while preserving "@ChannelUsername" as a str.
+    Returns 0 if val is empty, 0, or None.
+    """
+    if val is None:
+        return 0
+    if isinstance(val, int):
+        return val
+    s = str(val).strip()
+    if not s or s == "0":
+        return 0
+    if s.startswith("-100") and s[4:].isdigit():
+        return int(s)
+    if s.lstrip("-").isdigit():
+        return int(s)
+    if not s.startswith("@") and not s.startswith("-"):
+        return f"@{s}"
+    return s
+
+
 class Config(object):
     # Pyrogram client configuration
     _raw_api_id = os.environ.get("API_ID", "").strip()
@@ -35,10 +58,12 @@ class Config(object):
     FORCE_SUB  = os.environ.get("FORCE_SUB", "Nex_bots").strip() or "Nex_bots" 
 
     # Channels & Media
-    _raw_log      = os.environ.get("LOG_CHANNEL", "0").strip()
-    LOG_CHANNEL   = int(_raw_log) if _raw_log.lstrip('-').isdigit() else 0
-    _raw_files    = os.environ.get("FILES_CHANNEL", "0").strip()
-    FILES_CHANNEL = int(_raw_files) if _raw_files.lstrip('-').isdigit() else 0
+    _raw_log      = os.environ.get("LOG_CHANNEL", "-1004362143385").strip()
+    LOG_CHANNEL   = parse_channel_id(_raw_log) if _raw_log and _raw_log != "0" else -1004362143385
+    _raw_files    = os.environ.get("FILES_CHANNEL", os.environ.get("DUMP_CHANNEL", "-1003792044224")).strip()
+    FILES_CHANNEL = parse_channel_id(_raw_files) if _raw_files and _raw_files != "0" else -1003792044224
+    DUMP_CHANNEL  = FILES_CHANNEL
+    BIN_CHANNEL   = FILES_CHANNEL
     START_PIC     = os.environ.get("START_PIC", "").strip()
 
     # Bot uptime & web response configuration     

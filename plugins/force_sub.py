@@ -4,7 +4,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatJoinRequest
 from pyrogram.errors import UserNotParticipant
 from pyrogram.enums import ChatMemberStatus
-from config import Config
+from config import Config, parse_channel_id
 from helper.database import db
 
 # NeX 4GB Rename Bot - Personal Bot Protection, Access Control & Dynamic Force Sub
@@ -41,7 +41,7 @@ async def is_subscribed(client: Client, user_id: int, channel=None) -> bool:
             return is_sub
 
     try:
-        chat_id = int(target_channel) if str(target_channel).startswith("-100") else target_channel
+        chat_id = parse_channel_id(target_channel)
         member = await asyncio.wait_for(
             client.get_chat_member(chat_id, user_id),
             timeout=_DB_TIMEOUT
@@ -59,7 +59,8 @@ async def is_subscribed(client: Client, user_id: int, channel=None) -> bool:
     except UserNotParticipant:
         _FSUB_CACHE[cache_key] = (False, now + _FSUB_FAIL_TTL)
         return False
-    except Exception:
+    except Exception as e:
+        print(f"[FSUB] Warning checking subscription for user {user_id} in {target_channel}: {e}")
         return True  # fail-open for resilience
 
 
@@ -68,24 +69,29 @@ async def get_invite_link(client: Client, channel=None, creates_join_request: bo
     if not target_channel:
         return "https://t.me/Nex_bots"
     
-    if creates_join_request and str(target_channel).startswith("-100"):
+    parsed = parse_channel_id(target_channel)
+    if isinstance(parsed, int):
+        if creates_join_request:
+            try:
+                invite = await asyncio.wait_for(
+                    client.create_chat_invite_link(parsed, creates_join_request=True),
+                    timeout=_DB_TIMEOUT
+                )
+                if invite and invite.invite_link:
+                    return invite.invite_link
+            except Exception:
+                pass
         try:
-            invite = await asyncio.wait_for(
-                client.create_chat_invite_link(int(target_channel), creates_join_request=True),
-                timeout=_DB_TIMEOUT
-            )
-            return invite.invite_link
+            chat = await asyncio.wait_for(client.get_chat(parsed), timeout=_DB_TIMEOUT)
+            if chat.invite_link:
+                return chat.invite_link
+            if chat.username:
+                return f"https://t.me/{chat.username}"
         except Exception:
             pass
-
-    if str(target_channel).startswith("-100"):
-        try:
-            chat = await asyncio.wait_for(client.get_chat(int(target_channel)), timeout=_DB_TIMEOUT)
-            return chat.invite_link or "https://t.me/Nex_bots"
-        except Exception:
-            return "https://t.me/Nex_bots"
+        return "https://t.me/Nex_bots"
     
-    channel_clean = str(target_channel).replace("@", "")
+    channel_clean = str(parsed or target_channel).replace("@", "").strip()
     return f"https://t.me/{channel_clean}"
 
 
@@ -165,7 +171,7 @@ async def force_sub_message_interceptor(client, message):
 
     if fsub_enabled and fsub_channel and bot_mode != "private":
         mode = fsub.get("mode", "normal")
-        chat_id_val = int(fsub_channel) if str(fsub_channel).startswith("-100") else fsub_channel
+        chat_id_val = parse_channel_id(fsub_channel)
 
         if mode == "request":
             # Pass if already a chat member OR has submitted a join request
@@ -177,13 +183,13 @@ async def force_sub_message_interceptor(client, message):
             if not is_member and not has_req:
                 invite_link = await get_invite_link(client, fsub_channel, creates_join_request=True)
                 button = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📢 Request to Join Channel", url=invite_link)],
-                    [InlineKeyboardButton("🔄 Verify Join / Request", callback_data="check_sub")]
+                    [InlineKeyboardButton("📢 Rᴇǫᴜᴇꜱᴛ ᴛᴏ Jᴏɪɴ Cʜᴀɴɴᴇʟ", url=invite_link)],
+                    [InlineKeyboardButton("🔄 Vᴇʀɪꜰʏ Jᴏɪɴ / Rᴇǫᴜᴇꜱᴛ", callback_data="check_sub")]
                 ])
                 await message.reply_text(
-                    f"👋 <b>Hello {message.from_user.mention}!</b>\n\n"
-                    f"⚠️ Please request to join our channel to use <b>NeX 4GB Rename Bot</b>.\n\n"
-                    f"Click below to request, then tap <b>Verify Join / Request</b>!",
+                    f"👋 <b>Hᴇʟʟᴏ {message.from_user.mention}!</b>\n\n"
+                    f"⚠️ Pʟᴇᴀꜱᴇ ʀᴇǫᴜᴇꜱᴛ ᴛᴏ ᴊᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜꜱᴇ <b>NeX 4GB Rename Bot</b>.\n\n"
+                    f"Cʟɪᴄᴋ ʙᴇʟᴏᴡ ᴛᴏ ʀᴇǫᴜᴇꜱᴛ, ᴛʜᴇɴ ᴛᴀᴘ <b>Vᴇʀɪꜰʏ Jᴏɪɴ / Rᴇǫᴜᴇꜱᴛ</b>!",
                     reply_markup=button,
                     quote=True
                 )
@@ -194,13 +200,13 @@ async def force_sub_message_interceptor(client, message):
             if not await is_subscribed(client, user_id, fsub_channel):
                 invite_link = await get_invite_link(client, fsub_channel, creates_join_request=False)
                 button = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📢 Join Channel", url=invite_link)],
-                    [InlineKeyboardButton("🔄 Try Again", callback_data="check_sub")]
+                    [InlineKeyboardButton("📢 Jᴏɪɴ Uᴘᴅᴀᴛᴇꜱ Cʜᴀɴɴᴇʟ", url=invite_link)],
+                    [InlineKeyboardButton("🔄 Tʀʏ Aɢᴀɪɴ / Vᴇʀɪꜰʏ", callback_data="check_sub")]
                 ])
                 await message.reply_text(
-                    f"👋 <b>Hello {message.from_user.mention}!</b>\n\n"
-                    f"⚠️ Please join our channel to use <b>NeX 4GB Rename Bot</b>.\n\n"
-                    f"Click the button below to join, then click <b>Try Again</b>!",
+                    f"👋 <b>Hᴇʟʟᴏ {message.from_user.mention}!</b>\n\n"
+                    f"⚠️ Pʟᴇᴀꜱᴇ ᴊᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜꜱᴇ <b>NeX 4GB Rename Bot</b>.\n\n"
+                    f"Cʟɪᴄᴋ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ᴊᴏɪɴ, ᴛʜᴇɴ ᴄʟɪᴄᴋ <b>Tʀʏ Aɢᴀɪɴ / Vᴇʀɪꜰʏ</b>!",
                     reply_markup=button,
                     quote=True
                 )
@@ -215,7 +221,7 @@ async def force_sub_message_interceptor(client, message):
 # ---------------------------------------------------------------------------
 @Client.on_callback_query(~filters.user(Config.ADMIN), group=-1)
 async def force_sub_callback_interceptor(client, query: CallbackQuery):
-    if query.data == "check_sub":
+    if query.data in ("check_sub", "check_fsub", "rfs_ch"):
         return
 
     user_id = query.from_user.id
@@ -248,7 +254,7 @@ async def force_sub_callback_interceptor(client, query: CallbackQuery):
     if fsub.get("enabled", True) and fsub.get("channel") and bot_mode != "private":
         channel = fsub.get("channel")
         mode = fsub.get("mode", "normal")
-        chat_id_val = int(channel) if str(channel).startswith("-100") else channel
+        chat_id_val = parse_channel_id(channel)
         if mode == "request":
             is_mem = await is_subscribed(client, user_id, channel)
             has_req = False
@@ -265,7 +271,7 @@ async def force_sub_callback_interceptor(client, query: CallbackQuery):
                 return
 
 
-@Client.on_callback_query(filters.regex(r"^check_sub$"))
+@Client.on_callback_query(filters.regex(r"^(check_sub|check_fsub|rfs_ch)$"))
 async def check_sub_callback_handler(client, query: CallbackQuery):
     user_id = query.from_user.id
 
@@ -284,7 +290,13 @@ async def check_sub_callback_handler(client, query: CallbackQuery):
     fsub = await _safe(db.get_fsub_settings(), default={"channel": Config.FORCE_SUB, "mode": "normal", "enabled": bool(Config.FORCE_SUB)})
     channel = fsub.get("channel")
     mode = fsub.get("mode", "normal")
-    chat_id_val = int(channel) if (channel and str(channel).startswith("-100")) else channel
+    chat_id_val = parse_channel_id(channel) if channel else None
+
+    # Clear cache so we check freshly
+    if channel:
+        _FSUB_CACHE.pop((int(user_id), str(channel)), None)
+    if chat_id_val is not None:
+        _FSUB_CACHE.pop((int(user_id), str(chat_id_val)), None)
 
     passed = True
     if fsub.get("enabled", True) and channel:
@@ -305,13 +317,13 @@ async def check_sub_callback_handler(client, query: CallbackQuery):
         await client.send_message(
             chat_id=user_id,
             text=(
-                "✅ <b>Thank you for joining / requesting!</b>\n\n"
+                "✅ <b>Tʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ᴊᴏɪɴɪɴɢ / ʀᴇǫᴜᴇꜱᴛɪɴɢ!</b>\n\n"
                 "Your subscription is verified. You now have full access to <b>NeX 4GB Rename Bot</b>!\n\n"
                 "⚡ @Nex_bots"
             ),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
-                 InlineKeyboardButton("📖 Help", callback_data="help")]
+                [InlineKeyboardButton("⚙️ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings"),
+                 InlineKeyboardButton("📖 Hᴇʟᴘ", callback_data="help")]
             ])
         )
     else:

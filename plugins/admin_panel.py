@@ -12,7 +12,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, PeerIdInvalid
 
-from config import Config
+from config import Config, parse_channel_id
 from helper.database import db, TIER_NAMES, format_user_time
 from helper.utils import get_readable_file_size, humanbytes, edit_message_content, sanitize_secrets, calc_plan_prices
 
@@ -57,7 +57,8 @@ ADMIN_COMMANDS = [
     "owner", "admin", "mode", "maintenance", "status", "users", "broadcast", "bcast_btn",
     "add_prem", "rem_prem", "prem_list", "add_user", "rem_user", "auth_list",
     "ban", "unban", "ban_list", "add_coupon", "del_coupon", "coupons",
-    "set_fsub", "fsub", "set_global_meta", "set_upi", "restart", "logs", "health"
+    "set_fsub", "fsub", "set_global_meta", "set_upi", "restart", "logs", "health",
+    "channels", "set_log", "set_file_channel"
 ]
 
 
@@ -172,7 +173,7 @@ async def build_owner_panel(client: Client):
         ],
         [
             InlineKeyboardButton("📋 Cᴏᴍᴍᴀɴᴅꜱ Lɪꜱᴛ", callback_data="cb_owner_cmds"),
-            InlineKeyboardButton("📦 Dᴜᴍᴘꜱ & Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")
+            InlineKeyboardButton("📡 Cʜᴀɴɴᴇʟꜱ & FSᴜʙ", callback_data="cb_owner_channels")
         ],
         [
             InlineKeyboardButton("🔄 Rᴇꜱᴛᴀʀᴛ Bᴏᴛ", callback_data="cb_owner_restart"),
@@ -1580,6 +1581,82 @@ async def owner_state_input_handler(client: Client, message: Message):
         except ValueError:
             return await message.reply_text("❌ <b>Invalid ID!</b> Please enter numeric Telegram User ID.")
 
+    elif action == "set_log_channel":
+        OWNER_STATE.pop(admin_id, None)
+        target = None
+        if message.forward_from_chat:
+            target = message.forward_from_chat.id
+        else:
+            raw = input_text
+            if raw.lower() in ("0", "none", "off", "disable"):
+                target = None
+            else:
+                target = parse_channel_id(raw)
+        
+        await db.set_log_channel(target)
+        Config.LOG_CHANNEL = target
+        text = (
+            "📜 <b><u>Log Channel Updated!</u></b>\n\n"
+            f"◈ <b>New Channel :</b> <code>{target or 'Disabled'}</code>\n\n"
+            "<i>Saved permanently in MongoDB and active immediately.</i>\n\n"
+            "⚡ @Nex_bots"
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")]])
+        return await message.reply_text(text, reply_markup=markup)
+
+    elif action == "set_dump_channel":
+        OWNER_STATE.pop(admin_id, None)
+        target = None
+        if message.forward_from_chat:
+            target = message.forward_from_chat.id
+        else:
+            raw = input_text
+            if raw.lower() in ("0", "none", "off", "disable"):
+                target = None
+            else:
+                target = parse_channel_id(raw)
+        
+        await db.set_dump_channel_global(target)
+        Config.FILES_CHANNEL = target
+        Config.DUMP_CHANNEL = target
+        text = (
+            "📂 <b><u>File / Dump Channel Updated!</u></b>\n\n"
+            f"◈ <b>New Channel :</b> <code>{target or 'Disabled'}</code>\n\n"
+            "<i>Saved permanently in MongoDB and active immediately. All renamed files will be backed up here.</i>\n\n"
+            "⚡ @Nex_bots"
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")]])
+        return await message.reply_text(text, reply_markup=markup)
+
+    elif action == "set_fsub_channel":
+        OWNER_STATE.pop(admin_id, None)
+        target = None
+        if message.forward_from_chat:
+            target = message.forward_from_chat.id
+        else:
+            raw = input_text
+            if raw.lower() in ("0", "none", "off", "disable"):
+                target = None
+            else:
+                target = parse_channel_id(raw)
+        
+        await db.set_fsub_channel(target)
+        if target:
+            await db.set_fsub_settings(target, enabled=True)
+            Config.FORCE_SUB = target
+        else:
+            await db.set_fsub_settings(None, enabled=False)
+            Config.FORCE_SUB = None
+        
+        text = (
+            "🔐 <b><u>Force-Sub Channel Updated!</u></b>\n\n"
+            f"◈ <b>New Channel :</b> <code>{target or 'Disabled'}</code>\n\n"
+            "<i>Saved permanently in MongoDB and active immediately.</i>\n\n"
+            "⚡ @Nex_bots"
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")]])
+        return await message.reply_text(text, reply_markup=markup)
+
     await message.continue_propagation()
 
 
@@ -1735,27 +1812,155 @@ async def cb_owner_analytics(client, query: CallbackQuery):
     await query.answer()
 
 
+async def build_owner_channels_view(client: Client, user_id: int):
+    settings = await db.get_bot_settings()
+    log_ch = settings.get("log_channel") or Config.LOG_CHANNEL
+    dump_ch = settings.get("dump_channel") or getattr(Config, "FILES_CHANNEL", None) or getattr(Config, "DUMP_CHANNEL", None)
+    fsub_ch = settings.get("force_sub") or Config.FORCE_SUB
+    fsub_enabled = settings.get("force_sub_enabled", True) if settings.get("force_sub_enabled") is not None else bool(fsub_ch)
+    owner_dump = await db.get_dump_channel(user_id)
+
+    fsub_state_str = "ENABLED 🟢" if fsub_enabled else "DISABLED 🔴"
+    toggle_btn_text = "🔴 FSᴜʙ: Tᴜʀɴ OFF" if fsub_enabled else "🟢 FSᴜʙ: Tᴜʀɴ ON"
+
+    text = (
+        "<b>◈ Cʜᴀɴɴᴇʟꜱ & Fᴏʀᴄᴇ-Sᴜʙ Mᴀɴᴀɢᴇʀ 📡</b>\n\n"
+        f"◈ <b>📜 Lᴏɢ Cʜᴀɴɴᴇʟ :</b> <code>{log_ch or 'Not Configured'}</code>\n"
+        f"◈ <b>📂 Fɪʟᴇ/Dᴜᴍᴘ Cʜᴀɴɴᴇʟ :</b> <code>{dump_ch or 'Not Configured'}</code>\n"
+        f"◈ <b>🔐 Fᴏʀᴄᴇ-Sᴜʙ Cʜᴀɴɴᴇʟ :</b> <code>{fsub_ch or 'Not Configured'}</code>\n"
+        f"◈ <b>⚙️ Fᴏʀᴄᴇ-Sᴜʙ Sᴛᴀᴛᴜꜱ :</b> <b>{fsub_state_str}</b>\n"
+        f"◈ <b>👤 Pᴇʀꜱᴏɴᴀʟ Dᴜᴍᴘ :</b> <code>{owner_dump or 'Not Set'}</code>\n\n"
+        "<i>All channel IDs support <code>-100...</code> numbers or <code>@username</code>. Changes are saved permanently in MongoDB and applied instantly without bot restart.</i>\n\n"
+        "⚡ @Nex_bots"
+    )
+
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📜 Sᴇᴛ Lᴏɢ Cʜᴀɴɴᴇʟ", callback_data="cb_owner_set_log"),
+            InlineKeyboardButton("🧪 Tᴇꜱᴛ Lᴏɢ", callback_data="cb_owner_test_log")
+        ],
+        [
+            InlineKeyboardButton("📂 Sᴇᴛ Fɪʟᴇ Cʜᴀɴɴᴇʟ", callback_data="cb_owner_set_dump"),
+            InlineKeyboardButton("🧪 Tᴇꜱᴛ Fɪʟᴇ", callback_data="cb_owner_test_files")
+        ],
+        [
+            InlineKeyboardButton("🔐 Sᴇᴛ FSᴜʙ Cʜᴀɴɴᴇʟ", callback_data="cb_owner_set_fsub"),
+            InlineKeyboardButton("🧪 Tᴇꜱᴛ FSᴜʙ", callback_data="cb_owner_test_fsub")
+        ],
+        [
+            InlineKeyboardButton(f"{toggle_btn_text}", callback_data="cb_owner_toggle_fsub")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Oᴡɴᴇʀ", callback_data="owner_panel"),
+            InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
+        ]
+    ])
+    return text, markup
+
+
 @Client.on_callback_query(filters.regex(r"^cb_owner_channels$"))
 async def cb_owner_channels(client, query: CallbackQuery):
     if query.from_user.id not in Config.ADMIN:
         return await query.answer("❌ Owner only access!", show_alert=True)
-    owner_dump = await db.get_dump_channel(query.from_user.id)
-    text = (
-        "📦 <b><u>Channels & Backup Configuration</u></b>\n\n"
-        f"• <b>Log Channel:</b> <code>{Config.LOG_CHANNEL or 'Disabled'}</code>\n"
-        f"• <b>Files Backup Channel:</b> <code>{Config.FILES_CHANNEL or 'Disabled'}</code>\n"
-        f"• <b>ForceSub Channel:</b> <code>{Config.FORCE_SUB or 'Disabled'}</code>\n"
-        f"• <b>Your Private Dump:</b> <code>{owner_dump or 'None'}</code>\n"
-        f"• <b>Support Bot:</b> <code>@NexCRSupportbot</code>\n\n"
-        "<b>Command:</b> <code>/set_dump &lt;channel_id&gt;</code>\n\n"
-        "⚡ @Nex_bots"
-    )
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ Back to Owner", callback_data="owner_panel"),
-         InlineKeyboardButton("❌ Close", callback_data="close")]
-    ])
-    await edit_message_content(query.message, text, reply_markup=btn)
+    text, markup = await build_owner_channels_view(client, query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_set_log$") & filters.user(Config.ADMIN))
+async def cb_owner_set_log_wiz(client: Client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_log_channel"}
+    text = (
+        "📜 <b><u>Set Log Channel Wizard</u></b>\n\n"
+        "Forward a message from your channel OR send the channel ID (e.g. <code>-100xxxxxxxxxx</code>) or <code>@username</code>:\n\n"
+        "<i>Send <code>0</code> or <code>off</code> to disable. Send /cancel to abort.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_channels")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_set_dump$") & filters.user(Config.ADMIN))
+async def cb_owner_set_dump_wiz(client: Client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_dump_channel"}
+    text = (
+        "📂 <b><u>Set File / Dump Channel Wizard</u></b>\n\n"
+        "Forward a message from your dump channel OR send the channel ID (e.g. <code>-100xxxxxxxxxx</code>) or <code>@username</code>:\n\n"
+        "<i>Every renamed file will be backed up here. Send <code>0</code> or <code>off</code> to disable. Send /cancel to abort.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_channels")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_set_fsub$") & filters.user(Config.ADMIN))
+async def cb_owner_set_fsub_wiz(client: Client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_fsub_channel"}
+    text = (
+        "🔐 <b><u>Set Force-Sub Channel Wizard</u></b>\n\n"
+        "Forward a message from your updates channel OR send the channel ID (e.g. <code>-100xxxxxxxxxx</code>) or <code>@username</code>:\n\n"
+        "<i>Send <code>0</code> or <code>off</code> to disable. Send /cancel to abort.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_channels")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^(cb_test_log|cb_owner_test_log)$") & filters.user(Config.ADMIN))
+async def cb_test_log_handler(client: Client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    ch = settings.get("log_channel") or Config.LOG_CHANNEL
+    if not ch:
+        return await query.answer("❌ Log Channel is not configured!", show_alert=True)
+    try:
+        target = parse_channel_id(ch)
+        await client.send_message(target, "🧪 <b>NeX 4GB Bot: Log Channel Diagnostic Test!</b>\n\nChannel is accessible with send permissions! ✅\n\n⚡ @Nex_bots")
+        await query.answer("✅ Log Channel is accessible! Test message sent.", show_alert=True)
+    except Exception as e:
+        await query.answer(f"❌ Log Channel Error: {e}", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^(cb_test_files|cb_owner_test_files)$") & filters.user(Config.ADMIN))
+async def cb_test_files_handler(client: Client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    ch = settings.get("dump_channel") or getattr(Config, "FILES_CHANNEL", None) or getattr(Config, "DUMP_CHANNEL", None)
+    if not ch:
+        return await query.answer("❌ File/Dump Channel is not configured!", show_alert=True)
+    try:
+        target = parse_channel_id(ch)
+        await client.send_message(target, "🧪 <b>NeX 4GB Bot: File Backup Channel Test!</b>\n\nChannel is accessible with send permissions! ✅\n\n⚡ @Nex_bots")
+        await query.answer("✅ File Channel is accessible! Test message sent.", show_alert=True)
+    except Exception as e:
+        await query.answer(f"❌ File Channel Error: {e}", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^(cb_test_fsub|cb_owner_test_fsub)$") & filters.user(Config.ADMIN))
+async def cb_test_fsub_handler(client: Client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    ch = settings.get("force_sub") or Config.FORCE_SUB
+    if not ch:
+        return await query.answer("❌ Force-Sub Channel is not configured!", show_alert=True)
+    try:
+        target = parse_channel_id(ch)
+        chat = await client.get_chat(target)
+        title = getattr(chat, "title", str(target))
+        await query.answer(f"✅ FSub Channel accessible!\nTitle: {title}", show_alert=True)
+    except Exception as e:
+        await query.answer(f"❌ FSub Channel Error: {e}", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_toggle_fsub$") & filters.user(Config.ADMIN))
+async def cb_owner_toggle_fsub_handler(client: Client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    curr = settings.get("force_sub_enabled", True) if settings.get("force_sub_enabled") is not None else bool(Config.FORCE_SUB)
+    new_val = not curr
+    await db.set_fsub_enabled(new_val)
+    fsub_target = settings.get("force_sub") or Config.FORCE_SUB
+    if fsub_target:
+        await db.set_fsub_settings(fsub_target, enabled=new_val)
+    await query.answer(f"Force-Sub is now {'ENABLED 🟢' if new_val else 'DISABLED 🔴'}", show_alert=True)
+    text, markup = await build_owner_channels_view(client, query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
 
 
 # ==================== COMPREHENSIVE BOT & SERVER STATS ====================
