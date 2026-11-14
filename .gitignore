@@ -1,0 +1,26 @@
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Pyrogram Sessions
+*.session
+*.session-journal
+renamer.session
+
+# Downloads and temporary files
+downloads/
+temp/
+*.log
+
+# Operating Systems
+.DS_Store
+Thumbs.db

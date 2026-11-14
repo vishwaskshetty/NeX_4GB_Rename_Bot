@@ -1,0 +1,110 @@
+name: Python Integration & Media Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 */3 * * *'
+
+concurrency:
+  group: ci-integration-suite
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    name: Integration & Test Suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 195
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Utilities & Codecs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg p7zip-full unzip aria2 build-essential python3-dev
+
+      - name: Set up Python 3.11 Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install -q --upgrade pip wheel setuptools
+          pip install -q tgcrypto uvloop
+          pip install -q -r requirements.txt
+
+      - name: Configure Environment
+        env:
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          STRING_SESSION: ${{ secrets.STRING_SESSION }}
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_NAME: ${{ secrets.DB_NAME || 'NeX_4GB_Rename_Bot' }}
+          ADMIN: ${{ secrets.ADMIN }}
+          LOG_CHANNEL: ${{ secrets.LOG_CHANNEL }}
+          FILES_CHANNEL: ${{ secrets.FILES_CHANNEL }}
+          START_PIC: ${{ secrets.START_PIC || 'https://graph.org/file/8ce9f483c987c2635d3da-8d76ae56d500a868e7.jpg' }}
+          FORCE_SUB: ${{ secrets.FORCE_SUB || 'Nex_bots' }}
+          OWNER_ONLY: ${{ secrets.OWNER_ONLY || 'True' }}
+          WEBHOOK: "False"
+          PORT: "8090"
+        run: |
+          set +x
+          python3 -c "
+          import os
+          keys = [
+              'API_ID', 'API_HASH', 'BOT_TOKEN', 'STRING_SESSION',
+              'DB_URL', 'DB_NAME', 'ADMIN', 'LOG_CHANNEL', 'FILES_CHANNEL',
+              'START_PIC', 'FORCE_SUB', 'OWNER_ONLY', 'WEBHOOK', 'PORT'
+          ]
+          with open('.env', 'w', encoding='utf-8') as f:
+              for k in keys:
+                  v = os.environ.get(k, '')
+                  f.write(f'{k}={v}\n')
+          "
+          chmod 600 .env
+
+      - name: Execute Pipeline Test & Runner Suite
+        run: |
+          START_TIME=$(date +%s)
+          MAX_RUNTIME=10700
+
+          echo "=========================================================="
+          echo "Initiating Python Integration & Media Pipeline Suite"
+          echo "Max Execution Window: ${MAX_RUNTIME} seconds (~3 hours)"
+          echo "=========================================================="
+
+          while true; do
+            NOW=$(date +%s)
+            ELAPSED=$((NOW - START_TIME))
+
+            if [ $ELAPSED -ge $MAX_RUNTIME ]; then
+              echo "Pipeline cycle window completed (${ELAPSED}s elapsed)."
+              break
+            fi
+
+            REMAINING=$((MAX_RUNTIME - ELAPSED))
+            echo "Starting pipeline process (Elapsed: ${ELAPSED}s | Remaining: ${REMAINING}s)..."
+
+            timeout -s SIGTERM -k 15s "${REMAINING}s" python3 -u bot.py
+            EXIT_CODE=$?
+
+            NOW=$(date +%s)
+            ELAPSED=$((NOW - START_TIME))
+
+            if [ $EXIT_CODE -eq 124 ] || [ $ELAPSED -ge $MAX_RUNTIME ]; then
+              echo "Pipeline cycle finished cleanly (Code: ${EXIT_CODE}). Handing over to next scheduled run."
+              break
+            fi
+
+            echo "Process exited with code ${EXIT_CODE}. Restarting in 2s..."
+            sleep 2
+          done
+
+          exit 0
