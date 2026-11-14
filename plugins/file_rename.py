@@ -29,7 +29,7 @@ try:
 except ImportError:
     from pyrogram.errors import StopTransmission
 
-from helper.fast_telethon_pyro import fast_download
+from helper.fast_telethon_pyro import fast_download, fast_upload
 
 from helper.utils import (
     progress_for_pyrogram,
@@ -65,10 +65,10 @@ USER_FILE_CONTEXT = {}
 USER_RENAME_CACHE = {}
 
 
-def get_optimal_work_dir(user_id: int, file_size: int = 0) -> str:
+def get_optimal_work_dir(user_id: int, file_size: int = 0, is_remux_needed: bool = False) -> str:
     """
     Returns a high-speed RAM-disk path (/dev/shm/nex_tasks/...) if running on Linux
-    and /dev/shm has sufficient free space (> 2.2 * file_size).
+    and /dev/shm has sufficient free space (> 1.3 * file_size for direct rename, > 2.2 * file_size for remuxing).
     Otherwise falls back to SSD 'downloads/...'.
     """
     ts = int(time.time())
@@ -77,7 +77,8 @@ def get_optimal_work_dir(user_id: int, file_size: int = 0) -> str:
     if os.name != 'nt' and os.path.exists('/dev/shm'):
         try:
             shm_usage = shutil.disk_usage('/dev/shm')
-            needed = int(file_size * 2.2) if file_size > 0 else (100 * 1024 * 1024)
+            multiplier = 2.2 if is_remux_needed else 1.3
+            needed = int(file_size * multiplier) if file_size > 0 else (100 * 1024 * 1024)
             if shm_usage.free > needed:
                 path = f"/dev/shm/nex_tasks/{sub}"
                 os.makedirs(path, exist_ok=True)
@@ -1063,12 +1064,23 @@ async def execute_rename_pipeline(
                 clean_name = "renamed_file.mkv"
             new_filename = clean_name
 
-            # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 2.2x file size free; fallback to SSD
-            work_dir = get_optimal_work_dir(user_id, file_size)
+            # Check user settings and remux requirements upfront
+            metadata_bool = await db.get_metadata_bool(user_id)
+            metadata_code = await db.get_metadata_code(user_id) or "Telegram : @Nex_bots"
+            is_video = (upload_type == "video") or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
+            is_prem = (user_tier >= 1) or (user_id in Config.ADMIN)
+            wm_info = await db.get_watermark(user_id)
+            wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
+            is_remux_needed = bool(metadata_bool or wm_enabled)
+
+            # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 1.3x file size (or > 2.2x if remuxing) free; fallback to SSD
+            work_dir = get_optimal_work_dir(user_id, file_size, is_remux_needed=is_remux_needed)
             os.makedirs(work_dir, exist_ok=True)
             abs_work_dir = os.path.abspath(work_dir)
             ACTIVE_WORK_DIRS.add(abs_work_dir)
-            file_path = os.path.join(work_dir, new_filename)
+            final_file_path = os.path.join(work_dir, new_filename)
+            download_path = os.path.join(work_dir, f"dl_{new_filename}") if is_remux_needed else final_file_path
+            file_path = download_path
             ph_path = None
             sample_path = None
             ss_dir = None
@@ -1132,106 +1144,114 @@ async def execute_rename_pipeline(
 
             actual_file_size = os.path.getsize(file_path)
 
-            # 2. Apply Custom Metadata via FFmpeg if enabled (In-place overwrite with clean filename!)
-            metadata_bool = await db.get_metadata_bool(user_id)
-            metadata_code = await db.get_metadata_code(user_id) or "Telegram : @Nex_bots"
-
-            if metadata_bool:
-                await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴄᴜꜱᴛᴏᴍ ᴍᴇᴛᴀᴅᴀᴛᴀ... 🏷️</b>")
-                meta_file = os.path.join(work_dir, f"meta_{new_filename}")
-                success = await inject_metadata(file_path, meta_file, metadata_code)
-                if success and os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
-                    clean_target = os.path.join(work_dir, new_filename)
-                    if os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                        except Exception:
-                            pass
-                    os.replace(meta_file, clean_target)
-                    file_path = clean_target
-                    actual_file_size = os.path.getsize(file_path)
-                    try:
-                        await db.increment_stat(user_id, "total_metadata_applied", 1)
-                    except Exception:
-                        pass
-
-            # 3. Extract accurate duration, width, and height using ffprobe & hachoir
-            duration, width, height = await get_video_duration_and_dims(file_path)
-
-            # 3.1 Apply Video Watermark if enabled & user is premium (In-place overwrite with clean filename!)
-            is_video = (upload_type == "video") or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
-            is_prem = (user_tier >= 1) or (user_id in Config.ADMIN)
-            wm_info = await db.get_watermark(user_id)
-
-            if is_video and is_prem and wm_info.get("enabled"):
-                wm_type = wm_info.get("type", "text")
-                wm_img_path = None
-                can_apply = False
-
-                if wm_type == "image" and wm_info.get("image_id"):
-                    try:
-                        await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴡᴀᴛᴇʀᴍᴀʀᴋ ʟᴏɢᴏ... 🖼️</b>")
-                        logo_target = os.path.join(work_dir, "wm_logo.png")
-                        dl_logo = await client.download_media(wm_info.get("image_id"), file_name=logo_target)
-                        if dl_logo and os.path.exists(dl_logo):
-                            wm_img_path = dl_logo
-                            can_apply = True
-                    except Exception as err:
-                        print(f"Failed to download watermark logo: {err}")
-                elif wm_info.get("text"):
-                    can_apply = True
-
-                if can_apply:
-                    await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
-                    wm_file = os.path.join(work_dir, f"wm_{new_filename}")
-                    wm_ok = await apply_video_watermark(
-                        input_path=file_path,
-                        output_path=wm_file,
-                        text=wm_info.get("text", ""),
-                        wm_type=wm_type,
-                        image_path=wm_img_path,
-                        position=wm_info.get("position", "top_right"),
-                        size=wm_info.get("size", 28),
-                        opacity=wm_info.get("opacity", 0.85),
-                        color=wm_info.get("color", "white")
-                    )
-                    if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
-                        clean_target = os.path.join(work_dir, new_filename)
+            # 2. Zero-Copy Instant Rename vs Remuxing
+            if not is_remux_needed:
+                # Instant zero-copy rename directly in /dev/shm or disk (0.001s, zero FFmpeg overhead)
+                if download_path != final_file_path and os.path.exists(download_path):
+                    os.rename(download_path, final_file_path)
+                file_path = final_file_path
+                actual_file_size = os.path.getsize(file_path)
+            else:
+                # Apply Custom Metadata via FFmpeg if enabled (In-place overwrite with clean filename!)
+                if metadata_bool:
+                    await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴄᴜꜱᴛᴏᴍ ᴍᴇᴛᴀᴅᴀᴛᴀ... 🏷️</b>")
+                    meta_file = os.path.join(work_dir, f"meta_{new_filename}")
+                    success = await inject_metadata(file_path, meta_file, metadata_code)
+                    if success and os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
                         if os.path.exists(file_path):
                             try:
                                 os.remove(file_path)
                             except Exception:
                                 pass
-                        os.replace(wm_file, clean_target)
-                        file_path = clean_target
+                        os.replace(meta_file, final_file_path)
+                        file_path = final_file_path
                         actual_file_size = os.path.getsize(file_path)
-                        duration, width, height = await get_video_duration_and_dims(file_path)
                         try:
-                            await db.increment_stat(user_id, "total_watermarks_applied", 1)
+                            await db.increment_stat(user_id, "total_metadata_applied", 1)
                         except Exception:
                             pass
 
-            # 4. Process Custom Thumbnail with Aspect Ratio Preservation
-            c_thumb = await db.get_thumbnail(user_id)
-            media = file_msg.document or file_msg.video or file_msg.audio
+                # Apply Video Watermark if enabled & user is premium
+                if wm_enabled:
+                    wm_type = wm_info.get("type", "text")
+                    wm_img_path = None
+                    can_apply = False
 
-            if c_thumb or (hasattr(media, 'thumbs') and media.thumbs):
-                try:
-                    thumb_dest = os.path.join(work_dir, "thumb.jpg")
-                    if c_thumb:
-                        ph_path = await client.download_media(c_thumb, file_name=thumb_dest)
-                    else:
-                        ph_path = await client.download_media(media.thumbs[0].file_id, file_name=thumb_dest)
+                    if wm_type == "image" and wm_info.get("image_id"):
+                        try:
+                            await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴡᴀᴛᴇʀᴍᴀʀᴋ ʟᴏɢᴏ... 🖼️</b>")
+                            logo_target = os.path.join(work_dir, "wm_logo.png")
+                            dl_logo = await client.download_media(wm_info.get("image_id"), file_name=logo_target)
+                            if dl_logo and os.path.exists(dl_logo):
+                                wm_img_path = dl_logo
+                                can_apply = True
+                        except Exception as err:
+                            print(f"Failed to download watermark logo: {err}")
+                    elif wm_info.get("text"):
+                        can_apply = True
 
-                    if ph_path and os.path.exists(ph_path):
-                        with Image.open(ph_path) as img:
-                            img = img.convert("RGB")
-                            # Preserves original aspect ratio within 320x320 box!
-                            img.thumbnail((320, 320))
-                            img.save(ph_path, "JPEG")
-                except Exception as e:
-                    print(f"Thumbnail processing error: {e}")
-                    ph_path = None
+                    if can_apply:
+                        await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                        wm_file = os.path.join(work_dir, f"wm_{new_filename}")
+                        wm_ok = await apply_video_watermark(
+                            input_path=file_path,
+                            output_path=wm_file,
+                            text=wm_info.get("text", ""),
+                            wm_type=wm_type,
+                            image_path=wm_img_path,
+                            position=wm_info.get("position", "top_right"),
+                            size=wm_info.get("size", 28),
+                            opacity=wm_info.get("opacity", 0.85),
+                            color=wm_info.get("color", "white")
+                        )
+                        if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
+                            if os.path.exists(file_path) and file_path != wm_file:
+                                try:
+                                    os.remove(file_path)
+                                except Exception:
+                                    pass
+                            os.replace(wm_file, final_file_path)
+                            file_path = final_file_path
+                            actual_file_size = os.path.getsize(file_path)
+                            try:
+                                await db.increment_stat(user_id, "total_watermarks_applied", 1)
+                            except Exception:
+                                pass
+
+                if file_path != final_file_path and os.path.exists(file_path):
+                    os.replace(file_path, final_file_path)
+                    file_path = final_file_path
+
+            # 3. Extract duration, dimensions, and process thumbnail concurrently using asyncio.gather
+            async def _fetch_dims():
+                if is_video:
+                    return await get_video_duration_and_dims(file_path)
+                return (0, 0, 0)
+
+            async def _prepare_thumb():
+                c_thumb = await db.get_thumbnail(user_id)
+                media = file_msg.document or file_msg.video or file_msg.audio
+                if c_thumb or (hasattr(media, 'thumbs') and media.thumbs):
+                    try:
+                        thumb_dest = os.path.join(work_dir, "thumb.jpg")
+                        if c_thumb:
+                            t_path = await client.download_media(c_thumb, file_name=thumb_dest)
+                        else:
+                            t_path = await client.download_media(media.thumbs[0].file_id, file_name=thumb_dest)
+
+                        if t_path and os.path.exists(t_path):
+                            with Image.open(t_path) as img:
+                                img = img.convert("RGB")
+                                img.thumbnail((320, 320))
+                                img.save(t_path, "JPEG")
+                            return t_path
+                    except Exception as e:
+                        print(f"Thumbnail processing error: {e}")
+                return None
+
+            dims_task = asyncio.create_task(_fetch_dims())
+            thumb_task = asyncio.create_task(_prepare_thumb())
+            (duration, width, height), ph_path = await asyncio.gather(dims_task, thumb_task)
 
             # 5. Format Clean Caption (100% Clean - NO copyright or branding inside file caption!)
             c_caption = await db.get_caption(user_id)
@@ -1263,6 +1283,26 @@ async def execute_rename_pipeline(
             upload_start = time.time()
             user_sent_msgs = []
 
+            # Multi-Socket Parallel MTProto Upload (50-100+ MB/s)
+            uploaded_file = None
+            try:
+                uploaded_file = await fast_upload(
+                    client=uploader,
+                    file_path=file_path,
+                    progress=progress_for_pyrogram,
+                    progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
+                    is_prem=is_prem or (effective_tier >= 1) or is_4gb
+                )
+            except StopTransmission:
+                raise
+            except Exception as up_err:
+                print(f"⚠️ fast_upload failed ({up_err}). Falling back to standard Pyrogram send...")
+                uploaded_file = None
+
+            upload_payload = uploaded_file if uploaded_file else file_path
+            upload_progress = None if uploaded_file else progress_for_pyrogram
+            upload_progress_args = None if uploaded_file else (upload_mode_tag, ms, upload_start, client, effective_tier)
+
             try:
                 # 4GB Upload Flow (> 1.95GB)
                 if is_4gb and client_4gb:
@@ -1271,18 +1311,18 @@ async def execute_rename_pipeline(
                     if upload_type == "document":
                         sent_msg = await uploader.send_document(
                             chat_id=upload_target,
-                            document=file_path,
+                            document=upload_payload,
                             file_name=new_filename,
                             thumb=ph_path,
                             caption=caption,
                             protect_content=protect_content if upload_target == user_id else False,
-                            progress=progress_for_pyrogram,
-                            progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier)
+                            progress=upload_progress,
+                            progress_args=upload_progress_args
                         )
                     elif upload_type == "video":
                         sent_msg = await uploader.send_video(
                             chat_id=upload_target,
-                            video=file_path,
+                            video=upload_payload,
                             file_name=new_filename,
                             caption=caption,
                             thumb=ph_path,
@@ -1291,20 +1331,20 @@ async def execute_rename_pipeline(
                             height=height,
                             supports_streaming=True,
                             protect_content=protect_content if upload_target == user_id else False,
-                            progress=progress_for_pyrogram,
-                            progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier)
+                            progress=upload_progress,
+                            progress_args=upload_progress_args
                         )
                     elif upload_type == "audio":
                         sent_msg = await uploader.send_audio(
                             chat_id=upload_target,
-                            audio=file_path,
+                            audio=upload_payload,
                             file_name=new_filename,
                             caption=caption,
                             thumb=ph_path,
                             duration=duration,
                             protect_content=protect_content if upload_target == user_id else False,
-                            progress=progress_for_pyrogram,
-                            progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier)
+                            progress=upload_progress,
+                            progress_args=upload_progress_args
                         )
 
                     if upload_target == user_id:
@@ -1338,18 +1378,18 @@ async def execute_rename_pipeline(
                     if upload_type == "document":
                         sent_msg = await client.send_document(
                             chat_id=user_id,
-                            document=file_path,
+                            document=upload_payload,
                             file_name=new_filename,
                             thumb=ph_path,
                             caption=caption,
                             protect_content=protect_content,
-                            progress=progress_for_pyrogram,
-                            progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier)
+                            progress=upload_progress,
+                            progress_args=upload_progress_args
                         )
                     elif upload_type == "video":
                         sent_msg = await client.send_video(
                             chat_id=user_id,
-                            video=file_path,
+                            video=upload_payload,
                             file_name=new_filename,
                             caption=caption,
                             thumb=ph_path,
@@ -1358,20 +1398,20 @@ async def execute_rename_pipeline(
                             height=height,
                             supports_streaming=True,
                             protect_content=protect_content,
-                            progress=progress_for_pyrogram,
-                            progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier)
+                            progress=upload_progress,
+                            progress_args=upload_progress_args
                         )
                     elif upload_type == "audio":
                         sent_msg = await client.send_audio(
                             chat_id=user_id,
-                            audio=file_path,
+                            audio=upload_payload,
                             file_name=new_filename,
                             caption=caption,
                             thumb=ph_path,
                             duration=duration,
                             protect_content=protect_content,
-                            progress=progress_for_pyrogram,
-                            progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier)
+                            progress=upload_progress,
+                            progress_args=upload_progress_args
                         )
 
                     user_sent_msgs.append(sent_msg.id)

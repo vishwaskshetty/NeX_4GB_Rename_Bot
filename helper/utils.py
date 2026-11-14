@@ -200,20 +200,30 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
             f"▸ <b>ETA :</b> <code>{eta_str}</code>\n\n"
             f"⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> | @Nex_bots"
         )
-        try:
-            cancel_data = f"cancel_{msg_id}" if msg_id else "cancel_action"
-            await message.edit(
-                text=status_text,               
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data=cancel_data)]])                                               
-            )
-        except FloodWait as f_err:
-            await asyncio.sleep(f_err.value + 1)
-        except Exception:
-            pass
+        cancel_data = f"cancel_{msg_id}" if msg_id else "cancel_action"
+        reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data=cancel_data)]])
 
         if current == total:
+            try:
+                await message.edit(text=status_text, reply_markup=reply_markup)
+            except Exception:
+                pass
             PROGRESS_TIMESTAMPS.pop(key, None)
             PROGRESS_PERCENTAGES.pop(key, None)
+        else:
+            async def _bg_edit():
+                try:
+                    await message.edit(text=status_text, reply_markup=reply_markup)
+                except FloodWait as f_err:
+                    await asyncio.sleep(f_err.value + 1)
+                except Exception:
+                    pass
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_bg_edit())
+            except Exception:
+                pass
 
 
 def humanbytes(size):    
