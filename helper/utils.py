@@ -15,6 +15,31 @@ except ImportError:
 
 SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 
+SMALL_CAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ꜰ',
+    'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ',
+    'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ',
+    's': 'ꜱ', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x',
+    'y': 'ʏ', 'z': 'ᴢ'
+}
+
+def to_small_caps(text: str) -> str:
+    """
+    Converts plain text to bold small-caps Unicode styling (e.g. 'Hello World' -> 'Hᴇʟʟᴏ Wᴏʀʟᴅ').
+    Preserves HTML tags, code blocks, URLs, @usernames, /commands, and {placeholders} intact.
+    """
+    if not text:
+        return ""
+    token_pattern = re.compile(r'(<[^>]+>|https?://\S+|@\w+|/\w+|\{\w+\})')
+    parts = token_pattern.split(str(text))
+    result = []
+    for part in parts:
+        if token_pattern.fullmatch(part):
+            result.append(part)
+        else:
+            result.append("".join(SMALL_CAPS_MAP.get(ch, ch) for ch in part))
+    return "".join(result)
+
 def safe_reply_params(message_id: int):
     """
     Returns kwargs dictionary with reply_parameters=ReplyParameters(message_id=message_id)
@@ -91,6 +116,8 @@ def calc_plan_prices(months: int, base_inr: int = 139):
 
 # Global set to track active operations marked for cancellation
 CANCEL_REQUESTS = set()
+# Global dictionary to track interactive user input states (e.g. watermark prompts)
+USER_STATE = {}
 # Global dicts to track progress edit timestamps and percentages for strictly 5.0s (min 2%) throttling
 PROGRESS_TIMESTAMPS = {}
 PROGRESS_PERCENTAGES = {}
@@ -147,8 +174,8 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     percentage = (current * 100 / total) if (total and total > 0) else 0
     pct_diff = abs(percentage - last_pct)
 
-    # Strictly throttle UI progress edits to once every 5.0 seconds (or min 3% change) or upon completion
-    if ((now - last_update >= 5.0 and pct_diff >= 3.0) or (now - last_update >= 10.0) or (current == total)):
+    # Strictly throttle UI progress edits to once every 6.0 seconds (or min 3% change) or upon completion
+    if ((now - last_update >= 6.0 and pct_diff >= 3.0) or (now - last_update >= 12.0) or (current == total)):
         PROGRESS_TIMESTAMPS[key] = now
         PROGRESS_PERCENTAGES[key] = percentage
         diff = max(now - start, 0.001)
@@ -163,19 +190,21 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
         progress = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
         speed_txt = f"{humanbytes(speed)}/s"
 
+        clean_ud = to_small_caps(ud_type) if not ud_type.startswith("<b>") else ud_type
+
         status_text = (
-            f"<b>{ud_type}</b>\n\n"
+            f"<b>{clean_ud}</b>\n\n"
             f"{progress} <b>{round(percentage, 2)}%</b>\n\n"
-            f"🔗 <b>Size :</b> {humanbytes(current)} / {humanbytes(total)}\n"
-            f"🚀 <b>Speed :</b> {speed_txt}\n"
-            f"⏰ <b>ETA :</b> {eta_str}\n\n"
-            f"⚡ <b>NeX 4GB Rename Bot</b> | @Nex_bots"
+            f"▸ <b>Sɪᴢᴇ :</b> <code>{humanbytes(current)}</code> / <code>{humanbytes(total)}</code>\n"
+            f"▸ <b>Sᴘᴇᴇᴅ :</b> <code>{speed_txt}</code>\n"
+            f"▸ <b>ETA :</b> <code>{eta_str}</code>\n\n"
+            f"⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> | @Nex_bots"
         )
         try:
             cancel_data = f"cancel_{msg_id}" if msg_id else "cancel_action"
             await message.edit(
                 text=status_text,               
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancel", callback_data=cancel_data)]])                                               
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data=cancel_data)]])                                               
             )
         except FloodWait as f_err:
             await asyncio.sleep(f_err.value + 1)

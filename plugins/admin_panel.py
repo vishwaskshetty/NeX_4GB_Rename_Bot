@@ -71,7 +71,7 @@ async def unauthorized_owner_cmd(client, message):
     await send_security_alert(client, user, f"Command: {message.text}")
 
 
-@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_|cb_pwiz_|cb_cwiz_|cb_oref_|cb_oprice_|cb_otrial_|cb_oquota_|cb_otoggle_|cb_opay_)") & ~filters.user(Config.ADMIN), group=1)
+@Client.on_callback_query(filters.regex(r"^(cb_owner_|owner_|clear_cache_owner|cb_prem_page_|cb_prem_wiz_|cb_pwiz_|cb_cwiz_|cb_oref_|cb_oprice_|cb_otrial_|cb_oquota_|cb_otoggle_|cb_opay_)") & ~filters.user(Config.ADMIN), group=1)
 async def unauthorized_owner_cb(client, query: CallbackQuery):
     await query.answer("🚨 SECURITY ALERT: Unauthorized Access! This action has been logged.", show_alert=True)
     await send_security_alert(client, query.from_user, f"Callback: {query.data}")
@@ -119,9 +119,8 @@ async def build_owner_panel(client: Client):
     today_bytes = rename_stats.get("today_bytes", 0)
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   👑 <b>NeX Owner Control Panel</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 👑 <b>NeX Owner Control Panel</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>🌐 Mode :</b> <code>{mode_str}</code> | <b>🛠️ Maint :</b> <code>{maint_str}</code>\n"
         f"◈ <b>🛡️ Lock :</b> <code>{protect_str}</code> | <b>📢 FSub :</b> <code>{fsub_mode_str}</code>\n"
         f"◈ <b>🚀 4GB Client :</b> <code>{engine_str}</code>\n"
@@ -189,9 +188,8 @@ async def build_owner_panel(client: Client):
 async def build_activity_logs_view():
     logs = await db.get_activity_logs(15)
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   📜 <b>Live Activity Logs (Latest 15)</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 📜 <b>Live Activity Logs (Latest 15)</b></b>\n"
+        "───────────────\n\n"
     )
     if not logs:
         text += "<i>No activity logged yet.</i>\n\n"
@@ -302,9 +300,8 @@ async def total_users_cmd(client, message):
     prem_cnt = prem_stats.get("total_premium", 0)
     
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   👥 <b>NeX Registered Bot Users</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 👥 <b>NeX Registered Bot Users</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Total Registered Users :</b> <code>{total}</code>\n"
         f"◈ <b>Active 4GB Premium Users :</b> <code>{prem_cnt}</code>\n"
         f"◈ <b>Authorized Users (Private) :</b> <code>{auth_cnt}</code>\n"
@@ -447,9 +444,8 @@ async def ban_list_cmd(client, message):
         return await message.reply_text("✅ <b>No users are currently banned from NeX Bot!</b>\n\n⚡ @Nex_bots")
     
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🚫 <b>Banned Users Directory</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🚫 <b>Banned Users Directory</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Total Banned Users :</b> <code>{len(banned)}</code>\n\n"
     )
     for idx, uid in enumerate(banned[:30], 1):
@@ -778,9 +774,8 @@ async def cb_owner_coupons(client, query: CallbackQuery):
         return await query.answer("❌ Owner only access!", show_alert=True)
     coupons = await _safe(db.get_all_coupons(), default={})
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🎟️ <b>NeX Coupon Manager</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🎟️ <b>NeX Coupon Manager</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Active Coupons :</b> <code>{len(coupons)}</code>\n\n"
     )
     if not coupons:
@@ -991,9 +986,8 @@ async def cb_owner_auth(client, query: CallbackQuery):
         return await query.answer("❌ Owner only access!", show_alert=True)
     users = await _safe(db.get_auth_users(), default=[])
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🛡️ <b>Authorized Users (Private Mode)</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🛡️ <b>Authorized Users (Private Mode)</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Total Count :</b> <code>{len(users)}</code>\n\n"
     )
     if users:
@@ -1043,9 +1037,8 @@ async def cb_owner_banned(client, query: CallbackQuery):
         return await query.answer("❌ Owner only access!", show_alert=True)
     users = await _safe(db.get_banned_users(), default=[])
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🚫 <b>Banned Users Directory</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🚫 <b>Banned Users Directory</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Total Banned :</b> <code>{len(users)}</code>\n\n"
     )
     if users:
@@ -1373,9 +1366,8 @@ async def build_fsub_view():
     status_label = "ENABLED 🟢" if enabled else "DISABLED 🔴"
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   📢 <b>Dynamic Force-Sub Settings</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 📢 <b>Dynamic Force-Sub Settings</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Channel :</b> <code>{channel}</code>\n"
         f"◈ <b>Mode :</b> <b>{mode_label}</b>\n"
         f"◈ <b>Status :</b> <b>{status_label}</b>\n\n"
@@ -1546,9 +1538,8 @@ async def build_admin_stats_view(client: Client):
     has_4gb = "Connected 🟢" if getattr(client, "app_4gb", None) else "Disabled 🔴"
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   📊 <b>NeX Telemetry Dashboard</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 📊 <b>NeX Telemetry Dashboard</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Users :</b> <code>{total_users}</code> | <b>Banned :</b> <code>{len(banned)}</code>\n"
         f"◈ <b>VIPs :</b> <code>{usage.get('total_premium', 0)}</code> "
         f"(🥈{usage.get('silver_users', 0)} 🥇{usage.get('gold_users', 0)} 💎{usage.get('diamond_users', 0)})\n"
@@ -1658,9 +1649,8 @@ async def build_health_report(client: Client):
     db_tasks_cnt = await _safe(db.tasks.count_documents({}), default=0)
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🩺 <b>NeX Health Diagnostic</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🩺 <b>NeX Health Diagnostic</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>🤖 Bot MTProto :</b> <code>{bot_ping}</code>\n"
         f"◈ <b>🚀 4GB Client :</b> <code>{prem_status}</code>\n"
         f"◈ <b>🍃 MongoDB Ping :</b> <code>{db_ping}</code>\n"
@@ -1745,7 +1735,7 @@ async def build_owner_pricing_panel():
     p3_usd = round(p3_inr / 84.0, 2)
 
     text = (
-        "╭━━━〔 💎 𝗢𝗪𝗡𝗘𝗥 𝗣𝗥𝗜𝗖𝗜𝗡𝗚 𝗘𝗗𝗜𝗧𝗢𝗥 〕━━━\n\n"
+        "<b>◈ Oᴡɴᴇʀ Pʀɪᴄɪɴɢ Eᴅɪᴛᴏʀ 💎</b>\n───────────────\n\n"
         "🥈 <b>𝟭. 𝗦𝗜𝗟𝗩𝗘𝗥 𝗣𝗟𝗔𝗡 (𝗦𝘁𝗮𝗿𝘁𝗲𝗿)</b>\n"
         f"┣ Base Rate : <code>₹{p1_inr}/mo</code>  |  <code>{p1_stars} ⭐</code>  |  <code>${p1_usd:.2f}</code>\n\n"
         "🥇 <b>𝟮. 𝗚𝗢𝗟𝗗 𝗣𝗟𝗔𝗡 (𝗣𝗿𝗼)</b>\n"
@@ -1870,9 +1860,8 @@ async def build_owner_trial_panel():
     t_days = settings.get("trial_days", 3)
     
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🎁 <b>Free Trial Configuration</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🎁 <b>Free Trial Configuration</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Trial Status :</b> <code>{t_status}</code>\n"
         f"◈ <b>Trial Duration :</b> <code>{t_days} Days</code>\n"
         f"◈ <b>Total Trials Claimed :</b> <code>{trials_claimed}</code>\n\n"
@@ -1947,9 +1936,8 @@ async def build_owner_quota_panel():
     p_conc = settings.get("prem_concurrency", 4)
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   ⚡ <b>Quota & Concurrency Manager</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ ⚡ <b>Quota & Concurrency Manager</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Free Daily Quota :</b> <code>{free_gb} GB/day</code>\n"
         f"◈ <b>Free Concurrency :</b> <code>{f_conc} parallel task(s)</code>\n"
         f"◈ <b>Premium Concurrency :</b> <code>{p_conc} parallel task(s)</code>\n\n"
@@ -2024,9 +2012,8 @@ async def build_owner_toggles_panel():
     session_on = settings.get("session_upload_enabled", True)
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   ⚙️ <b>Bot Feature Toggles</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ ⚙️ <b>Bot Feature Toggles</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>🎬 Sample Video :</b> <code>{'ON 🟢' if sample_on else 'OFF 🔴'}</code>\n"
         f"◈ <b>📸 Screenshots :</b> <code>{'ON 🟢' if ss_on else 'OFF 🔴'}</code>\n"
         f"◈ <b>⚡ RAM-Disk Accel :</b> <code>{'ON 🟢' if ramdisk_on else 'OFF 🔴'}</code>\n"
@@ -2107,9 +2094,8 @@ async def build_owner_payment_panel():
     contact = settings.get("admin_contact", "NexCRSupportbot")
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   💳 <b>Payment & Support Config</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 💳 <b>Payment & Support Config</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Active UPI ID :</b> <code>{upi_id}</code>\n"
         f"◈ <b>Payment QR Pic :</b> <code>{qr_url[:40]}...</code>\n"
         f"◈ <b>Support Contact :</b> @{contact}\n\n"
@@ -2175,9 +2161,8 @@ async def build_owner_referral_panel():
     tier_name = TIER_NAMES.get(settings["reward_tier"], "Gold")
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🎁 <b>Referral System Control</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 🎁 <b>Referral System Control</b></b>\n"
+        "───────────────\n\n"
         f"◈ <b>Status :</b> <code>{status_str}</code>\n"
         f"◈ <b>Target :</b> <code>{req} Invites</code>\n"
         f"◈ <b>Reward :</b> <b>{days} Days {tier_name}</b>\n\n"
@@ -2302,9 +2287,8 @@ async def cb_owner_restart(client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^cb_owner_cmds$") & filters.user(Config.ADMIN))
 async def cb_owner_cmds_view(client, query: CallbackQuery):
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   📋 <b>NeX Bot Commands Cheat-Sheet</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
+        "<b>◈ 📋 <b>NeX Bot Commands Cheat-Sheet</b></b>\n"
+        "───────────────\n\n"
         "👑 <b>Owner Commands:</b>\n"
         "• <code>/owner</code> | <code>/admin</code> - Open Control Panel\n"
         "• <code>/mode</code> [pub|priv] | <code>/maintenance</code> - Modes\n"

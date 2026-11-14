@@ -56,34 +56,36 @@ async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 
     selected_plan_name = tier_titles[selected_tier]
 
     text = (
-        "╭━━━〔 💎 𝗡𝗲𝗫 𝗣𝗥𝗘𝗠𝗜𝗨𝗠 𝗣𝗟𝗔𝗡𝗦 〕━━━\n\n"
-        "🥈 <b>𝟭. 𝗦𝗜𝗟𝗩𝗘𝗥 𝗣𝗟𝗔𝗡 (𝗦𝘁𝗮𝗿𝘁𝗲𝗿)</b>\n"
-        f"┣ 💰 <b>Price</b>    : ₹{p1_inr}/mo  |  {p1_stars} ⭐  |  ${p1_usd:.2f}\n"
-        "┣ 📦 <b>Max File</b> : 4.00 GB <i>(Top Speed)</i>\n"
-        "┣ 📊 <b>Quota</b>    : 50 GB / Day\n"
-        "┗ 🔄 <b>Queue</b>    : 2 Parallel Tasks (5 Queued)\n\n"
-        "🥇 <b>𝟮. 𝗚𝗢𝗟𝗗 𝗣𝗟𝗔𝗡 (𝗣𝗿𝗼)</b>\n"
-        f"┣ 💰 <b>Price</b>    : ₹{p2_inr}/mo  |  {p2_stars} ⭐  |  ${p2_usd:.2f}\n"
-        "┣ 📦 <b>Max File</b> : 4.00 GB <i>(Top Speed)</i>\n"
-        "┣ 📊 <b>Quota</b>    : 150 GB / Day\n"
-        "┣ 🔄 <b>Queue</b>    : 3 Parallel Tasks (10 Queued)\n"
-        "┗ 🎬 <b>Extras</b>   : Batch Rename + Sample & Screenshots\n\n"
-        "💎 <b>𝟯. 𝗗𝗜𝗔𝗠𝗢𝗡𝗗 𝗣𝗟𝗔𝗡 (𝗩𝗜𝗣 𝗨𝗹𝘁𝗶𝗺𝗮𝘁𝗲)</b>\n"
-        f"┣ 💰 <b>Price</b>    : ₹{p3_inr}/mo  |  {p3_stars} ⭐  |  ${p3_usd:.2f}\n"
-        "┣ 📦 <b>Max File</b> : 4.00 GB <i>(RAM-Disk Priority)</i>\n"
-        "┣ ♾️ <b>Quota</b>    : Unlimited Daily Bandwidth\n"
-        "┣ 🔄 <b>Queue</b>    : 4 Parallel Tasks (15 Queued)\n"
-        "┗ 🛠️ <b>All Tools</b>: Audio/Sub Remover, Remux & Archive\n\n"
-        "🎯 <b>𝗬𝗢𝗨𝗥 𝗦𝗘𝗟𝗘𝗖𝗧𝗘𝗗 𝗖𝗛𝗘𝗖𝗞𝗢𝗨𝗧 :</b>\n"
-        f"┣ 🏆 <b>Selected Tier</b> : {selected_plan_name}\n"
-        f"┣ 📅 <b>Duration</b>      : {months} Month(s) ({days} Days)\n"
-        f"┗ 💳 <b>Total Price</b>   : <b>₹{total_inr}</b>  |  <b>{total_stars} ⭐</b>  |  <b>${total_usd:.2f}</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        "<b>◈ NᴇX Pʀᴇᴍɪᴜᴍ Pʟᴀɴꜱ 💎</b>\n"
+        "───────────────\n\n"
+        "🥈 <b>1. Sɪʟᴠᴇʀ Pʟᴀɴ (Sᴛᴀʀᴛᴇʀ)</b>\n"
+        f"▸ <b>Pʀɪᴄᴇ :</b> ₹{p1_inr}/mo  |  {p1_stars} ⭐  |  ${p1_usd:.2f}\n"
+        "▸ <b>Mᴀx Fɪʟᴇ :</b> 4.00 GB <i>(Top Speed)</i>\n"
+        "▸ <b>Qᴜᴏᴛᴀ :</b> 50 GB / Day\n"
+        "▸ <b>Qᴜᴇᴜᴇ :</b> 2 Parallel Tasks (5 Queued)\n\n"
+        "🥇 <b>2. Gᴏʟᴅ Pʟᴀɴ (Pʀᴏ)</b>\n"
+        f"▸ <b>Pʀɪᴄᴇ :</b> ₹{p2_inr}/mo  |  {p2_stars} ⭐  |  ${p2_usd:.2f}\n"
+        "▸ <b>Mᴀx Fɪʟᴇ :</b> 4.00 GB <i>(Top Speed)</i>\n"
+        "▸ <b>Qᴜᴏᴛᴀ :</b> 150 GB / Day\n"
+        "▸ <b>Qᴜᴇᴜᴇ :</b> 3 Parallel Tasks (10 Queued)\n"
+        "▸ <b>Exᴛʀᴀꜱ :</b> Batch Rename + Sample & Screenshots\n\n"
+        "💎 <b>3. Dɪᴀᴍᴏɴᴅ Pʟᴀɴ (VIP Uʟᴛɪᴍᴀᴛᴇ)</b>\n"
+        f"▸ <b>Pʀɪᴄᴇ :</b> ₹{p3_inr}/mo  |  {p3_stars} ⭐  |  ${p3_usd:.2f}\n"
+        "▸ <b>Mᴀx Fɪʟᴇ :</b> 4.00 GB <i>(RAM-Disk Priority)</i>\n"
+        "▸ <b>Qᴜᴏᴛᴀ :</b> Unlimited Daily Bandwidth\n"
+        "▸ <b>Qᴜᴇᴜᴇ :</b> 4 Parallel Tasks (15 Queued)\n"
+        "▸ <b>Aʟʟ Tᴏᴏʟꜱ :</b> Audio/Sub Remover, Remux & Archive\n\n"
+        "───────────────\n"
+        "🎯 <b>Yᴏᴜʀ Sᴇʟᴇᴄᴛᴇᴅ Cʜᴇᴄᴋᴏᴜᴛ :</b>\n"
+        f"▸ <b>Sᴇʟᴇᴄᴛᴇᴅ Tɪᴇʀ :</b> {selected_plan_name}\n"
+        f"▸ <b>Dᴜʀᴀᴛɪᴏɴ :</b> {months} Month(s) ({days} Days)\n"
+        f"▸ <b>Tᴏᴛᴀʟ Pʀɪᴄᴇ :</b> <b>₹{total_inr}</b>  |  <b>{total_stars} ⭐</b>  |  <b>${total_usd:.2f}</b>\n"
+        "───────────────"
     )
 
-    btn_s = f"{'✅ ' if selected_tier == 1 else ''}🥈 Silver"
-    btn_g = f"{'✅ ' if selected_tier == 2 else ''}🥇 Gold"
-    btn_d = f"{'✅ ' if selected_tier == 3 else ''}💎 Diamond"
+    btn_s = f"{'✅ ' if selected_tier == 1 else ''}🥈 Sɪʟᴠᴇʀ"
+    btn_g = f"{'✅ ' if selected_tier == 2 else ''}🥇 Gᴏʟᴅ"
+    btn_d = f"{'✅ ' if selected_tier == 3 else ''}💎 Dɪᴀᴍᴏɴᴅ"
 
     dec_target = max(1, months - 1)
     inc_target = min(24, months + 1)
@@ -98,17 +100,17 @@ async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 
         # Row 2: Duration stepper
         [
             InlineKeyboardButton("➖", callback_data=f"plan_step_{selected_tier}_{dec_target}"),
-            InlineKeyboardButton(f"📅 {months} Month(s)", callback_data=f"plan_step_curr_{selected_tier}_{months}"),
+            InlineKeyboardButton(f"📅 {months} Mᴏɴᴛʜ(ꜱ)", callback_data=f"plan_step_curr_{selected_tier}_{months}"),
             InlineKeyboardButton("➕", callback_data=f"plan_step_{selected_tier}_{inc_target}")
         ],
         # Row 3: Instant payment
         [
-            InlineKeyboardButton(f"⭐ Pay {total_stars} Stars", callback_data=f"pay_stars_{selected_tier}_{months}"),
-            InlineKeyboardButton(f"🇮🇳 Pay ₹{total_inr} (UPI)", callback_data=f"pay_upi_{selected_tier}_{months}")
+            InlineKeyboardButton(f"⭐ Pᴀʏ {total_stars} Sᴛᴀʀꜱ", callback_data=f"pay_stars_{selected_tier}_{months}"),
+            InlineKeyboardButton(f"🇮🇳 Pᴀʏ ₹{total_inr} (UPI)", callback_data=f"pay_upi_{selected_tier}_{months}")
         ],
         # Row 4: USD payment
         [
-            InlineKeyboardButton(f"💵 Pay ${total_usd:.2f} (USD)", callback_data=f"pay_usd_{selected_tier}_{months}")
+            InlineKeyboardButton(f"💵 Pᴀʏ ${total_usd:.2f} (USD)", callback_data=f"pay_usd_{selected_tier}_{months}")
         ]
     ]
 
@@ -120,23 +122,23 @@ async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 
     trial_enabled = bot_settings.get("trial_enabled", True)
 
     if not has_trial and not is_prem and trial_enabled:
-        buttons.append([InlineKeyboardButton("🎁 Claim Free Trial", callback_data="claim_trial_cb")])
+        buttons.append([InlineKeyboardButton("🎁 Cʟᴀɪᴍ Fʀᴇᴇ Tʀɪᴀʟ", callback_data="claim_trial_cb")])
 
     # Row 6: Profile & Redeem
     buttons.append([
-        InlineKeyboardButton("👤 My Profile", callback_data="cb_user_profile"),
-        InlineKeyboardButton("🎟️ Redeem Coupon", callback_data="redeem_coupon_btn")
+        InlineKeyboardButton("👤 Mʏ Pʀᴏꜰɪʟᴇ", callback_data="cb_user_profile"),
+        InlineKeyboardButton("🎟️ Rᴇᴅᴇᴇᴍ Cᴏᴜᴘᴏɴ", callback_data="redeem_coupon_btn")
     ])
 
     # Row 7: Support & Back
     buttons.append([
-        InlineKeyboardButton("💬 Support", url="https://t.me/NexCRSupportbot"),
-        InlineKeyboardButton("⬅️ Back", callback_data="start")
+        InlineKeyboardButton("💬 Sᴜᴘᴘᴏʀᴛ", url="https://t.me/NexCRSupportbot"),
+        InlineKeyboardButton("⬅️ Bᴀᴄᴋ", callback_data="start")
     ])
 
     # Row 8: Close
     buttons.append([
-        InlineKeyboardButton("❌ Close", callback_data="close")
+        InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
     ])
 
     return text, InlineKeyboardMarkup(buttons)
@@ -162,24 +164,24 @@ async def build_upi_payment_view(tier: int = 2, months: int = 1, base_inr: int =
     t_name = tier_names.get(tier, "Premium")
 
     text = (
-        "╭━━━〔 🇮🇳 𝗨𝗣𝗜 𝗣𝗔𝗬𝗠𝗘𝗡𝗧 〕━━━\n"
-        f"┣ 💎 <b>Plan</b>        : {t_name} ({month_str})\n"
-        f"┣ 📅 <b>Duration</b>    : {days} Days\n"
-        f"┣ 💵 <b>Amount</b>      : <b>₹{inr_price} INR</b>\n"
-        f"┣ 💳 <b>UPI ID</b>      : <code>{upi_id}</code>\n"
-        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"┣ 1. Send ₹{inr_price} to <code>{upi_id}</code>\n"
-        "┣    via GPay / PhonePe / Paytm / BHIM\n"
-        "┣ 2. Take a screenshot showing UTR/Ref\n"
-        "┣ 3. Send screenshot to @NexCRSupportbot\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>◈ UPI Pᴀʏᴍᴇɴᴛ 🇮🇳</b>\n"
+        "───────────────\n"
+        f"▸ 💎 <b>Pʟᴀɴ :</b> {t_name} ({month_str})\n"
+        f"▸ 📅 <b>Dᴜʀᴀᴛɪᴏɴ :</b> {days} Days\n"
+        f"▸ 💵 <b>Aᴍᴏᴜɴᴛ :</b> <b>₹{inr_price} INR</b>\n"
+        f"▸ 💳 <b>UPI ID :</b> <code>{upi_id}</code>\n"
+        "───────────────\n"
+        f"1. Send ₹{inr_price} to <code>{upi_id}</code> via GPay / PhonePe / Paytm / BHIM\n"
+        "2. Take a screenshot showing UTR/Ref number\n"
+        "3. Send screenshot to @NexCRSupportbot\n"
+        "───────────────\n\n"
         "<i>⚡ Active in 5-15 mins upon verification!</i>"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Send Screenshot (@NexCRSupportbot)", url="https://t.me/NexCRSupportbot")],
-        [InlineKeyboardButton("🔔 Notify Admin of Transfer", callback_data=f"notify_upi_paid_{tier}_{months}")],
-        [InlineKeyboardButton("⬅️ Back to Plans", callback_data=f"plan_sel_{tier}_{months}"),
-         InlineKeyboardButton("❌ Close", callback_data="close")]
+        [InlineKeyboardButton("📤 Sᴇɴᴅ Sᴄʀᴇᴇɴꜱʜᴏᴛ (@NexCRSupportbot)", url="https://t.me/NexCRSupportbot")],
+        [InlineKeyboardButton("🔔 Nᴏᴛɪꜰʏ Aᴅᴍɪɴ ᴏꜰ Tʀᴀɴꜱꜰᴇʀ", callback_data=f"notify_upi_paid_{tier}_{months}")],
+        [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Pʟᴀɴꜱ", callback_data=f"plan_sel_{tier}_{months}"),
+         InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
     ])
     return text, markup
 
@@ -203,21 +205,22 @@ async def build_usd_payment_view(tier: int = 2, months: int = 1, base_inr: int =
     t_name = tier_names.get(tier, "Premium")
 
     text = (
-        "╭━━━〔 💵 𝗨𝗦𝗗 𝗣𝗔𝗬𝗠𝗘𝗡𝗧 〕━━━\n"
-        f"┣ 💎 <b>Plan</b>        : {t_name} ({month_str})\n"
-        f"┣ 📅 <b>Duration</b>    : {days} Days\n"
-        f"┣ 💵 <b>Price (USD)</b> : <b>${usd_price:.2f}</b>\n"
-        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "┣ International payments accepted via:\n"
-        "┣ • Crypto (USDT TRC20 / TON / BTC)\n"
-        "┣ • PayPal / International Cards\n"
-        "┣ Contact @NexCRSupportbot to complete!\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        "<b>◈ USD Pᴀʏᴍᴇɴᴛ 💵</b>\n"
+        "───────────────\n"
+        f"▸ 💎 <b>Pʟᴀɴ :</b> {t_name} ({month_str})\n"
+        f"▸ 📅 <b>Dᴜʀᴀᴛɪᴏɴ :</b> {days} Days\n"
+        f"▸ 💵 <b>Pʀɪᴄᴇ (USD) :</b> <b>${usd_price:.2f}</b>\n"
+        "───────────────\n"
+        "International payments accepted via:\n"
+        "• Crypto (USDT TRC20 / TON / BTC)\n"
+        "• PayPal / International Cards\n\n"
+        "Contact @NexCRSupportbot to complete!\n"
+        "───────────────"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Contact Support to Pay", url="https://t.me/NexCRSupportbot")],
-        [InlineKeyboardButton("⬅️ Back to Plans", callback_data=f"plan_sel_{tier}_{months}"),
-         InlineKeyboardButton("❌ Close", callback_data="close")]
+        [InlineKeyboardButton("💬 Cᴏɴᴛᴀᴄᴛ Sᴜᴘᴘᴏʀᴛ ᴛᴏ Pᴀʏ", url="https://t.me/NexCRSupportbot")],
+        [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Pʟᴀɴꜱ", callback_data=f"plan_sel_{tier}_{months}"),
+         InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
     ])
     return text, markup
 
@@ -264,16 +267,15 @@ async def build_profile_card(user_id: int):
     tot_ref = g_stats.get("referrals", 0)
 
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   👤 <b>NeX User Profile</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>User ID :</b> <code>{user_id}</code>\n"
-        f"◈ <b>Plan :</b> <b>{badge}</b>\n"
-        f"◈ <b>Expiry :</b> <code>{expiry_str}</code>\n"
-        f"◈ <b>Speed Cap :</b> <code>{speed_str}</code>\n\n"
-        f"◈ <b>Today's Bandwidth :</b>\n"
+        "<b>◈ NᴇX Uꜱᴇʀ Pʀᴏꜰɪʟᴇ 👤</b>\n"
+        "───────────────\n"
+        f"▸ <b>Uꜱᴇʀ ID :</b> <code>{user_id}</code>\n"
+        f"▸ <b>Pʟᴀɴ :</b> <b>{badge}</b>\n"
+        f"▸ <b>Exᴘɪʀʏ :</b> <code>{expiry_str}</code>\n"
+        f"▸ <b>Sᴘᴇᴇᴅ Cᴀᴘ :</b> <code>{speed_str}</code>\n\n"
+        "▸ <b>Tᴏᴅᴀʏ'ꜱ Bᴀɴᴅᴡɪᴅᴛʜ :</b>\n"
         f"  <code>[{bar}]</code> {used_gb:.1f} / {limit_gb:.0f} GB\n\n"
-        "◈ <b>Your Activity Stats :</b>\n"
+        "▸ <b>Yᴏᴜʀ Aᴄᴛɪᴠɪᴛʏ Sᴛᴀᴛꜱ :</b>\n"
         f"  • 📁 Renamed : <code>{g_stats['files_renamed']}</code> files\n"
         f"  • 💾 Data : <code>{humanbytes(g_stats['bytes_processed'])}</code>\n"
         f"  • 🎬 Samples : <code>{g_stats['samples_generated']}</code>\n"
@@ -284,12 +286,12 @@ async def build_profile_card(user_id: int):
     )
 
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("💎 Premium Plans", callback_data="open_plans"),
-         InlineKeyboardButton("🎁 Refer & Earn", callback_data="cb_referral")],
-        [InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
-         InlineKeyboardButton("🔄 Refresh", callback_data="cb_user_profile")],
-        [InlineKeyboardButton("⬅️ Back to Start", callback_data="start"),
-         InlineKeyboardButton("❌ Close", callback_data="close")]
+        [InlineKeyboardButton("💎 Pʀᴇᴍɪᴜᴍ Pʟᴀɴꜱ", callback_data="open_plans"),
+         InlineKeyboardButton("🎁 Rᴇꜰᴇʀ & Eᴀʀɴ", callback_data="cb_referral")],
+        [InlineKeyboardButton("⚙️ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings"),
+         InlineKeyboardButton("🔄 Rᴇꜰʀᴇꜱʜ", callback_data="cb_user_profile")],
+        [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start"),
+         InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
     ])
     return text, markup
 
@@ -300,13 +302,12 @@ async def build_timezone_menu(user_id: int):
     current_tz = await db.get_timezone(user_id)
     now_str = format_user_time(time.time(), current_tz)
     text = (
-        "╭━━━━━━━━━━━━━━━━━━━╮\n"
-        "┃   🌍 <b>Timezone Configuration</b>\n"
-        "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-        f"◈ <b>Active Timezone :</b> <code>{current_tz}</code>\n"
-        f"◈ <b>Current Local Time :</b> <code>{now_str}</code>\n\n"
+        "<b>◈ Tɪᴍᴇᴢᴏɴᴇ Cᴏɴꜰɪɢᴜʀᴀᴛɪᴏɴ 🌍</b>\n"
+        "───────────────\n"
+        f"▸ <b>Aᴄᴛɪᴠᴇ Tɪᴍᴇᴢᴏɴᴇ :</b> <code>{current_tz}</code>\n"
+        f"▸ <b>Cᴜʀʀᴇɴᴛ Lᴏᴄᴀʟ Tɪᴍᴇ :</b> <code>{now_str}</code>\n\n"
         "<i>Select a region below or type <code>/timezone Region/City</code>:</i>\n\n"
-        "⚡ @Nex_bots | 💬 Support: @NexCRSupportbot"
+        "⚡ @Nex_bots | 💬 Sᴜᴘᴘᴏʀᴛ: @NexCRSupportbot"
     )
 
     keyboard = InlineKeyboardMarkup([
@@ -326,8 +327,8 @@ async def build_timezone_menu(user_id: int):
             InlineKeyboardButton("🇦🇺 Sydney (AEST)", callback_data="select_tz_Australia/Sydney")
         ],
         [
-            InlineKeyboardButton("⬅️ Back to Settings", callback_data="open_settings"),
-            InlineKeyboardButton("❌ Close", callback_data="close")
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings"),
+            InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
         ]
     ])
     return text, keyboard

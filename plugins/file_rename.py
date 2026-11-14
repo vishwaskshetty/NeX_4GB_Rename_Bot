@@ -36,6 +36,8 @@ from helper.utils import (
     convert,
     humanbytes,
     CANCEL_REQUESTS,
+    USER_STATE,
+    to_small_caps,
     safe_reply_params,
     edit_message_content,
     sanitize_secrets
@@ -278,47 +280,47 @@ async def rename_start(client, message):
     )
 
     media_info_text = (
-        "╭━━━〔 🗂️ 𝗡𝗲𝗫 𝗠𝗘𝗗𝗜𝗔 𝗜𝗡𝗙𝗢 〕━━━╮\n"
-        f"┃ 📁 Filename : <code>{filename}</code>\n"
-        f"┃ 📦 Size     : <code>{filesize}</code>\n"
-        f"┃ 🏷️ Type     : <code>.{file_extension}</code> ({mime_type})\n"
-        f"┃ 🌐 DC ID    : <code>{dcid}</code>\n"
-        "┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"
-        "┃ ⚡ Select an action below:\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯"
+        "<b>◈ NᴇX Mᴇᴅɪᴀ Iɴꜰᴏ 🗂️</b>\n"
+        "───────────────\n"
+        f"▸ <b>Fɪʟᴇɴᴀᴍᴇ :</b> <code>{filename}</code>\n"
+        f"▸ <b>Sɪᴢᴇ :</b> <code>{filesize}</code>\n"
+        f"▸ <b>Tʏᴘᴇ :</b> <code>.{file_extension}</code> ({mime_type})\n"
+        f"▸ <b>DC ID :</b> <code>{dcid}</code>\n"
+        "───────────────\n"
+        "<i>Select an action below:</i>"
     )
 
     if is_video:
         buttons = [
             [
-                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{message.id}"),
-                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
+                InlineKeyboardButton("✏️ Rᴇɴᴀᴍᴇ Fɪʟᴇ", callback_data=f"rename_{message.id}"),
+                InlineKeyboardButton("⚡ Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ", callback_data=f"auto_rename_{message.id}")
             ],
             [
-                InlineKeyboardButton("🎬 Sample Video Only", callback_data=f"extract_sample_only_{message.id}"),
-                InlineKeyboardButton("📸 Screenshots Only", callback_data=f"extract_ss_only_{message.id}")
+                InlineKeyboardButton("🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ", callback_data=f"extract_sample_only_{message.id}"),
+                InlineKeyboardButton("📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ", callback_data=f"extract_ss_only_{message.id}")
             ],
             [
-                InlineKeyboardButton("🎵 Audio / Sub Streams", callback_data=f"extract_streams_{message.id}"),
-                InlineKeyboardButton("🔄 MKV ⇄ MP4 Remux", callback_data=f"remux_action_{message.id}")
+                InlineKeyboardButton("🎵 Aᴜᴅɪᴏ / Sᴜʙꜱ", callback_data=f"extract_streams_{message.id}"),
+                InlineKeyboardButton("🔄 MKV ⇄ MP4", callback_data=f"remux_action_{message.id}")
             ],
             [
-                InlineKeyboardButton("💧 Video Watermark", callback_data=f"watermark_action_{message.id}"),
-                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")
+                InlineKeyboardButton("💧 Wᴀᴛᴇʀᴍᴀʀᴋ", callback_data=f"watermark_action_{message.id}"),
+                InlineKeyboardButton("⚙️ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings")
             ],
             [
-                InlineKeyboardButton("❌ Cancel", callback_data="close")
+                InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data="close")
             ]
         ]
     else:
         buttons = [
             [
-                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{message.id}"),
-                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
+                InlineKeyboardButton("✏️ Rᴇɴᴀᴍᴇ Fɪʟᴇ", callback_data=f"rename_{message.id}"),
+                InlineKeyboardButton("⚡ Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ", callback_data=f"auto_rename_{message.id}")
             ],
             [
-                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
-                InlineKeyboardButton("❌ Cancel", callback_data="close")
+                InlineKeyboardButton("⚙️ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings"),
+                InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data="close")
             ]
         ]
 
@@ -503,6 +505,12 @@ async def extract_sample_only_cb(client, query: CallbackQuery):
             await ms.delete()
         except Exception:
             pass
+        # Auto-delete original incoming/forwarded file message to prevent chat clutter
+        try:
+            if 'file_msg' in locals() and file_msg:
+                await file_msg.delete()
+        except Exception:
+            pass
         try:
             await db.increment_stat(user_id, "total_samples_generated", 1)
         except Exception:
@@ -600,6 +608,12 @@ async def extract_ss_only_cb(client, query: CallbackQuery):
             await ms.delete()
         except Exception:
             pass
+        # Auto-delete original incoming/forwarded file message to prevent chat clutter
+        try:
+            if 'file_msg' in locals() and file_msg:
+                await file_msg.delete()
+        except Exception:
+            pass
         try:
             await db.increment_stat(user_id, "total_screenshots_generated", len(shots))
         except Exception:
@@ -617,13 +631,13 @@ async def extract_ss_only_cb(client, query: CallbackQuery):
 async def extract_streams_cb(client, query: CallbackQuery):
     await query.answer("Opening Stream Inspector... 🎵")
     await query.message.reply_text(
-        "╭━━━〔 🎵 𝗦𝗧𝗥𝗘𝗔𝗠 𝗜𝗡𝗦𝗣𝗘𝗖𝗧𝗢𝗥 〕━━━╮\n"
-        "┃ Reply to the video file with:\n"
-        "┃ • <code>/streams</code> : View all audio & subtitle tracks\n"
-        "┃ • <code>/streams strip_subs</code> : Remove all subtitles\n"
-        "┃ • <code>/streams audio 1</code> : Keep only audio stream 1\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        "<b>◈ Sᴛʀᴇᴀᴍ Iɴꜱᴘᴇᴄᴛᴏʀ 🎵</b>\n"
+        "───────────────\n"
+        "▸ Reply to the video file with:\n"
+        "• <code>/streams</code> : View all audio & subtitle tracks\n"
+        "• <code>/streams strip_subs</code> : Remove all subtitles\n"
+        "• <code>/streams audio 1</code> : Keep only audio stream 1",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]])
     )
 
 
@@ -631,12 +645,12 @@ async def extract_streams_cb(client, query: CallbackQuery):
 async def remux_action_cb(client, query: CallbackQuery):
     await query.answer("Opening Container Remuxer... 🔄")
     await query.message.reply_text(
-        "╭━━━〔 🔄 𝗟𝗢𝗦𝗦𝗟𝗘𝗦𝗦 𝗥𝗘𝗠𝗨𝗫𝗘𝗥 〕━━━╮\n"
-        "┃ Reply to the video file with:\n"
-        "┃ • <code>/remux</code> : Convert MKV ⇄ MP4 losslessly\n"
-        "┃ (Lossless conversion in seconds with zero re-encoding!)\n"
-        "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
+        "<b>◈ Lᴏꜱꜱʟᴇꜱꜱ Rᴇᴍᴜxᴇʀ 🔄</b>\n"
+        "───────────────\n"
+        "▸ Reply to the video file with:\n"
+        "• <code>/remux</code> : Convert MKV ⇄ MP4 losslessly\n"
+        "(Lossless conversion in seconds with zero re-encoding!)",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]])
     )
 
 
@@ -662,8 +676,58 @@ async def watermark_action_cb(client, query: CallbackQuery):
 async def refunc(client, message):
     reply_message = message.reply_to_message
     if reply_message and reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply):
-        new_name = message.text.strip()
         user_id = message.from_user.id
+        user_state = USER_STATE.get(user_id)
+        reply_prompt = (reply_message.text or "") + (reply_message.caption or "")
+
+        # Check if user was replying to a Watermark Text prompt
+        if user_state == "waiting_wm_text" or "watermark text" in reply_prompt.lower():
+            USER_STATE.pop(user_id, None)
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+            if not message.text:
+                return await message.reply_text("❌ Please send text for your watermark tag.")
+            wm_text = message.text.strip()
+            await db.set_watermark(user_id, text=wm_text, type="text", enabled=True)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            from plugins.extra_features import build_watermark_view
+            t, m = await build_watermark_view(user_id)
+            return await client.send_message(
+                chat_id=user_id,
+                text=f"✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n───────────────\n▸ <b>Tᴀɢ :</b> <code>{wm_text}</code>\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+                reply_markup=m
+            )
+
+        # Check if user was replying to a Watermark Logo prompt
+        if user_state == "waiting_wm_logo" or "watermark logo" in reply_prompt.lower() or "logo photo" in reply_prompt.lower():
+            USER_STATE.pop(user_id, None)
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+            photo = message.photo or (message.document if message.document and message.document.mime_type and message.document.mime_type.startswith("image/") else None)
+            if not photo:
+                return await message.reply_text("❌ Please reply with a photo or image file for your watermark logo.")
+            file_id = photo.file_id
+            await db.set_watermark(user_id, image_id=file_id, type="image", enabled=True)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            from plugins.extra_features import build_watermark_view
+            t, m = await build_watermark_view(user_id)
+            return await client.send_message(
+                chat_id=user_id,
+                text="✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n───────────────\n▸ <b>Tʏᴘᴇ :</b> Iᴍᴀɢᴇ Lᴏɢᴏ 🖼️\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+                reply_markup=m
+            )
+
+        new_name = message.text.strip()
         try:
             await message.delete()
         except Exception:
@@ -715,7 +779,7 @@ async def refunc(client, message):
         if upload_mode in ["Document", "Video", "Audio"]:
             prompt_msg = await client.send_message(
                 chat_id=message.chat.id,
-                text=f"**Processing With Default Mode ({upload_mode})...**\n\n**File Name :-** `{final_name}`",
+                text=f"<b>◈ Pʀᴏᴄᴇꜱꜱɪɴɢ Dᴇꜰᴀᴜʟᴛ Mᴏᴅᴇ ({upload_mode}) ⚡</b>\n───────────────\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
                 **safe_reply_params(file_msg.id)
             )
             class MockCallback:
@@ -727,15 +791,15 @@ async def refunc(client, message):
             await route_to_extras_or_execute(client, mock_cb, final_name, upload_mode.lower(), file_msg)
             return
 
-        buttons = [[InlineKeyboardButton("📁 Document", callback_data=f"upload_document_{file_msg.id}")]]
+        buttons = [[InlineKeyboardButton("📁 Dᴏᴄᴜᴍᴇɴᴛ", callback_data=f"upload_document_{file_msg.id}")]]
         if file_msg.video or (file_msg.document and final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))):
-            buttons.append([InlineKeyboardButton("🎥 Video", callback_data=f"upload_video_{file_msg.id}")])
+            buttons[0].append(InlineKeyboardButton("🎥 Vɪᴅᴇᴏ", callback_data=f"upload_video_{file_msg.id}"))
         elif file_msg.audio or (file_msg.document and final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))):
-            buttons.append([InlineKeyboardButton("🎵 Audio", callback_data=f"upload_audio_{file_msg.id}")])
+            buttons[0].append(InlineKeyboardButton("🎵 Aᴜᴅɪᴏ", callback_data=f"upload_audio_{file_msg.id}"))
 
         await client.send_message(
             chat_id=message.chat.id,
-            text=f"**Select The Output File Type**\n\n**File Name :-** `{final_name}`",
+            text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n───────────────\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
             reply_markup=InlineKeyboardMarkup(buttons),
             **safe_reply_params(file_msg.id)
         )
@@ -820,19 +884,18 @@ async def route_to_extras_or_execute(client, update, new_filename: str, upload_t
         if row2:
             buttons.append(row2)
 
-        buttons.append([InlineKeyboardButton("⏩ Skip Extras (Rename Only)", callback_data=f"ext_skip_{file_msg.id}")])
+        buttons.append([InlineKeyboardButton("⏩ Sᴋɪᴘ Exᴛʀᴀꜱ (Rᴇɴᴀᴍᴇ Oɴʟʏ)", callback_data=f"ext_skip_{file_msg.id}")])
         buttons.append([
-            InlineKeyboardButton("🔕 Disable Always in Settings", callback_data=f"ext_disable_{file_msg.id}"),
-            InlineKeyboardButton("❌ Cancel", callback_data="close")
+            InlineKeyboardButton("🔕 Dɪꜱᴀʙʟᴇ ɪɴ Sᴇᴛᴛɪɴɢꜱ", callback_data=f"ext_disable_{file_msg.id}"),
+            InlineKeyboardButton("❌ Cᴀɴᴄᴇʟ", callback_data="close")
         ])
 
         prompt_text = (
-            "╭━━━━━━━━━━━━━━━━━━━╮\n"
-            "┃   🎬 <b>Media Extras Confirmation</b>\n"
-            "╰━━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"◈ <b>Target File :</b> <code>{new_filename}</code>\n"
-            f"◈ <b>🎬 Sample Video :</b> <code>{sample_dur}s</code>\n"
-            f"◈ <b>📸 Screenshots :</b> <code>{ss_count} frames</code>\n\n"
+            "<b>◈ Mᴇᴅɪᴀ Exᴛʀᴀꜱ Cᴏɴꜰɪʀᴍᴀᴛɪᴏɴ 🎬</b>\n"
+            "───────────────\n"
+            f"▸ <b>Tᴀʀɢᴇᴛ Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
+            f"▸ <b>🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ :</b> <code>{sample_dur}s</code>\n"
+            f"▸ <b>📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ :</b> <code>{ss_count} frames</code>\n\n"
             "<i>Do you want to generate Sample Video or Screenshots for this file?</i>\n\n"
             "⚡ @Nex_bots"
         )
@@ -1436,6 +1499,12 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
             CANCEL_REQUESTS.discard(f"{ms.chat.id}_{ms.id}")
         try:
             await ms.delete()
+        except Exception:
+            pass
+        # Auto-delete original incoming/forwarded file message to prevent chat clutter
+        try:
+            if 'file_msg' in locals() and file_msg:
+                await file_msg.delete()
         except Exception:
             pass
         if 'work_dir' in locals() and os.path.exists(work_dir):

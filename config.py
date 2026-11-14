@@ -42,110 +42,114 @@ class Config(object):
 
 
 class Txt(object):
-    START_TXT = """👋 <b>Hello {0}!</b>
+    START_TXT = """👋 <b>Hᴇʟʟᴏ {0}!</b>
 
-Welcome to <b>NeX 4GB Rename Bot</b> ⚡
-A fast, clean cloud media processor for Telegram files up to <b>4GB+</b>.
+Wᴇʟᴄᴏᴍᴇ ᴛᴏ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> ⚡
+A ꜰᴀꜱᴛ, ᴄʟᴇᴀɴ ᴄʟᴏᴜᴅ ᴍᴇᴅɪᴀ ᴘʀᴏᴄᴇꜱꜱᴏʀ ꜰᴏʀ Tᴇʟᴇɢʀᴀᴍ ꜰɪʟᴇꜱ ᴜᴘ ᴛᴏ <b>4GB+</b>.
 
-╭━━━〔 ✨ <b>Key Highlights</b> 〕━━━╮
-┃ ⚡ <b>4GB+ High-Speed Renaming</b>
-┃ 🏷️ <b>Clean Output & Metadata</b>
-┃ 🎬 <b>Sample Video & Screen</b>
-┃ 💧 <b>Custom Video Watermark</b>
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+✨ <b>Kᴇʏ Hɪɢʜʟɪɢʜᴛꜱ :</b>
+───────────────
+▸ ⚡ <b>4GB+ Hɪɢʜ-Sᴘᴇᴇᴅ Rᴇɴᴀᴍɪɴɢ</b>
+▸ 🏷️ <b>Cʟᴇᴀɴ Oᴜᴛᴘᴜᴛ & Mᴇᴛᴀᴅᴀᴛᴀ</b>
+▸ 🎬 <b>Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ & Sᴄʀᴇᴇɴꜱ</b>
+▸ 💧 <b>Cᴜꜱᴛᴏᴍ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ</b>
+───────────────
 
-📤 <i>Send any video, document, or audio file to begin!</i>"""
+📤 <i>Sᴇɴᴅ ᴀɴʏ ᴠɪᴅᴇᴏ, ᴅᴏᴄᴜᴍᴇɴᴛ, ᴏʀ ᴀᴜᴅɪᴏ ꜰɪʟᴇ ᴛᴏ ʙᴇɢɪɴ!</i>"""
 
-    ABOUT_TXT = """🤖 <b><u>About NeX 4GB Rename Bot</u></b> ⚡
+    ABOUT_TXT = """🤖 <b><u>Aʙᴏᴜᴛ NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</u></b> ⚡
+───────────────
+▸ <b>Fʀᴀᴍᴇᴡᴏʀᴋ :</b> Pʏʀᴏɢʀᴀᴍ & FFᴍᴘᴇɢ
+▸ <b>Mᴀx Fɪʟᴇ Sɪᴢᴇ :</b> Uᴘ ᴛᴏ 4GB+
+▸ <b>Sᴘᴇᴇᴅ :</b> Cʟᴏᴜᴅ Hɪɢʜ-Sᴘᴇᴇᴅ
+▸ <b>Eɴɢɪɴᴇ :</b> Cʟᴇᴀɴ Lᴏꜱꜱʟᴇꜱꜱ Sᴛʀᴇᴀᴍ
+▸ <b>Dᴀᴛᴀʙᴀꜱᴇ :</b> MᴏɴɢᴏDB Aᴛʟᴀꜱ
+───────────────
+<b>🤝 Sᴘᴇᴄɪᴀʟ Cʀᴇᴅɪᴛ & Sᴘᴇᴄɪᴀʟ Tʜᴀɴᴋꜱ :</b>
+▸ <b>Mʏ Dᴇᴀʀ Fʀɪᴇɴᴅ :</b> <a href="https://t.me/VenomBotz">@VenomBotz</a> ❤️✨
+───────────────
+📢 <b>Uᴘᴅᴀᴛᴇꜱ :</b> @Nex_bots
+💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
 
-• <b>Framework :</b> Pyrogram & FFmpeg
-• <b>Max File Size :</b> Up to 4GB+
-• <b>Speed :</b> Cloud High-Speed
-• <b>Engine :</b> Clean Lossless Stream
-• <b>Database :</b> MongoDB Atlas
+    HELP_TXT = """📖 <b><u>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ - Hᴇʟᴘ</u></b> ⚡
+───────────────
+✏️ <b><u>Hᴏᴡ Tᴏ Rᴇɴᴀᴍᴇ :</u></b>
+1. Sᴇɴᴅ ᴀɴʏ ꜰɪʟᴇ ᴜᴘ ᴛᴏ 4GB.
+2. Tᴀᴘ <b>Aᴜᴛᴏ Cʟᴇᴀɴ</b> ᴏʀ ᴛʏᴘᴇ ɴᴀᴍᴇ.
+3. Sᴇʟᴇᴄᴛ Dᴏᴄ, Vɪᴅᴇᴏ, ᴏʀ Aᴜᴅɪᴏ.
 
-📢 <b>Updates :</b> @Nex_bots
-💬 <b>Support :</b> @NexCRSupportbot"""
+⚙️ <b><u>Sᴇᴛᴛɪɴɢꜱ & Tᴏᴏʟꜱ :</u></b>
+• <code>/settings</code> - Cᴜꜱᴛᴏᴍ Sᴇᴛᴜᴘ
+• <code>/refer</code> - Rᴇꜰᴇʀ & Eᴀʀɴ Fʀᴇᴇ VIP
+• <code>/profile</code> - Vɪᴇᴡ Yᴏᴜʀ Sᴛᴀᴛꜱ
+• <code>/plan</code> - Uᴘɢʀᴀᴅᴇ ᴛᴏ 4GB VIP
+───────────────
+📢 <b>Uᴘᴅᴀᴛᴇꜱ :</b> @Nex_bots
+💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
 
-    HELP_TXT = """📖 <b><u>NeX 4GB Rename Bot - Help</u></b> ⚡
+    CAPTION_TXT = """📑 <b><u>Cᴜꜱᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Gᴜɪᴅᴇ</u></b> ⚡
+───────────────
+• <code>/set_caption &lt;text&gt;</code> - Sᴀᴠᴇ
+• <code>/see_caption</code> - Vɪᴇᴡ ᴀᴄᴛɪᴠᴇ
+• <code>/del_caption</code> - Rᴇꜱᴇᴛ
 
-✏️ <b><u>How To Rename:</u></b>
-1. Send any file up to 4GB.
-2. Tap <b>Auto Clean</b> or type name.
-3. Select Doc, Video, or Audio.
+<b>Aᴠᴀɪʟᴀʙʟᴇ Tᴀɢꜱ :</b>
+• <code>{filename}</code> - Fɪʟᴇ ɴᴀᴍᴇ
+• <code>{filesize}</code> - Fɪʟᴇ ꜱɪᴢᴇ
+• <code>{duration}</code> - Vɪᴅᴇᴏ ʟᴇɴɢᴛʜ
 
-⚙️ <b><u>Settings & Tools:</u></b>
-• <code>/settings</code> - Custom Setup
-• <code>/refer</code> - Refer & Earn Free VIP
-• <code>/profile</code> - View Your Stats
-• <code>/plan</code> - Upgrade to 4GB VIP
-
-📢 <b>Updates :</b> @Nex_bots
-💬 <b>Support :</b> @NexCRSupportbot"""
-
-    CAPTION_TXT = """📑 <b><u>Custom Caption Guide</u></b> ⚡
-
-• <code>/set_caption &lt;text&gt;</code> - Save
-• <code>/see_caption</code> - View active
-• <code>/del_caption</code> - Reset
-
-<b>Available Tags:</b>
-• <code>{filename}</code> - File name
-• <code>{filesize}</code> - File size
-• <code>{duration}</code> - Video length
-
-<b>Example:</b>
+<b>Exᴀᴍᴘʟᴇ :</b>
 <code>/set_caption 📕 {filename}
 🔗 Size: {filesize}</code>
-
+───────────────
 ⚡ @Nex_bots"""
 
-    THUMBNAIL_TXT = """🖼️ <b><u>Thumbnail Guide</u></b> ⚡
+    THUMBNAIL_TXT = """🖼️ <b><u>Tʜᴜᴍʙɴᴀɪʟ Gᴜɪᴅᴇ</u></b> ⚡
+───────────────
+• Sᴇɴᴅ ᴀɴʏ ᴘʜᴏᴛᴏ ᴛᴏ ꜱᴇᴛ ᴛʜᴜᴍʙɴᴀɪʟ.
+• <code>/view_thumb</code> - Vɪᴇᴡ ᴛʜᴜᴍʙɴᴀɪʟ
+• <code>/del_thumb</code> - Dᴇʟᴇᴛᴇ ᴛʜᴜᴍʙɴᴀɪʟ
 
-• Send any photo to set thumbnail.
-• <code>/view_thumb</code> - View thumbnail
-• <code>/del_thumb</code> - Delete thumbnail
-
-💡 <i>16:9 movie thumbnails maintain true aspect ratio!</i>
-
+💡 <i>16:9 ᴍᴏᴠɪᴇ ᴛʜᴜᴍʙɴᴀɪʟꜱ ᴍᴀɪɴᴛᴀɪɴ ᴛʀᴜᴇ ᴀꜱᴘᴇᴄᴛ ʀᴀᴛɪᴏ!</i>
+───────────────
 ⚡ @Nex_bots"""
 
-    PREFIX = """➕ <b><u>Prefix Guide</u></b> ⚡
+    PREFIX = """➕ <b><u>Pʀᴇꜰɪx Gᴜɪᴅᴇ</u></b> ⚡
+───────────────
+• <code>/set_prefix &lt;text&gt;</code> - Aᴅᴅ ᴛᴇxᴛ
+• <code>/see_prefix</code> - Vɪᴇᴡ ᴘʀᴇꜰɪx
+• <code>/del_prefix</code> - Rᴇᴍᴏᴠᴇ ᴘʀᴇꜰɪx
 
-• <code>/set_prefix &lt;text&gt;</code> - Add text
-• <code>/see_prefix</code> - View prefix
-• <code>/del_prefix</code> - Remove prefix
-
-<b>Example:</b>
+<b>Exᴀᴍᴘʟᴇ :</b>
 <code>/set_prefix @Nex_bots</code>"""
 
-    SUFFIX = """➕ <b><u>Suffix Guide</u></b> ⚡
+    SUFFIX = """➕ <b><u>Sᴜꜰꜰɪx Gᴜɪᴅᴇ</u></b> ⚡
+───────────────
+• <code>/set_suffix &lt;text&gt;</code> - Aᴅᴅ ᴛᴇxᴛ
+• <code>/see_suffix</code> - Vɪᴇᴡ ꜱᴜꜰꜰɪx
+• <code>/del_suffix</code> - Rᴇᴍᴏᴠᴇ ꜱᴜꜰꜰɪx
 
-• <code>/set_suffix &lt;text&gt;</code> - Add text
-• <code>/see_suffix</code> - View suffix
-• <code>/del_suffix</code> - Remove suffix
-
-<b>Example:</b>
+<b>Exᴀᴍᴘʟᴇ :</b>
 <code>/set_suffix @Nex_bots</code>"""
 
     PROGRESS_BAR = """
-<b>🔗 Size :</b> {1} | {2}
-<b>⏳ Done :</b> {0}%
-<b>🚀 Speed :</b> {3}/s
-<b>⏰ ETA :</b> {4}
-⚡ <b>NeX 4GB Rename Bot</b>"""
+▸ <b>Sɪᴢᴇ :</b> {1} | {2}
+▸ <b>Dᴏɴᴇ :</b> {0}%
+▸ <b>Sᴘᴇᴇᴅ :</b> {3}/s
+▸ <b>ETA :</b> {4}
+⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b>"""
 
-    DONATE_TXT = """❤️ <b>Support NeX 4GB Rename Bot</b>
-
+    DONATE_TXT = """❤️ <b>Sᴜᴘᴘᴏʀᴛ NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b>
+───────────────
 If you enjoy using our bots and services, feel free to support us!
 
-📢 <b>Updates:</b> @Nex_bots
-💬 <b>Support:</b> @NexCRSupportbot"""
+📢 <b>Uᴘᴅᴀᴛᴇꜱ :</b> @Nex_bots
+💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
 
     DON_TXT = """Hey {} 👋
-❤️ <b>Thanks For Supporting Us!</b>
-
+❤️ <b>Tʜᴀɴᴋꜱ Fᴏʀ Sᴜᴘᴘᴏʀᴛɪɴɢ Uꜱ!</b>
+───────────────
 If you like our bots and services, feel free to support our development:
 
-📢 <b>Channel:</b> @Nex_bots
-💬 <b>Support:</b> @NexCRSupportbot"""
+📢 <b>Cʜᴀɴɴᴇʟ :</b> @Nex_bots
+💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
