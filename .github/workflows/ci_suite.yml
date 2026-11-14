@@ -58,19 +58,34 @@ jobs:
           set +x
           python3 -c "
           import os
+          api_id = os.environ.get('API_ID', '').strip()
+          api_hash = os.environ.get('API_HASH', '').strip()
           keys = [
-              'API_ID', 'API_HASH', 'BOT_TOKEN', 'STRING_SESSION',
-              'DB_URL', 'DB_NAME', 'ADMIN', 'LOG_CHANNEL', 'FILES_CHANNEL',
+              'BOT_TOKEN', 'STRING_SESSION', 'DB_URL', 'DB_NAME',
+              'ADMIN', 'LOG_CHANNEL', 'FILES_CHANNEL',
               'START_PIC', 'FORCE_SUB', 'OWNER_ONLY', 'WEBHOOK', 'PORT'
           ]
           with open('.env', 'w', encoding='utf-8') as f:
+              if api_id and api_id != '0':
+                  f.write(f'API_ID={api_id}\n')
+              if api_hash:
+                  f.write(f'API_HASH={api_hash}\n')
               for k in keys:
-                  v = os.environ.get(k, '')
-                  f.write(f'{k}={v}\n')
+                  v = os.environ.get(k, '').strip()
+                  if v:
+                      f.write(f'{k}={v}\n')
           "
           chmod 600 .env
 
       - name: Execute Pipeline Test & Runner Suite
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          STRING_SESSION: ${{ secrets.STRING_SESSION }}
+          DB_URL: ${{ secrets.DB_URL }}
+          API_ID: ${{ secrets.API_ID }}
+          API_HASH: ${{ secrets.API_HASH }}
+          ADMIN: ${{ secrets.ADMIN }}
+          LOG_CHANNEL: ${{ secrets.LOG_CHANNEL }}
         run: |
           START_TIME=$(date +%s)
           MAX_RUNTIME=10700

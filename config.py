@@ -10,26 +10,31 @@ id_pattern = re.compile(r'^.\d+$')
 
 class Config(object):
     # Pyrogram client configuration
-    API_ID    = int(os.environ.get("API_ID", "0")) if os.environ.get("API_ID") else 0
-    API_HASH  = os.environ.get("API_HASH", "")
-    BOT_TOKEN = os.environ.get("BOT_TOKEN", "") 
+    _raw_api_id = os.environ.get("API_ID", "").strip()
+    API_ID    = int(_raw_api_id) if _raw_api_id.isdigit() and int(_raw_api_id) > 0 else 2040
+    API_HASH  = os.environ.get("API_HASH", "").strip() or "b18441a1ff607e10a989891a5462e627"
+    BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip() 
 
     # 4GB Premium client session string
-    STRING_SESSION = os.environ.get("STRING_SESSION", "")
+    STRING_SESSION = os.environ.get("STRING_SESSION", "").strip()
    
     # Database configuration
-    DB_NAME = os.environ.get("DB_NAME", "NeX_4GB_Rename_Bot")     
-    DB_URL  = os.environ.get("DB_URL", "")
+    DB_NAME = os.environ.get("DB_NAME", "NeX_4GB_Rename_Bot").strip() or "NeX_4GB_Rename_Bot"     
+    DB_URL  = os.environ.get("DB_URL", "").strip()
  
     # Owner & Access Control
-    ADMIN      = [int(admin) if id_pattern.search(admin) else admin for admin in os.environ.get('ADMIN', '').split()]
+    _raw_admin = os.environ.get('ADMIN', '').strip()
+    ADMIN      = [int(admin) for admin in _raw_admin.split() if admin.lstrip('-').isdigit()] if _raw_admin else []
+    OWNER_ID   = ADMIN[0] if ADMIN else 0
     OWNER_ONLY = os.environ.get("OWNER_ONLY", "True").lower() == "true"
-    FORCE_SUB  = os.environ.get("FORCE_SUB", "Nex_bots") 
+    FORCE_SUB  = os.environ.get("FORCE_SUB", "Nex_bots").strip() or "Nex_bots" 
 
     # Channels & Media
-    LOG_CHANNEL   = int(os.environ.get("LOG_CHANNEL", "0")) if os.environ.get("LOG_CHANNEL") else 0
-    FILES_CHANNEL = int(os.environ.get("FILES_CHANNEL", "0")) if os.environ.get("FILES_CHANNEL") else 0
-    START_PIC     = os.environ.get("START_PIC", "")
+    _raw_log      = os.environ.get("LOG_CHANNEL", "0").strip()
+    LOG_CHANNEL   = int(_raw_log) if _raw_log.lstrip('-').isdigit() else 0
+    _raw_files    = os.environ.get("FILES_CHANNEL", "0").strip()
+    FILES_CHANNEL = int(_raw_files) if _raw_files.lstrip('-').isdigit() else 0
+    START_PIC     = os.environ.get("START_PIC", "").strip()
 
     # Bot uptime & web response configuration     
     BOT_UPTIME = time.time()
