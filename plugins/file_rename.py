@@ -951,9 +951,36 @@ async def extras_decision_callback(client, query: CallbackQuery):
     await execute_rename_pipeline(client, query, new_filename, upload_type, file_msg, extras=extras)
 
 
-async def execute_rename_pipeline(client, update, new_filename: str, upload_type: str, file_msg, extras: dict = None):
-    user_id = update.from_user.id
-    ms = update.message if hasattr(update, 'message') else update
+async def execute_rename_pipeline(
+    client,
+    update=None,
+    new_filename: str = "",
+    upload_type: str = "document",
+    file_msg=None,
+    extras: dict = None,
+    ms=None,
+    status_msg=None,
+    sts_msg=None,
+    user_id: int = None,
+    **kwargs
+):
+    status_target = status_msg or sts_msg or ms or update or kwargs.get("status")
+    ms = getattr(status_target, "message", status_target)
+
+    # Resolve user_id cleanly
+    if not user_id:
+        if hasattr(status_target, "from_user") and status_target.from_user and not getattr(status_target.from_user, "is_bot", False):
+            user_id = status_target.from_user.id
+        elif file_msg and hasattr(file_msg, "chat") and file_msg.chat:
+            user_id = file_msg.chat.id
+        elif file_msg and hasattr(file_msg, "from_user") and file_msg.from_user:
+            user_id = file_msg.from_user.id
+        elif hasattr(ms, "chat") and ms.chat:
+            user_id = ms.chat.id
+        elif hasattr(update, "from_user") and update.from_user:
+            user_id = update.from_user.id
+        else:
+            user_id = 0
 
     # 0. Check Drain Mode (Server 24/7 Cloud Handoff Window)
     try:
@@ -1450,7 +1477,11 @@ async def execute_rename_pipeline(client, update, new_filename: str, upload_type
 
             # Log activity to real-time tracker
             try:
-                user_fn = update.from_user.first_name if hasattr(update, 'from_user') and update.from_user else "User"
+                user_fn = "User"
+                if hasattr(status_target, 'from_user') and status_target.from_user:
+                    user_fn = getattr(status_target.from_user, "first_name", "User")
+                elif file_msg and hasattr(file_msg, 'from_user') and file_msg.from_user:
+                    user_fn = getattr(file_msg.from_user, "first_name", "User")
                 await db.log_activity(
                     user_id=user_id,
                     name=user_fn,
@@ -1546,71 +1577,81 @@ async def resume_interrupted_tasks(client):
         print(f"🔄 [Recovery] Found {len(pending_tasks)} active/interrupted tasks from previous run.")
         for task in pending_tasks:
             task_id = str(task.get("_id"))
-            user_id = task.get("user_id")
-            file_name = task.get("file_name", "file.mkv")
-            extra = task.get("extra", {}) or {}
-            chat_id = extra.get("chat_id") or user_id
-            src_msg_id = extra.get("source_message_id")
-            status_msg_id = extra.get("status_message_id")
-            upload_type = extra.get("upload_type", "document")
-            task_extras = extra.get("extras", {})
-
-            if not src_msg_id:
-                await db.remove_active_task(task_id)
-                continue
-
             try:
-                file_msg = await client.get_messages(chat_id, int(src_msg_id))
-            except Exception as e:
-                print(f"⚠️ [Recovery] Failed to fetch source message {src_msg_id} in {chat_id}: {e}")
-                file_msg = None
+                user_id = task.get("user_id")
+                file_name = task.get("file_name", "file.mkv")
+                extra = task.get("extra", {}) or {}
+                chat_id = extra.get("chat_id") or user_id
+                src_msg_id = extra.get("source_message_id")
+                status_msg_id = extra.get("status_message_id")
+                upload_type = extra.get("upload_type", "document")
+                task_extras = extra.get("extras", {})
 
-            if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+                if not src_msg_id:
+                    await db.remove_active_task(task_id)
+                    continue
+
                 try:
-                    await client.send_message(
-                        chat_id=chat_id,
-                        text=f"⚠️ <b>NeX Cloud Handoff:</b>\n\nCould not recover interrupted task for <code>{file_name}</code>. Please send your file again.",
-                        reply_parameters=ReplyParameters(message_id=int(src_msg_id)) if src_msg_id else None
-                    )
-                except Exception:
-                    pass
+                    file_msg = await client.get_messages(chat_id, int(src_msg_id))
+                except Exception as e:
+                    print(f"⚠️ [Recovery] Failed to fetch source message {src_msg_id} in {chat_id}: {e}")
+                    file_msg = None
+
+                if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+                    try:
+                        await client.send_message(
+                            chat_id=chat_id,
+                            text=f"⚠️ <b>NeX Cloud Handoff:</b>\n\nCould not recover interrupted task for <code>{file_name}</code>. Please send your file again.",
+                            reply_parameters=ReplyParameters(message_id=int(src_msg_id)) if src_msg_id else None
+                        )
+                    except Exception:
+                        pass
+                    await db.remove_active_task(task_id)
+                    continue
+
+                ms = None
+                if status_msg_id:
+                    try:
+                        ms = await client.get_messages(chat_id, int(status_msg_id))
+                    except Exception:
+                        ms = None
+
+                if not ms or not getattr(ms, "text", None):
+                    try:
+                        ms = await client.send_message(
+                            chat_id=chat_id,
+                            text=f"🔄 <b>NeX Cloud Handoff Resuming...</b>\n\nResuming <code>{file_name}</code> automatically ⚡",
+                            reply_parameters=ReplyParameters(message_id=file_msg.id)
+                        )
+                    except Exception:
+                        pass
+
+                if not ms:
+                    await db.remove_active_task(task_id)
+                    continue
+
+                print(f"🚀 [Recovery] Resuming task {task_id} for user {user_id} ({file_name})...")
                 await db.remove_active_task(task_id)
-                continue
-
-            ms = None
-            if status_msg_id:
-                try:
-                    ms = await client.get_messages(chat_id, int(status_msg_id))
-                except Exception:
-                    ms = None
-
-            if not ms or not getattr(ms, "text", None):
-                try:
-                    ms = await client.send_message(
-                        chat_id=chat_id,
-                        text=f"🔄 <b>NeX Cloud Handoff Resuming...</b>\n\nResuming <code>{file_name}</code> automatically ⚡",
-                        reply_parameters=ReplyParameters(message_id=file_msg.id)
+                asyncio.create_task(
+                    execute_rename_pipeline(
+                        client=client,
+                        update=ms,
+                        new_filename=file_name,
+                        upload_type=upload_type,
+                        file_msg=file_msg,
+                        extras=task_extras,
+                        ms=ms,
+                        status_msg=ms,
+                        user_id=int(user_id) if user_id else None
                     )
-                except Exception:
-                    pass
-
-            if not ms:
-                await db.remove_active_task(task_id)
-                continue
-
-            print(f"🚀 [Recovery] Resuming task {task_id} for user {user_id} ({file_name})...")
-            await db.remove_active_task(task_id)
-            asyncio.create_task(
-                execute_rename_pipeline(
-                    client=client,
-                    ms=ms,
-                    new_filename=file_name,
-                    upload_type=upload_type,
-                    file_msg=file_msg,
-                    extras=task_extras
                 )
-            )
-            await asyncio.sleep(2)
+                await asyncio.sleep(2)
+            except Exception as task_err:
+                print(f"⚠️ [Recovery] Error resuming task {task_id}: {task_err}")
+                try:
+                    await db.remove_active_task(task_id)
+                except Exception:
+                    pass
 
         await db.cleanup_stale_tasks(max_age_seconds=21600)
     except Exception as e:
