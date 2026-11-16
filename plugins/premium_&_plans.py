@@ -37,9 +37,9 @@ async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 
     days = months * 30
 
     bot_settings = await db.get_bot_settings()
-    p1_base = bot_settings.get("plan_1_base_inr", 99)
-    p2_base = bot_settings.get("plan_2_base_inr", 139)
-    p3_base = bot_settings.get("plan_3_base_inr", 199)
+    p1_base = bot_settings.get("plan_1_base_inr", 129)
+    p2_base = bot_settings.get("plan_2_base_inr", 180)
+    p3_base = bot_settings.get("plan_3_base_inr", 259)
 
     p1_inr, p1_stars, p1_usd = calc_plan_prices(1, p1_base)
     p2_inr, p2_stars, p2_usd = calc_plan_prices(1, p2_base)

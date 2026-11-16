@@ -2186,9 +2186,9 @@ async def cb_owner_reset_stuck(client: Client, query: CallbackQuery):
 
 async def build_owner_pricing_panel():
     settings = await db.get_bot_settings()
-    p1_inr = settings.get("plan_1_base_inr", 99)
-    p2_inr = settings.get("plan_2_base_inr", 139)
-    p3_inr = settings.get("plan_3_base_inr", 199)
+    p1_inr = settings.get("plan_1_base_inr", 129)
+    p2_inr = settings.get("plan_2_base_inr", 180)
+    p3_inr = settings.get("plan_3_base_inr", 259)
 
     p1_stars = max(1, round((p1_inr * 100) / 199))
     p1_usd = round(p1_inr / 84.0, 2)
@@ -2245,8 +2245,8 @@ async def cb_oprice_edit_tier_handler(client, query: CallbackQuery):
     t_names = {1: "Silver (Starter)", 2: "Gold (Pro)", 3: "Diamond (VIP)"}
     t_name = t_names.get(tier, f"Tier {tier}")
     settings = await db.get_bot_settings()
-    default_bases = {1: 99, 2: 139, 3: 199}
-    curr_inr = settings.get(f"plan_{tier}_base_inr", default_bases.get(tier, 139))
+    default_bases = {1: 129, 2: 180, 3: 259}
+    curr_inr = settings.get(f"plan_{tier}_base_inr", default_bases.get(tier, 180))
     OWNER_STATE[query.from_user.id] = {"action": "set_tier_base_price", "tier": tier}
     text = (
         f"💎 <b><u>Set 1-Month Base Price for {t_name}</u></b>\n\n"

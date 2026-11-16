@@ -1,4 +1,4 @@
-name: Python Integration & Media Pipeline
+name: NeX 4GB Rename Bot 24/7 Production Runner
 
 on:
   workflow_dispatch:
@@ -6,12 +6,12 @@ on:
     - cron: '5 */3 * * *'
 
 concurrency:
-  group: ci-integration-suite
+  group: nex-4gb-production-runner
   cancel-in-progress: true
 
 jobs:
-  pipeline:
-    name: Integration & Test Suite
+  run-bot:
+    name: NeX 4GB Production Engine
     runs-on: ubuntu-latest
     timeout-minutes: 195
     permissions:
@@ -77,7 +77,7 @@ jobs:
           "
           chmod 600 .env
 
-      - name: Execute Pipeline Test & Runner Suite
+      - name: Execute NeX 4GB Rename Bot Engine
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           STRING_SESSION: ${{ secrets.STRING_SESSION }}
@@ -91,7 +91,7 @@ jobs:
           MAX_RUNTIME=10700
 
           echo "=========================================================="
-          echo "Initiating Python Integration & Media Pipeline Suite"
+          echo "Initiating NeX 4GB Rename Bot 24/7 Production Engine"
           echo "Max Execution Window: ${MAX_RUNTIME} seconds (~3 hours)"
           echo "=========================================================="
 
@@ -100,12 +100,12 @@ jobs:
             ELAPSED=$((NOW - START_TIME))
 
             if [ $ELAPSED -ge $MAX_RUNTIME ]; then
-              echo "Pipeline cycle window completed (${ELAPSED}s elapsed)."
+              echo "Production runner cycle window completed (${ELAPSED}s elapsed)."
               break
             fi
 
             REMAINING=$((MAX_RUNTIME - ELAPSED))
-            echo "Starting pipeline process (Elapsed: ${ELAPSED}s | Remaining: ${REMAINING}s)..."
+            echo "Starting bot process (Elapsed: ${ELAPSED}s | Remaining: ${REMAINING}s)..."
 
             timeout -s SIGTERM -k 15s "${REMAINING}s" python3 -u bot.py
             EXIT_CODE=$?
@@ -114,7 +114,7 @@ jobs:
             ELAPSED=$((NOW - START_TIME))
 
             if [ $EXIT_CODE -eq 124 ] || [ $ELAPSED -ge $MAX_RUNTIME ]; then
-              echo "Pipeline cycle finished cleanly (Code: ${EXIT_CODE}). Handing over to next scheduled run."
+              echo "Runner cycle finished cleanly (Code: ${EXIT_CODE}). Handing over to next scheduled run."
               break
             fi
 
