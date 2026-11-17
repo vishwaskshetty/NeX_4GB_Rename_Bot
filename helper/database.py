@@ -1464,17 +1464,17 @@ class Database:
             return cached
         cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
         raw_log = cfg.get("log_channel") if cfg.get("log_channel") is not None else Config.LOG_CHANNEL
-        raw_vdisk = cfg.get("virtual_disk_channel") if cfg.get("virtual_disk_channel") is not None else getattr(Config, "VIRTUAL_DISK_CHANNEL", Config.LOG_CHANNEL)
-        raw_dump = cfg.get("dump_channel") or cfg.get("files_channel") if (cfg.get("dump_channel") is not None or cfg.get("files_channel") is not None) else Config.FILES_CHANNEL
+        raw_vdisk = cfg.get("virtual_disk_channel") if cfg.get("virtual_disk_channel") is not None else getattr(Config, "VIRTUAL_DISK_CHANNEL", -1003792044224)
+        raw_dump = cfg.get("dump_channel") or cfg.get("files_channel") if (cfg.get("dump_channel") is not None or cfg.get("files_channel") is not None) else getattr(Config, "FILES_CHANNEL", -1003792044224)
         raw_fsub = cfg.get("force_sub") if cfg.get("force_sub") is not None else Config.FORCE_SUB
         fsub_enabled = bool(cfg.get("force_sub_enabled", True))
         fsub_list = cfg.get("force_sub_channels") or ([raw_fsub] if raw_fsub else [])
 
         res = {
             "owner_only": bool(cfg.get("owner_only", Config.OWNER_ONLY)),
-            "log_channel": parse_channel_id(raw_log),
-            "virtual_disk_channel": parse_channel_id(raw_vdisk),
-            "dump_channel": parse_channel_id(raw_dump),
+            "log_channel": parse_channel_id(raw_log) or -1003792044224,
+            "virtual_disk_channel": parse_channel_id(raw_vdisk) or -1003792044224,
+            "dump_channel": parse_channel_id(raw_dump) or -1003792044224,
             "force_sub": raw_fsub,
             "force_sub_enabled": fsub_enabled,
             "force_sub_channels": fsub_list,
@@ -1528,6 +1528,26 @@ class Database:
 
     async def set_fsub_enabled(self, status: bool):
         return await self.update_bot_settings(force_sub_enabled=bool(status))
+
+    # ==================== DISTRIBUTED INSTANCE LOCK (ANTI-DUPLICATE) ====================
+    async def set_active_instance(self, instance_id: str):
+        """Sets the active running bot instance ID and timestamp in MongoDB."""
+        await self.cfg.update_one(
+            {'_id': 'active_instance'},
+            {'$set': {'instance_id': instance_id, 'heartbeat': time.time()}},
+            upsert=True
+        )
+
+    async def get_active_instance(self) -> dict:
+        """Retrieves the active instance document from MongoDB."""
+        return await self.cfg.find_one({'_id': 'active_instance'}) or {}
+
+    async def update_instance_heartbeat(self, instance_id: str):
+        """Updates the heartbeat timestamp for this running instance."""
+        await self.cfg.update_one(
+            {'_id': 'active_instance', 'instance_id': instance_id},
+            {'$set': {'heartbeat': time.time()}}
+        )
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

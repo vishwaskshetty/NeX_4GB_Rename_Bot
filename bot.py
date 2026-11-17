@@ -1,5 +1,6 @@
 import os
 import sys
+import socket
 
 # High-Speed C++ based uvloop Event Loop for Linux (100-200 MB/s transfers)
 try:
@@ -165,30 +166,33 @@ class Bot(Client):
         self.username = me.username  
         self.uptime = Config.BOT_UPTIME     
 
-        # Sync dynamic channels, virtual disk & force-sub from MongoDB
+        # Single-Active-Instance Distributed Lock in MongoDB (Anti-Duplicate Messages Guard)
+        instance_id = f"{socket.gethostname()}_{os.getpid()}_{int(time.time())}"
+        self.instance_id = instance_id
         try:
-            bot_settings = await db.get_bot_settings()
-            if bot_settings.get("virtual_disk_channel"):
-                Config.VIRTUAL_DISK_CHANNEL = parse_channel_id(bot_settings["virtual_disk_channel"])
-            elif getattr(Config, "VIRTUAL_DISK_CHANNEL", None):
-                await db.update_bot_settings(virtual_disk_channel=Config.VIRTUAL_DISK_CHANNEL)
+            await db.set_active_instance(instance_id)
+            print(f"🔒 Single-Instance Distributed Lock acquired: {instance_id}")
+        except Exception as lock_err:
+            print(f"⚠️ Lock acquisition note: {lock_err}")
+        asyncio.create_task(self._instance_heartbeat_loop())
 
-            if bot_settings.get("log_channel"):
-                Config.LOG_CHANNEL = parse_channel_id(bot_settings["log_channel"])
-            elif Config.LOG_CHANNEL:
-                await db.update_bot_settings(log_channel=Config.LOG_CHANNEL)
+        # Hardcode FILES_CHANNEL = -1003792044224 as permanent virtual_disk_channel, dump_channel & FILES_CHANNEL
+        PERM_CHANNEL = -1003792044224
+        Config.FILES_CHANNEL = PERM_CHANNEL
+        Config.FILE_CHANNEL = PERM_CHANNEL
+        Config.DUMP_CHANNEL = PERM_CHANNEL
+        Config.BIN_CHANNEL = PERM_CHANNEL
+        Config.VIRTUAL_DISK_CHANNEL = PERM_CHANNEL
+        if not Config.LOG_CHANNEL or Config.LOG_CHANNEL == 0:
+            Config.LOG_CHANNEL = PERM_CHANNEL
 
-            if bot_settings.get("dump_channel"):
-                Config.FILES_CHANNEL = parse_channel_id(bot_settings["dump_channel"])
-                Config.DUMP_CHANNEL = Config.FILES_CHANNEL
-                Config.BIN_CHANNEL = Config.FILES_CHANNEL
-            elif Config.FILES_CHANNEL:
-                await db.update_bot_settings(dump_channel=Config.FILES_CHANNEL)
-
-            if bot_settings.get("force_sub"):
-                Config.FORCE_SUB = bot_settings["force_sub"]
-            elif Config.FORCE_SUB:
-                await db.update_bot_settings(force_sub=Config.FORCE_SUB)
+        try:
+            await db.update_bot_settings(
+                virtual_disk_channel=PERM_CHANNEL,
+                dump_channel=PERM_CHANNEL,
+                files_channel=PERM_CHANNEL
+            )
+            print(f"📡 Permanent Virtual Disk & File Channel configured: {PERM_CHANNEL}")
         except Exception as sync_err:
             print(f"Startup channel sync note: {sync_err}")
 
@@ -208,6 +212,14 @@ class Bot(Client):
         except Exception as e:
             print(f"Failed to register Bot Commands Menu: {e}")
 
+        # Warm up channel on Main Bot Client
+        try:
+            ch_main = await self.get_chat(PERM_CHANNEL)
+            print(f"✅ Main Bot resolved permanent channel {PERM_CHANNEL}: {getattr(ch_main, 'title', 'Channel')}")
+        except Exception as ch_err:
+            print(f"⚠️ Main Bot could not resolve channel {PERM_CHANNEL}: {ch_err}")
+
+        user_me = None
         if self.app_4gb:
             try:
                 await self.app_4gb.start()
@@ -223,65 +235,39 @@ class Bot(Client):
                     await self.set_bot_commands(ALL_OWNER_COMMANDS, scope=BotCommandScopeChat(chat_id=int(user_me.id)))
                 except Exception:
                     pass
+
+                # Warm up channel on app_4gb and guarantee membership & admin privileges
+                try:
+                    ch_4gb = await self.app_4gb.get_chat(PERM_CHANNEL)
+                    print(f"✅ app_4gb resolved permanent channel {PERM_CHANNEL}: {getattr(ch_4gb, 'title', 'Channel')}")
+                except Exception as e_4gb:
+                    print(f"ℹ️ app_4gb not in channel {PERM_CHANNEL} yet ({e_4gb}). Joining via invite...")
+                    try:
+                        invite = await self.export_chat_invite_link(PERM_CHANNEL)
+                        await self.app_4gb.join_chat(invite)
+                        print(f"✅ app_4gb joined {PERM_CHANNEL} successfully!")
+                        if user_me:
+                            await self.promote_chat_member(
+                                PERM_CHANNEL,
+                                user_me.id,
+                                privileges=ChatPrivileges(
+                                    can_post_messages=True,
+                                    can_edit_messages=True,
+                                    can_delete_messages=True,
+                                    can_invite_users=True,
+                                    can_pin_messages=True
+                                )
+                            )
+                            print(f"✅ app_4gb promoted to Admin in {PERM_CHANNEL}!")
+                    except Exception as join_err:
+                        print(f"⚠️ Auto-join/promote app_4gb note: {join_err}")
             except Exception as e:
                 print(f"Error starting 4GB Premium Client: {e}")
-
-        # Check if Virtual Disk / Log Channel is accessible by bot
-        vdisk_target = parse_channel_id(getattr(Config, "VIRTUAL_DISK_CHANNEL", None) or Config.LOG_CHANNEL)
-        is_vdisk_valid = False
-        if vdisk_target and vdisk_target != 0:
-            try:
-                await self.get_chat(vdisk_target)
-                is_vdisk_valid = True
-            except Exception as ch_err:
-                print(f"Configured Virtual Disk Channel ({vdisk_target}) not accessible by bot: {ch_err}")
-                is_vdisk_valid = False
-
-        # Auto-Create Telegram Virtual Cloud Disk Channel on Startup if Missing or Inaccessible
-        if not is_vdisk_valid and self.app_4gb and self.app_4gb_started:
-            try:
-                print("Creating auto 'NeX 4GB Virtual Cloud Disk' channel via app_4gb...")
-                created_chat = await self.app_4gb.create_channel(
-                    title="NeX 4GB Virtual Cloud Disk",
-                    description="Auto-generated Virtual Cloud Disk for NeX 4GB Rename Bot transfers."
-                )
-                vdisk_id = created_chat.id
-                try:
-                    await self.app_4gb.add_chat_members(vdisk_id, me.username)
-                except Exception:
-                    pass
-                try:
-                    await self.app_4gb.promote_chat_member(
-                        vdisk_id,
-                        me.username,
-                        privileges=ChatPrivileges(
-                            can_post_messages=True,
-                            can_edit_messages=True,
-                            can_delete_messages=True,
-                            can_invite_users=True,
-                            can_pin_messages=True
-                        )
-                    )
-                except Exception as prom_err:
-                    print(f"Virtual Disk bot admin promotion info: {prom_err}")
-
-                Config.VIRTUAL_DISK_CHANNEL = vdisk_id
-                Config.LOG_CHANNEL = vdisk_id
-                if not Config.FILES_CHANNEL or Config.FILES_CHANNEL == 0:
-                    Config.FILES_CHANNEL = vdisk_id
-                    Config.DUMP_CHANNEL = vdisk_id
-                    Config.BIN_CHANNEL = vdisk_id
-                    await db.update_bot_settings(virtual_disk_channel=vdisk_id, log_channel=vdisk_id, dump_channel=vdisk_id)
-                else:
-                    await db.update_bot_settings(virtual_disk_channel=vdisk_id, log_channel=vdisk_id)
-                print(f"✅ NeX 4GB Virtual Cloud Disk channel created & configured: {vdisk_id}")
-            except Exception as create_err:
-                print(f"Failed to auto-create Virtual Disk channel: {create_err}")
 
         # Cache Virtual Disk peer on both client and app_4gb to prevent PeerIdInvalid
         try:
             from helper.tg_virtual_disk import TelegramVirtualDisk
-            await TelegramVirtualDisk.ensure_peer_cached(self)
+            await TelegramVirtualDisk.ensure_peer_cached(self, PERM_CHANNEL)
         except Exception as cache_err:
             print(f"Virtual Disk peer caching note: {cache_err}")
 
@@ -322,6 +308,25 @@ class Bot(Client):
         asyncio.create_task(self._mtproto_watchdog())
         asyncio.create_task(self._temp_cleanup_worker())
         asyncio.create_task(self._render_keep_alive())
+
+    async def _instance_heartbeat_loop(self):
+        """
+        Anti-Duplicate Guard: Periodically updates instance heartbeat in MongoDB.
+        If a newer bot instance is detected, cleanly exits this process immediately
+        so multiple containers/runners never poll Telegram simultaneously.
+        """
+        await asyncio.sleep(5)
+        while self._is_running:
+            try:
+                await asyncio.sleep(10)
+                doc = await db.get_active_instance()
+                active_id = doc.get("instance_id")
+                if active_id and active_id != getattr(self, "instance_id", None):
+                    print(f"🔄 Newer bot instance detected in MongoDB ({active_id})! Shutting down old instance ({getattr(self, 'instance_id', None)}) cleanly to prevent duplicate messages...")
+                    os._exit(0)
+                await db.update_instance_heartbeat(getattr(self, "instance_id", ""))
+            except Exception:
+                pass
 
     async def _render_keep_alive(self):
         """

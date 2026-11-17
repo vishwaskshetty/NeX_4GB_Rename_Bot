@@ -57,15 +57,18 @@ class Config(object):
     OWNER_ONLY = os.environ.get("OWNER_ONLY", "True").lower() == "true"
     FORCE_SUB  = os.environ.get("FORCE_SUB", "Nex_bots").strip() or "Nex_bots" 
 
-    # Channels & Media
-    _raw_log             = os.environ.get("LOG_CHANNEL", "-1004362143385").strip()
-    LOG_CHANNEL          = parse_channel_id(_raw_log) if _raw_log and _raw_log != "0" else -1004362143385
-    _raw_vdisk           = os.environ.get("VIRTUAL_DISK_CHANNEL", os.environ.get("LOG_CHANNEL", "-1004362143385")).strip()
-    VIRTUAL_DISK_CHANNEL = parse_channel_id(_raw_vdisk) if _raw_vdisk and _raw_vdisk != "0" else LOG_CHANNEL
-    _raw_files           = os.environ.get("FILES_CHANNEL", os.environ.get("DUMP_CHANNEL", "-1003792044224")).strip()
+    # Channels & Media (Permanently Hardcoded to -1003792044224)
+    _raw_files           = os.environ.get("FILES_CHANNEL", os.environ.get("FILE_CHANNEL", "-1003792044224")).strip()
     FILES_CHANNEL        = parse_channel_id(_raw_files) if _raw_files and _raw_files != "0" else -1003792044224
+    FILE_CHANNEL         = FILES_CHANNEL
     DUMP_CHANNEL         = FILES_CHANNEL
     BIN_CHANNEL          = FILES_CHANNEL
+
+    _raw_vdisk           = os.environ.get("VIRTUAL_DISK_CHANNEL", "-1003792044224").strip()
+    VIRTUAL_DISK_CHANNEL = parse_channel_id(_raw_vdisk) if _raw_vdisk and _raw_vdisk != "0" else -1003792044224
+
+    _raw_log             = os.environ.get("LOG_CHANNEL", "-1003792044224").strip()
+    LOG_CHANNEL          = parse_channel_id(_raw_log) if _raw_log and _raw_log != "0" else -1003792044224
     START_PIC            = os.environ.get("START_PIC", "").strip()
 
     # Bot uptime & web response configuration     

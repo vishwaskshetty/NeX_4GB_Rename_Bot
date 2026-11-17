@@ -7,7 +7,7 @@ from pyrogram import Client, filters, enums, __version__
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from helper.database import db, TIER_NAMES
 from config import Config, Txt, parse_channel_id  
-from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content
+from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content, is_duplicate_update
 
 _DB_TIMEOUT = 5  # seconds – guard so DB never blocks message handlers
 
@@ -175,6 +175,8 @@ async def build_server_diagnostics(back_cb: str = "start"):
 
 @Client.on_message(filters.private & filters.command("start"))
 async def start(client, message):
+    if message.chat and await is_duplicate_update(f"start_{message.chat.id}_{message.id}"):
+        return
     user = message.from_user
     user_id = user.id
 
@@ -270,6 +272,8 @@ async def leaderboard_cmd(client, message):
 
 @Client.on_callback_query(filters.regex(r"^(start|render|help|about|close|cb_leaderboard|cb_referral)$"))
 async def cb_handler(client, query: CallbackQuery):
+    if await is_duplicate_update(f"cb_{query.id}"):
+        return
     data = query.data 
     if data == "start":
         await query.answer()

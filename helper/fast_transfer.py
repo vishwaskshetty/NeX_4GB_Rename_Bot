@@ -99,7 +99,7 @@ async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 8)
             valid_pool.append(s)
         else:
             try:
-                await s.stop()
+                asyncio.create_task(s.stop())
             except Exception:
                 pass
     pool = valid_pool
@@ -110,17 +110,41 @@ async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 8)
 
     if len(pool) < pool_size:
         test_mode = await asyncio.wait_for(client.storage.test_mode(), timeout=5.0)
-        auth_key = getattr(primary, "auth_key", None)
-        if not auth_key:
-            auth_key = await client.storage.auth_key()
+        main_dc = await asyncio.wait_for(client.storage.dc_id(), timeout=5.0)
 
         while len(pool) < pool_size:
             try:
-                extra_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
-                await asyncio.wait_for(extra_session.start(), timeout=5.0)
-                pool.append(extra_session)
+                if dc_id == main_dc:
+                    auth_key = await client.storage.auth_key()
+                    extra_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
+                    await asyncio.wait_for(extra_session.start(), timeout=5.0)
+                    pool.append(extra_session)
+                else:
+                    auth_key = await asyncio.wait_for(Auth(client, dc_id, test_mode).create(), timeout=5.0)
+                    extra_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
+                    await asyncio.wait_for(extra_session.start(), timeout=5.0)
+                    # Export & Import authorization for this independent DC socket
+                    for _ in range(3):
+                        try:
+                            exported_auth = await asyncio.wait_for(
+                                client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id)),
+                                timeout=5.0
+                            )
+                            await asyncio.wait_for(
+                                extra_session.invoke(
+                                    raw.functions.auth.ImportAuthorization(
+                                        id=exported_auth.id,
+                                        bytes=exported_auth.bytes
+                                    )
+                                ),
+                                timeout=5.0
+                            )
+                            break
+                        except AuthBytesInvalid:
+                            continue
+                    pool.append(extra_session)
             except Exception as e:
-                log.warning(f"Failed to spawn extra session for DC {dc_id}: {e}")
+                log.warning(f"Failed to spawn extra authorized session for DC {dc_id}: {e}")
                 break
 
     client._multi_media_sessions[dc_id] = pool
@@ -204,7 +228,7 @@ async def fast_download(
 
         pool_size = 8 if is_prem else 4
         try:
-            sessions = await asyncio.wait_for(get_media_session_pool(client, dc_id, pool_size=pool_size), timeout=8.0)
+            sessions = await asyncio.wait_for(get_media_session_pool(client, dc_id, pool_size=pool_size), timeout=15.0)
         except Exception as sess_err:
             log.warning(f"Media session pool init failed for DC {dc_id} ({sess_err}). Falling back to standard download_media...")
             return await client.download_media(message_or_file, file_name=file_path, progress=progress, progress_args=progress_args)
@@ -553,6 +577,14 @@ async def zero_disk_turbo_pipe(
     the progress bar non-blockingly via asyncio.create_task every 5.0 seconds.
     Returns raw.types.InputFileBig (for files > 10MB) or raw.types.InputFile (<= 10MB).
     """
+    if hasattr(staged_msg, "chat") and hasattr(staged_msg, "id") and staged_msg.chat:
+        try:
+            refreshed = await client.get_messages(staged_msg.chat.id, staged_msg.id)
+            if refreshed and not getattr(refreshed, "empty", False):
+                staged_msg = refreshed
+        except Exception:
+            pass
+
     file_obj = (
         getattr(staged_msg, "document", None) or
         getattr(staged_msg, "video", None) or
@@ -659,7 +691,10 @@ async def zero_disk_turbo_pipe(
                     error_holder.append(StopTransmission("Download Cancelled"))
                     break
                 except Exception as ex:
+                    log.warning(f"zero_disk_turbo_pipe download worker {wid} part {part_idx} attempt {attempt+1} error: {ex}")
                     if attempt == 2:
+                        import traceback
+                        traceback.print_exc()
                         error_holder.append(ex)
                     else:
                         await asyncio.sleep(0.5 * (attempt + 1))
@@ -719,7 +754,10 @@ async def zero_disk_turbo_pipe(
                     error_holder.append(StopTransmission("Upload Cancelled"))
                     break
                 except Exception as ex:
+                    log.warning(f"zero_disk_turbo_pipe upload worker {wid} part {part_idx} attempt {attempt+1} error: {ex}")
                     if attempt == 2:
+                        import traceback
+                        traceback.print_exc()
                         error_holder.append(ex)
                     else:
                         await asyncio.sleep(0.5 * (attempt + 1))

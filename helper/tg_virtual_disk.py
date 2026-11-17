@@ -15,11 +15,11 @@ def get_virtual_disk_channel(client: Optional[Client] = None) -> int:
     """Returns the parsed numeric ID or username of the Telegram Virtual Disk channel."""
     vdisk = (
         getattr(Config, "VIRTUAL_DISK_CHANNEL", None) or
-        getattr(Config, "LOG_CHANNEL", None) or
         getattr(Config, "FILES_CHANNEL", None) or
-        getattr(Config, "DUMP_CHANNEL", None)
+        getattr(Config, "DUMP_CHANNEL", None) or
+        -1003792044224
     )
-    return parse_channel_id(vdisk)
+    return parse_channel_id(vdisk) or -1003792044224
 
 
 class TelegramVirtualDisk:

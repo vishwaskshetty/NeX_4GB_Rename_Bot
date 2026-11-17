@@ -122,6 +122,27 @@ USER_STATE = {}
 PROGRESS_TIMESTAMPS = {}
 PROGRESS_PERCENTAGES = {}
 
+# In-Memory Per-Message / Callback Deduplication Cache
+from collections import OrderedDict
+_PROCESSED_UPDATES = OrderedDict()
+_UPDATE_LOCK = asyncio.Lock()
+
+async def is_duplicate_update(update_key, ttl: float = 30.0) -> bool:
+    """
+    Returns True if update_key was already processed within ttl seconds.
+    Used to prevent double/duplicate responses when multiple events fire or network retries occur.
+    """
+    async with _UPDATE_LOCK:
+        now = time.time()
+        while _PROCESSED_UPDATES and len(_PROCESSED_UPDATES) > 4000:
+            _PROCESSED_UPDATES.popitem(last=False)
+        
+        last_seen = _PROCESSED_UPDATES.get(update_key)
+        if last_seen is not None and (now - last_seen) < ttl:
+            return True
+        _PROCESSED_UPDATES[update_key] = now
+        return False
+
 
 def get_readable_file_size(size_in_bytes) -> str:
     if size_in_bytes is None:

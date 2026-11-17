@@ -1,5 +1,7 @@
-from pyrogram import Client, filters 
+from pyrogram import Client, filters
+from pyrogram.types import ForceReply
 from helper.database import db
+from helper.utils import is_duplicate_update, USER_STATE
 
 # NeX 4GB Rename Bot - Thumbnail & Caption Manager
 # Developed by @Nex_bots
@@ -64,6 +66,14 @@ async def removethumb(client, message):
 
 @Client.on_message(filters.private & filters.photo)
 async def addthumbs(client, message):
+    if await is_duplicate_update(f"photo_{message.chat.id}_{message.id}"):
+        return
+    user_id = message.from_user.id
+    if user_id in USER_STATE and USER_STATE[user_id] == "waiting_wm_logo":
+        return await message.continue_propagation()
+    if message.reply_to_message and message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply):
+        return await message.continue_propagation()
+
     ms = await message.reply_text("⏳ <i>Processing and saving thumbnail...</i>")
     await db.set_thumbnail(message.from_user.id, file_id=message.photo.file_id)                
     await ms.edit("✅ <b>Custom Thumbnail Saved Successfully!</b>\n\n<i>Aspect ratio will be preserved automatically.</i>\n\n⚡ @Nex_bots")

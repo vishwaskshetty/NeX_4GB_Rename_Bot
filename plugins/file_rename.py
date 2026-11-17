@@ -48,7 +48,8 @@ from helper.utils import (
     to_small_caps,
     safe_reply_params,
     edit_message_content,
-    sanitize_secrets
+    sanitize_secrets,
+    is_duplicate_update
 )
 from helper.ffmpeg_utils import (
     inject_metadata,
@@ -158,6 +159,8 @@ def apply_prefix_suffix(filename: str, prefix: str, suffix: str) -> str:
 
 @Client.on_message(filters.private & (filters.document | filters.audio | filters.video))
 async def rename_start(client, message):
+    if message.chat and await is_duplicate_update(f"media_{message.chat.id}_{message.id}"):
+        return
     file = message.document or message.video or message.audio
     filename = file.file_name if file.file_name else "Unknown_File"
     file_id = file.file_id
@@ -684,6 +687,8 @@ async def watermark_action_cb(client, query: CallbackQuery):
 
 @Client.on_message(filters.private & filters.reply)
 async def refunc(client, message):
+    if message.chat and await is_duplicate_update(f"reply_{message.chat.id}_{message.id}"):
+        return
     reply_message = message.reply_to_message
     if reply_message and reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply):
         user_id = message.from_user.id
@@ -992,6 +997,11 @@ async def execute_rename_pipeline(
         else:
             user_id = 0
 
+    task_key = f"exec_{user_id}_{file_msg.id if file_msg else 'none'}_{new_filename}"
+    if await is_duplicate_update(task_key, ttl=10.0):
+        print(f"⚠️ Duplicate execution prevented for task {task_key}")
+        return
+
     # 0. Check Drain Mode (Server 24/7 Cloud Handoff Window)
     try:
         from bot import is_in_drain_mode
@@ -1212,6 +1222,8 @@ async def execute_rename_pipeline(
                     raise
                 except Exception as pipe_err:
                     print(f"⚠️ zero_disk_turbo_pipe failed ({pipe_err}). Falling back to disk pipeline...")
+                    import traceback
+                    traceback.print_exc()
                     use_zero_disk = False
                     uploaded_file = None
 
@@ -1238,6 +1250,8 @@ async def execute_rename_pipeline(
                     raise
                 except Exception as down_err:
                     print(f"⚠️ fast_download failed ({down_err}). Falling back to standard download_media...")
+                    import traceback
+                    traceback.print_exc()
                     path = await client.download_media(
                         file_msg,
                         file_name=file_path,
@@ -1346,6 +1360,8 @@ async def execute_rename_pipeline(
                     raise
                 except Exception as up_err:
                     print(f"⚠️ fast_upload failed ({up_err}). Falling back to standard Pyrogram send...")
+                    import traceback
+                    traceback.print_exc()
                     uploaded_file = None
 
             # 5. Format Clean Caption (100% Clean - NO copyright or branding inside file caption!)
@@ -1530,8 +1546,17 @@ async def execute_rename_pipeline(
                     print(f"Usage tracking error: {e}")
 
                 # Automatic File Channel / Dump Channel Forwarding for ALL successful renames
-                dump_target = parse_channel_id(Config.DUMP_CHANNEL or Config.FILES_CHANNEL)
-                if dump_target and dump_target != 0 and dump_target != user_id and dump_target != bridge_channel:
+                dump_target = parse_channel_id(Config.DUMP_CHANNEL or Config.FILES_CHANNEL or -1003792044224)
+                already_in_dump = is_4gb and ('bridge_msg' in locals()) and bridge_msg and (bridge_channel == dump_target)
+                if already_in_dump:
+                    try:
+                        user_mention = getattr(status_target.from_user, "mention", f"User {user_id}") if hasattr(status_target, "from_user") and status_target.from_user else f"<code>{user_id}</code>"
+                        orig_name = getattr(file_msg, "name", None) or getattr(file_msg, "file_name", None) or (file_msg.document and file_msg.document.file_name) or (file_msg.video and file_msg.video.file_name) or new_filename
+                        dump_caption = f"{caption}\n\n👤 <b>Uꜱᴇʀ :</b> {user_mention} (<code>{user_id}</code>)\n📂 <b>Oʀɪɢɪɴᴀʟ :</b> <code>{orig_name}</code>"
+                        await client.edit_message_caption(chat_id=dump_target, message_id=bridge_msg.id, caption=dump_caption)
+                    except Exception as e:
+                        print(f"Dump channel caption update error: {e}")
+                elif dump_target and dump_target != 0 and dump_target != user_id:
                     try:
                         user_mention = getattr(status_target.from_user, "mention", f"User {user_id}") if hasattr(status_target, "from_user") and status_target.from_user else f"<code>{user_id}</code>"
                         orig_name = getattr(file_msg, "name", None) or getattr(file_msg, "file_name", None) or (file_msg.document and file_msg.document.file_name) or (file_msg.video and file_msg.video.file_name) or new_filename
@@ -1680,6 +1705,8 @@ async def execute_rename_pipeline(
                 asyncio.create_task(_auto_delete_copyright_media(user_id, user_sent_msgs))
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return await ms.edit(f"❌ <b>Error occurred:</b> <code>{e}</code>")
 
     finally:
