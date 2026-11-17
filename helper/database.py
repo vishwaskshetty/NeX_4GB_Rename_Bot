@@ -145,6 +145,7 @@ class Database:
         self.cfg = self.db.bot_config
         self.logs = self.db.activity_logs
         self.tasks = self.db.active_tasks
+        self.processed_updates = self.db.processed_updates
 
     @property
     def client(self):
@@ -1548,6 +1549,36 @@ class Database:
             {'_id': 'active_instance', 'instance_id': instance_id},
             {'$set': {'heartbeat': time.time()}}
         )
+
+    # ==================== ATOMIC DISTRIBUTED UPDATE LOCK ====================
+    async def init_indexes(self):
+        """Initializes TTL and performance indexes in MongoDB."""
+        try:
+            await self.processed_updates.create_index("ts", expireAfterSeconds=300)
+        except Exception:
+            pass
+
+    async def claim_update(self, update_key: str) -> bool:
+        """
+        Atomically claims an update key (e.g. msg_{chat_id}_{message_id} or cb_{query_id})
+        using MongoDB update_one with upsert=True.
+        Returns True if this instance successfully inserted the key (first claimer).
+        Returns False if the key already exists (claimed by another server/worker) or on duplicate key race.
+        """
+        if not update_key:
+            return True
+        try:
+            res = await self.processed_updates.update_one(
+                {"_id": str(update_key)},
+                {"$setOnInsert": {"ts": time.time()}},
+                upsert=True
+            )
+            return res.upserted_id is not None
+        except Exception as e:
+            if "duplicate" in str(e).lower() or "11000" in str(e):
+                return False
+            # On network timeout or DB error, allow execution so local dedup handles it
+            return True
 
 
 db = Database(Config.DB_URL, Config.DB_NAME)

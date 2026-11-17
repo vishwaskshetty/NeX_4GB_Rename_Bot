@@ -173,8 +173,10 @@ async def build_server_diagnostics(back_cb: str = "start"):
     return text, markup
 
 
-@Client.on_message(filters.private & filters.command("start"))
+@Client.on_message(filters.private & filters.command("start") & filters.incoming & ~filters.bot & ~filters.via_bot)
 async def start(client, message):
+    if not message.from_user or message.from_user.is_bot:
+        return
     if message.chat and await is_duplicate_update(f"start_{message.chat.id}_{message.id}"):
         return
     user = message.from_user

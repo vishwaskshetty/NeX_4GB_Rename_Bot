@@ -64,8 +64,12 @@ async def removethumb(client, message):
     await message.reply_text("🗑️ <b>Custom Thumbnail Deleted Successfully!</b>\n\n⚡ @Nex_bots")
 	
 
-@Client.on_message(filters.private & filters.photo)
+@Client.on_message(filters.private & filters.photo & filters.incoming & ~filters.bot & ~filters.via_bot)
 async def addthumbs(client, message):
+    if not message.from_user or message.from_user.is_bot:
+        return
+    if (message.caption and message.caption.strip().startswith("/")) or (message.text and message.text.strip().startswith("/")):
+        return
     if await is_duplicate_update(f"photo_{message.chat.id}_{message.id}"):
         return
     user_id = message.from_user.id

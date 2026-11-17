@@ -1,6 +1,8 @@
 import os
 import time
 import re
+import math
+import gc
 import shutil
 import asyncio
 import mimetypes
@@ -117,6 +119,43 @@ def get_full_mime_type(f: str) -> str:
     return mime or "application/octet-stream"
 
 
+_USER_FILE_COOLDOWN: dict[int, float] = {}
+
+async def check_user_cooldown(client, message_or_query, user_id: int) -> bool:
+    """
+    Enforces a mandatory 10-second per-user cooldown between file submissions and renames.
+    Returns True if on cooldown (request rejected), False if allowed to proceed.
+    """
+    now = time.time()
+    last_time = _USER_FILE_COOLDOWN.get(user_id, 0)
+    diff = now - last_time
+    if diff < 10.0:
+        wait_sec = int(math.ceil(10.0 - diff))
+        warn_text = (
+            f"⏳ <b>Cᴏᴏʟᴅᴏᴡɴ Aᴄᴛɪᴠᴇ!</b>\n\n"
+            f"▸ Pʟᴇᴀꜱᴇ ᴡᴀɪᴛ <b>{wait_sec} ꜱᴇᴄᴏɴᴅꜱ</b> ʙᴇꜰᴏʀᴇ ꜱᴇɴᴅɪɴɢ ᴏʀ ʀᴇɴᴀᴍɪɴɢ ᴀɴᴏᴛʜᴇʀ ꜰɪʟᴇ."
+        )
+        if isinstance(message_or_query, CallbackQuery):
+            await message_or_query.answer(f"⏳ Cooldown Active! Please wait {wait_sec}s.", show_alert=True)
+            return True
+        else:
+            try:
+                warn_msg = await message_or_query.reply_text(warn_text)
+                async def _auto_del(msg, delay):
+                    await asyncio.sleep(delay)
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                asyncio.create_task(_auto_del(warn_msg, wait_sec))
+            except Exception:
+                pass
+            return True
+
+    _USER_FILE_COOLDOWN[user_id] = now
+    return False
+
+
 def apply_cleaner(filename: str, clean_words: str, replace_words: str) -> str:
     base_name, ext = os.path.splitext(filename)
 
@@ -157,8 +196,13 @@ def apply_prefix_suffix(filename: str, prefix: str, suffix: str) -> str:
     return filename
 
 
-@Client.on_message(filters.private & (filters.document | filters.audio | filters.video))
+@Client.on_message(filters.private & (filters.document | filters.audio | filters.video) & filters.incoming & ~filters.bot & ~filters.via_bot)
 async def rename_start(client, message):
+    if not message.from_user or message.from_user.is_bot:
+        return
+    user_id = message.from_user.id
+    if await check_user_cooldown(client, message, user_id):
+        return
     if message.chat and await is_duplicate_update(f"media_{message.chat.id}_{message.id}"):
         return
     file = message.document or message.video or message.audio
@@ -348,6 +392,8 @@ async def rename_start(client, message):
 @Client.on_callback_query(filters.regex(r'^auto_rename(?:_(\d+))?$'))
 async def auto_rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
+    if await check_user_cooldown(client, update, user_id):
+        return
     target_id = (
         (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
         or update.message.reply_to_message_id
@@ -396,6 +442,8 @@ async def auto_rename_handler(client, update: CallbackQuery):
 @Client.on_callback_query(filters.regex(r'^rename(?:_(\d+))?$'))
 async def rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
+    if await check_user_cooldown(client, update, user_id):
+        return
     file_msg_id = (
         (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
         or update.message.reply_to_message_id
@@ -1001,6 +1049,7 @@ async def execute_rename_pipeline(
     if await is_duplicate_update(task_key, ttl=10.0):
         print(f"⚠️ Duplicate execution prevented for task {task_key}")
         return
+    _USER_FILE_COOLDOWN[user_id] = time.time()
 
     # 0. Check Drain Mode (Server 24/7 Cloud Handoff Window)
     try:
@@ -1744,6 +1793,9 @@ async def execute_rename_pipeline(
             pass
         if 'work_dir' in locals() and os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
+        if 'user_id' in locals() and user_id:
+            _USER_FILE_COOLDOWN[user_id] = time.time()
+        gc.collect()
 
 
 @Client.on_message(filters.private & filters.command(["reset_task", "cleartask", "unfreeze"]))

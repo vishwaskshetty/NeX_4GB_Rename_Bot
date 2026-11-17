@@ -130,8 +130,12 @@ _UPDATE_LOCK = asyncio.Lock()
 async def is_duplicate_update(update_key, ttl: float = 30.0) -> bool:
     """
     Returns True if update_key was already processed within ttl seconds.
-    Used to prevent double/duplicate responses when multiple events fire or network retries occur.
+    Combines local in-memory LRU dedup with atomic MongoDB distributed lock (`db.claim_update`)
+    so that even if multiple servers or containers are running simultaneously,
+    exactly ONE server processes each update.
     """
+    if not update_key:
+        return False
     async with _UPDATE_LOCK:
         now = time.time()
         while _PROCESSED_UPDATES and len(_PROCESSED_UPDATES) > 4000:
@@ -141,7 +145,17 @@ async def is_duplicate_update(update_key, ttl: float = 30.0) -> bool:
         if last_seen is not None and (now - last_seen) < ttl:
             return True
         _PROCESSED_UPDATES[update_key] = now
-        return False
+
+    # Atomic distributed lock across servers in MongoDB
+    try:
+        from helper.database import db
+        claimed = await db.claim_update(update_key)
+        if not claimed:
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def get_readable_file_size(size_in_bytes) -> str:

@@ -39,6 +39,19 @@ def get_bot_uptime() -> float:
     """Returns uptime in seconds."""
     return time.time() - BOT_START_TIME
 
+import logging
+log = logging.getLogger("BotShield")
+
+def _global_asyncio_exception_handler(loop, context):
+    exc = context.get("exception")
+    msg = context.get("message", "")
+    if exc:
+        exc_str = str(exc)
+        if any(err in exc_str for err in ["FloodWait", "PeerIdInvalid", "ConnectionResetError", "TimeoutError", "MessageNotModified", "MessageIdInvalid", "StopTransmission", "CancelledError"]):
+            log.warning(f"🛡️ Handled background task exception: {type(exc).__name__}: {exc}")
+            return
+    log.error(f"🛡️ Caught unhandled asyncio task exception: {msg} | Exception: {exc}")
+
 # Bot Commands Definitions
 # 1. Public User Commands (Default Scope - 32 Commands with /start strictly #1)
 USER_COMMANDS = [
@@ -161,6 +174,13 @@ class Bot(Client):
             print(f"Error starting web server on port {Config.PORT}: {e}")
 
         await super().start()
+        try:
+            loop = asyncio.get_running_loop()
+            loop.set_exception_handler(_global_asyncio_exception_handler)
+            print("🛡️ Global AsyncIO Exception Shield active.")
+        except Exception as e:
+            print(f"Exception shield note: {e}")
+
         me = await self.get_me()
         self.mention = me.mention
         self.username = me.username  
@@ -171,6 +191,7 @@ class Bot(Client):
         self.instance_id = instance_id
         try:
             await db.set_active_instance(instance_id)
+            await db.init_indexes()
             print(f"🔒 Single-Instance Distributed Lock acquired: {instance_id}")
         except Exception as lock_err:
             print(f"⚠️ Lock acquisition note: {lock_err}")

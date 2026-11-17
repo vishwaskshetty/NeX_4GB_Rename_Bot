@@ -176,10 +176,11 @@ async def build_owner_panel(client: Client):
             InlineKeyboardButton("📡 Cʜᴀɴɴᴇʟꜱ & V-Dɪꜱᴋ", callback_data="cb_owner_channels")
         ],
         [
-            InlineKeyboardButton("🔄 Rᴇꜱᴛᴀʀᴛ Bᴏᴛ", callback_data="cb_owner_restart"),
-            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start")
+            InlineKeyboardButton("📢 Bʀᴏᴀᴅᴄᴀꜱᴛ", callback_data="cb_owner_broadcast_info"),
+            InlineKeyboardButton("🔄 Rᴇꜱᴛᴀʀᴛ Bᴏᴛ", callback_data="cb_owner_restart")
         ],
         [
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start"),
             InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
         ]
     ]
@@ -2183,13 +2184,22 @@ async def build_health_report(client: Client):
     queued_cnt = sum(len(q) for q in USER_QUEUE.values()) if USER_QUEUE else 0
     db_tasks_cnt = await _safe(db.tasks.count_documents({}), default=0)
 
+    try:
+        vdisk_id = parse_channel_id(getattr(Config, "VIRTUAL_DISK_CHANNEL", -1003792044224))
+        ch = await client.get_chat(vdisk_id)
+        title = getattr(ch, "title", str(vdisk_id))[:18]
+        vdisk_status = f"Accessible 🟢 ({title})"
+    except Exception as e:
+        vdisk_status = f"Error 🔴 ({str(e)[:15]})"
+
     text = (
         "<b>◈ NᴇX Hᴇᴀʟᴛʜ Dɪᴀɢɴᴏꜱᴛɪᴄ 🩺</b>\n"
         "\n\n"
         f"◈ <b>🤖 Bot MTProto :</b> <code>{bot_ping}</code>\n"
         f"◈ <b>🚀 4GB Client :</b> <code>{prem_status}</code>\n"
         f"◈ <b>🍃 MongoDB Ping :</b> <code>{db_ping}</code>\n"
-        f"◈ <b>🎬 FFmpeg Binary :</b> <code>{ff_status}</code>\n\n"
+        f"◈ <b>🎬 FFmpeg Binary :</b> <code>{ff_status}</code>\n"
+        f"◈ <b>💿 V-Disk Channel :</b> <code>{vdisk_status}</code>\n\n"
         f"◈ <b>⏱️ Bot Uptime :</b> <code>{uptime_str}</code>\n"
         f"◈ <b>📁 Total Renamed :</b> <code>{total_renamed} files</code> (<code>{total_bytes_str}</code>)\n\n"
         f"◈ <b>🖥️ CPU :</b> <code>{cpu}%</code> | <b>RAM :</b> <code>{ram}%</code>\n"
@@ -2883,6 +2893,27 @@ async def broadcast_panel_cmd(bot: Client, message: Message):
         [InlineKeyboardButton("❌ Cancel Broadcast", callback_data="bcast_cancel")]
     ])
     await message.reply_text(text, reply_markup=markup, quote=True)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_broadcast_info$") & filters.user(Config.ADMIN))
+async def cb_owner_broadcast_info(client, query: CallbackQuery):
+    text = (
+        "📢 <b><u>Broadcast Message System</u></b> ⚡\n\n"
+        "To broadcast a message to all bot users:\n\n"
+        "1. Send or forward the post to this chat.\n"
+        "2. Reply to that message with <code>/broadcast</code>.\n"
+        "3. An interactive control panel will appear allowing you to:\n"
+        "   • Send without buttons (as-is)\n"
+        "   • Add quick Preset Buttons (Join/Support, Free Trial, Start Bot)\n"
+        "   • Add Custom Buttons using <code>/bcast_btn</code>\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Oᴡɴᴇʀ", callback_data="owner_panel"),
+         InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
 
 
 @Client.on_callback_query(filters.regex(r"^bcast_custom_info$"))
