@@ -536,9 +536,246 @@ async def fast_upload(
         )
 
 
+async def zero_disk_turbo_pipe(
+    client: Client,
+    uploader: Client,
+    staged_msg,
+    new_filename: str,
+    progress: Optional[Callable] = None,
+    progress_args: tuple = (),
+    is_prem: bool = False
+):
+    """
+    Single-Pass Multi-Session Zero-Disk RAM Chunk Pipe.
+    Pipes 512KB media chunks directly from the staged Virtual Disk Telegram message
+    into the target uploader client's MTProto Session upload stream simultaneously in memory.
+    Bypasses disk I/O completely, uses a sliding RAM buffer capped at 24MB, and updates
+    the progress bar non-blockingly via asyncio.create_task every 5.0 seconds.
+    Returns raw.types.InputFileBig (for files > 10MB) or raw.types.InputFile (<= 10MB).
+    """
+    file_obj = (
+        getattr(staged_msg, "document", None) or
+        getattr(staged_msg, "video", None) or
+        getattr(staged_msg, "audio", None)
+    )
+    if not file_obj or not hasattr(file_obj, "file_id"):
+        raise ValueError("Invalid staged message media for zero-disk pipe")
+
+    file_size = getattr(file_obj, "file_size", 0)
+    if file_size == 0:
+        raise ValueError("File size is 0 bytes")
+
+    # Detect premium status from progress_args if provided
+    try:
+        if not is_prem and len(progress_args) >= 5 and progress_args[4] is not None:
+            is_prem = bool(int(progress_args[4]) >= 1)
+    except Exception:
+        pass
+
+    total_parts = math.ceil(file_size / UPLOAD_PART_SIZE)
+    is_big = file_size > 10 * 1024 * 1024
+    new_file_id = uploader.rnd_id() if hasattr(uploader, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
+
+    decoded = FileId.decode(file_obj.file_id)
+    dc_id = decoded.dc_id
+    file_type = decoded.file_type
+
+    if file_type == FileType.PHOTO:
+        location = raw.types.InputPhotoFileLocation(
+            id=decoded.media_id,
+            access_hash=decoded.access_hash,
+            file_reference=decoded.file_reference,
+            thumb_size=decoded.thumbnail_size or ""
+        )
+    else:
+        location = raw.types.InputDocumentFileLocation(
+            id=decoded.media_id,
+            access_hash=decoded.access_hash,
+            file_reference=decoded.file_reference,
+            thumb_size=decoded.thumbnail_size or ""
+        )
+
+    pool_size = 8 if is_prem else 4
+    worker_limit = CONCURRENT_WORKERS_PREM if is_prem else 8
+    down_worker_count = min(worker_limit, total_parts)
+    up_worker_count = min(worker_limit, total_parts)
+
+    down_sessions = await get_media_session_pool(client, dc_id, pool_size=pool_size)
+    main_dc = await uploader.storage.dc_id()
+    up_sessions = await get_media_session_pool(uploader, main_dc, pool_size=pool_size)
+
+    # 48 chunks * 512KB = 24MB max RAM buffer
+    pipe_queue = asyncio.Queue(maxsize=48)
+    part_indices = asyncio.Queue()
+    for idx in range(total_parts):
+        part_indices.put_nowait(idx)
+
+    uploaded_bytes = 0
+    error_holder = []
+    lock = asyncio.Lock()
+    md5_hash = hashlib.md5() if not is_big else None
+    last_progress_time = 0.0
+
+    async def _safe_progress(curr, tot):
+        if not progress:
+            return
+        try:
+            if inspect.iscoroutinefunction(progress):
+                await progress(curr, tot, *progress_args)
+            else:
+                progress(curr, tot, *progress_args)
+        except Exception:
+            pass
+
+    async def download_worker(wid: int):
+        session = down_sessions[wid % len(down_sessions)]
+        while True:
+            if error_holder:
+                break
+            try:
+                part_idx = part_indices.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+            offset = part_idx * CHUNK_SIZE
+            rpc = raw.functions.upload.GetFile(
+                location=location,
+                offset=offset,
+                limit=CHUNK_SIZE
+            )
+
+            chunk_data = None
+            for attempt in range(3):
+                if error_holder:
+                    break
+                try:
+                    res = await asyncio.wait_for(
+                        session.invoke(rpc, sleep_threshold=getattr(client, "sleep_threshold", 60)),
+                        timeout=25.0
+                    )
+                    chunk_data = getattr(res, "bytes", b"")
+                    break
+                except StopTransmission:
+                    error_holder.append(StopTransmission("Download Cancelled"))
+                    break
+                except Exception as ex:
+                    if attempt == 2:
+                        error_holder.append(ex)
+                    else:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+
+            if not chunk_data or error_holder:
+                part_indices.task_done()
+                break
+
+            if not is_big and md5_hash:
+                md5_hash.update(chunk_data)
+
+            await pipe_queue.put((part_idx, chunk_data))
+            part_indices.task_done()
+
+    async def upload_worker(wid: int):
+        nonlocal uploaded_bytes, last_progress_time
+        session = up_sessions[wid % len(up_sessions)]
+        while True:
+            if error_holder:
+                break
+            try:
+                item = await pipe_queue.get()
+            except asyncio.QueueEmpty:
+                break
+
+            if item is None:
+                pipe_queue.task_done()
+                break
+
+            part_idx, chunk = item
+            if is_big:
+                rpc = raw.functions.upload.SaveBigFilePart(
+                    file_id=new_file_id,
+                    file_part=part_idx,
+                    file_total_parts=total_parts,
+                    bytes=chunk
+                )
+            else:
+                rpc = raw.functions.upload.SaveFilePart(
+                    file_id=new_file_id,
+                    file_part=part_idx,
+                    bytes=chunk
+                )
+
+            success = False
+            for attempt in range(3):
+                if error_holder:
+                    break
+                try:
+                    await asyncio.wait_for(
+                        session.invoke(rpc, sleep_threshold=getattr(uploader, "sleep_threshold", 60)),
+                        timeout=25.0
+                    )
+                    success = True
+                    break
+                except StopTransmission:
+                    error_holder.append(StopTransmission("Upload Cancelled"))
+                    break
+                except Exception as ex:
+                    if attempt == 2:
+                        error_holder.append(ex)
+                    else:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+
+            if not success or error_holder:
+                pipe_queue.task_done()
+                break
+
+            async with lock:
+                uploaded_bytes += len(chunk)
+                current_up = uploaded_bytes
+
+            now = time.time()
+            if now - last_progress_time >= 5.0 or current_up >= file_size:
+                last_progress_time = now
+                asyncio.create_task(_safe_progress(min(current_up, file_size), file_size))
+
+            pipe_queue.task_done()
+
+    # Launch concurrent download workers
+    down_tasks = [asyncio.create_task(download_worker(i)) for i in range(down_worker_count)]
+    up_tasks = [asyncio.create_task(upload_worker(i)) for i in range(up_worker_count)]
+
+    async def feeder():
+        await part_indices.join()
+        for _ in range(up_worker_count):
+            await pipe_queue.put(None)
+
+    feeder_task = asyncio.create_task(feeder())
+    await asyncio.gather(*down_tasks, feeder_task, *up_tasks)
+
+    if error_holder:
+        raise error_holder[0]
+
+    # Final 100% progress notification
+    asyncio.create_task(_safe_progress(file_size, file_size))
+
+    if is_big:
+        return raw.types.InputFileBig(
+            id=new_file_id,
+            parts=total_parts,
+            name=new_filename
+        )
+    else:
+        return raw.types.InputFile(
+            id=new_file_id,
+            parts=total_parts,
+            name=new_filename,
+            md5_checksum=md5_hash.hexdigest() if md5_hash else ""
+        )
+
+
 __all__ = [
     "fast_download",
     "fast_upload",
+    "zero_disk_turbo_pipe",
     "get_media_session",
     "get_media_session_pool",
     "CHUNK_SIZE",

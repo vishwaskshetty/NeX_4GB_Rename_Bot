@@ -29,7 +29,15 @@ try:
 except ImportError:
     from pyrogram.errors import StopTransmission
 
-from helper.fast_telethon_pyro import fast_download, fast_upload
+from helper.fast_transfer import fast_download, fast_upload, zero_disk_turbo_pipe
+from helper.tg_virtual_disk import (
+    TelegramVirtualDisk,
+    get_virtual_disk_channel,
+    stage_to_virtual_disk,
+    fetch_from_virtual_disk,
+    delete_from_virtual_disk,
+    stream_virtual_disk_slice
+)
 
 from helper.utils import (
     progress_for_pyrogram,
@@ -1074,6 +1082,17 @@ async def execute_rename_pipeline(
             wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
             is_remux_needed = bool(metadata_bool or wm_enabled)
 
+            # 0. Telegram Virtual Disk Instant 0.05s Staging
+            vdisk_ch = get_virtual_disk_channel(client)
+            staged_msg = None
+            if vdisk_ch and vdisk_ch != 0:
+                try:
+                    staged_msg = await stage_to_virtual_disk(client, file_msg, vdisk_ch)
+                    if staged_msg:
+                        print(f"✅ [VDisk] Media staged to Virtual Disk {vdisk_ch} (msg_id: {staged_msg.id})")
+                except Exception as stage_err:
+                    print(f"⚠️ [VDisk] Staging failed: {stage_err}")
+
             # High-Speed RAM-disk allocation (/dev/shm) if on Linux with > 1.3x file size (or > 2.2x if remuxing) free; fallback to SSD
             work_dir = get_optimal_work_dir(user_id, file_size, is_remux_needed=is_remux_needed)
             os.makedirs(work_dir, exist_ok=True)
@@ -1099,6 +1118,8 @@ async def execute_rename_pipeline(
                         "work_dir": work_dir,
                         "chat_id": file_msg.chat.id,
                         "source_message_id": file_msg.id,
+                        "staged_msg_id": staged_msg.id if staged_msg else None,
+                        "vdisk_ch": vdisk_ch if vdisk_ch else None,
                         "status_message_id": ms.id,
                         "new_name": new_filename,
                         "extras": extras or {}
@@ -1108,126 +1129,14 @@ async def execute_rename_pipeline(
                 pass
 
             cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancel", callback_data=f"cancel_process_{task_id}")]])
-            try:
-                await ms.edit(
-                    "<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>\n\n<i>Connecting to high-speed MTProto server...</i>",
-                    reply_markup=cancel_btn
-                )
-            except Exception:
-                pass
 
-            # 1. Download media via parallel MTProto chunk streaming with safe fallback
-            start_time = time.time()
-            try:
-                path = await fast_download(
-                    client=client,
-                    message_or_file=file_msg,
-                    file_path=file_path,
-                    progress=progress_for_pyrogram,
-                    progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
-                )
-            except StopTransmission:
-                raise
-            except Exception as down_err:
-                print(f"⚠️ fast_download failed ({down_err}). Falling back to standard download_media...")
-                path = await client.download_media(
-                    file_msg,
-                    file_name=file_path,
-                    progress=progress_for_pyrogram,
-                    progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
-                )
-
-            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>")
-
-            if ms.id in CANCEL_REQUESTS or f"{ms.chat.id}_{ms.id}" in CANCEL_REQUESTS or (ms.chat and ms.chat.id in CANCEL_REQUESTS) or user_id in CANCEL_REQUESTS:
-                return await ms.edit("❌ <b>Operation Aborted!</b>\n\n⚡ @Nex_bots")
-
-            actual_file_size = os.path.getsize(file_path)
-
-            # 2. Zero-Copy Instant Rename vs Remuxing
-            if not is_remux_needed:
-                # Instant zero-copy rename directly in /dev/shm or disk (0.001s, zero FFmpeg overhead)
-                if download_path != final_file_path and os.path.exists(download_path):
-                    os.rename(download_path, final_file_path)
-                file_path = final_file_path
-                actual_file_size = os.path.getsize(file_path)
-            else:
-                # Apply Custom Metadata via FFmpeg if enabled (In-place overwrite with clean filename!)
-                if metadata_bool:
-                    await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴄᴜꜱᴛᴏᴍ ᴍᴇᴛᴀᴅᴀᴛᴀ... 🏷️</b>")
-                    meta_file = os.path.join(work_dir, f"meta_{new_filename}")
-                    success = await inject_metadata(file_path, meta_file, metadata_code)
-                    if success and os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
-                        if os.path.exists(file_path):
-                            try:
-                                os.remove(file_path)
-                            except Exception:
-                                pass
-                        os.replace(meta_file, final_file_path)
-                        file_path = final_file_path
-                        actual_file_size = os.path.getsize(file_path)
-                        try:
-                            await db.increment_stat(user_id, "total_metadata_applied", 1)
-                        except Exception:
-                            pass
-
-                # Apply Video Watermark if enabled & user is premium
-                if wm_enabled:
-                    wm_type = wm_info.get("type", "text")
-                    wm_img_path = None
-                    can_apply = False
-
-                    if wm_type == "image" and wm_info.get("image_id"):
-                        try:
-                            await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴡᴀᴛᴇʀᴍᴀʀᴋ ʟᴏɢᴏ... 🖼️</b>")
-                            logo_target = os.path.join(work_dir, "wm_logo.png")
-                            dl_logo = await client.download_media(wm_info.get("image_id"), file_name=logo_target)
-                            if dl_logo and os.path.exists(dl_logo):
-                                wm_img_path = dl_logo
-                                can_apply = True
-                        except Exception as err:
-                            print(f"Failed to download watermark logo: {err}")
-                    elif wm_info.get("text"):
-                        can_apply = True
-
-                    if can_apply:
-                        await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
-                        wm_file = os.path.join(work_dir, f"wm_{new_filename}")
-                        wm_ok = await apply_video_watermark(
-                            input_path=file_path,
-                            output_path=wm_file,
-                            text=wm_info.get("text", ""),
-                            wm_type=wm_type,
-                            image_path=wm_img_path,
-                            position=wm_info.get("position", "top_right"),
-                            size=wm_info.get("size", 28),
-                            opacity=wm_info.get("opacity", 0.85),
-                            color=wm_info.get("color", "white")
-                        )
-                        if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
-                            if os.path.exists(file_path) and file_path != wm_file:
-                                try:
-                                    os.remove(file_path)
-                                except Exception:
-                                    pass
-                            os.replace(wm_file, final_file_path)
-                            file_path = final_file_path
-                            actual_file_size = os.path.getsize(file_path)
-                            try:
-                                await db.increment_stat(user_id, "total_watermarks_applied", 1)
-                            except Exception:
-                                pass
-
-                if file_path != final_file_path and os.path.exists(file_path):
-                    os.replace(file_path, final_file_path)
-                    file_path = final_file_path
-
-            # 3. Extract duration, dimensions, and process thumbnail concurrently using asyncio.gather
-            async def _fetch_dims():
-                if is_video:
-                    return await get_video_duration_and_dims(file_path)
-                return (0, 0, 0)
+            # Determine 4GB Routing & Uploader Client
+            user_dump = await db.get_dump_channel(user_id)
+            bridge_channel = parse_channel_id(user_dump or vdisk_ch or Config.DUMP_CHANNEL or Config.FILES_CHANNEL or Config.LOG_CHANNEL)
+            is_4gb = file_size > (1.95 * 1024 * 1024 * 1024)
+            client_4gb = getattr(client, "app_4gb", None) or app_4gb
+            uploader = client_4gb if (is_4gb and client_4gb) else client
+            upload_mode_tag = "<b>◈ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ ᴜᴘʟᴏᴀᴅɪɴɢ... 🚀</b>" if (is_4gb and client_4gb) else "<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 🚀</b>"
 
             async def _prepare_thumb():
                 c_thumb = await db.get_thumbnail(user_id)
@@ -1250,9 +1159,194 @@ async def execute_rename_pipeline(
                         print(f"Thumbnail processing error: {e}")
                 return None
 
-            dims_task = asyncio.create_task(_fetch_dims())
-            thumb_task = asyncio.create_task(_prepare_thumb())
-            (duration, width, height), ph_path = await asyncio.gather(dims_task, thumb_task)
+            async def _fetch_dims(f_path):
+                if is_video and os.path.exists(f_path):
+                    return await get_video_duration_and_dims(f_path)
+                return (0, 0, 0)
+
+            duration, width, height = 0, 0, 0
+            if is_video:
+                if hasattr(file_msg, "video") and file_msg.video:
+                    duration = getattr(file_msg.video, "duration", 0) or 0
+                    width = getattr(file_msg.video, "width", 0) or 0
+                    height = getattr(file_msg.video, "height", 0) or 0
+                elif hasattr(staged_msg, "video") and staged_msg and staged_msg.video:
+                    duration = getattr(staged_msg.video, "duration", 0) or 0
+                    width = getattr(staged_msg.video, "width", 0) or 0
+                    height = getattr(staged_msg.video, "height", 0) or 0
+                elif hasattr(file_msg, "document") and file_msg.document and hasattr(file_msg.document, "attributes"):
+                    for attr in file_msg.document.attributes:
+                        if hasattr(attr, "duration"):
+                            duration = getattr(attr, "duration", 0) or duration
+                            width = getattr(attr, "w", 0) or width
+                            height = getattr(attr, "h", 0) or height
+
+            ph_path = await _prepare_thumb()
+
+            uploaded_file = None
+            use_zero_disk = False
+            upload_start = time.time()
+            actual_file_size = file_size
+
+            # Attempt single-pass Zero-Disk RAM Turbo Pipe if no remuxing needed and staged
+            if not is_remux_needed and staged_msg is not None:
+                try:
+                    await ms.edit(
+                        f"{upload_mode_tag}\n\n<i>Zero-Disk RAM Turbo Pipe active (50-100+ MB/s)...</i>",
+                        reply_markup=cancel_btn
+                    )
+                    upload_start = time.time()
+                    uploaded_file = await zero_disk_turbo_pipe(
+                        client=client,
+                        uploader=uploader,
+                        staged_msg=staged_msg,
+                        new_filename=new_filename,
+                        progress=progress_for_pyrogram,
+                        progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
+                        is_prem=is_prem or (effective_tier >= 1) or is_4gb
+                    )
+                    if uploaded_file:
+                        use_zero_disk = True
+                        actual_file_size = file_size
+                except StopTransmission:
+                    raise
+                except Exception as pipe_err:
+                    print(f"⚠️ zero_disk_turbo_pipe failed ({pipe_err}). Falling back to disk pipeline...")
+                    use_zero_disk = False
+                    uploaded_file = None
+
+            # Fallback to high-speed disk pipeline if remuxing needed or zero-disk pipe skipped/failed
+            if not use_zero_disk:
+                try:
+                    await ms.edit(
+                        "<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>\n\n<i>Connecting to high-speed MTProto server...</i>",
+                        reply_markup=cancel_btn
+                    )
+                except Exception:
+                    pass
+
+                start_time = time.time()
+                try:
+                    path = await fast_download(
+                        client=client,
+                        message_or_file=file_msg,
+                        file_path=file_path,
+                        progress=progress_for_pyrogram,
+                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                    )
+                except StopTransmission:
+                    raise
+                except Exception as down_err:
+                    print(f"⚠️ fast_download failed ({down_err}). Falling back to standard download_media...")
+                    path = await client.download_media(
+                        file_msg,
+                        file_name=file_path,
+                        progress=progress_for_pyrogram,
+                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                    )
+
+                if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                    return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>")
+
+                if ms.id in CANCEL_REQUESTS or f"{ms.chat.id}_{ms.id}" in CANCEL_REQUESTS or (ms.chat and ms.chat.id in CANCEL_REQUESTS) or user_id in CANCEL_REQUESTS:
+                    return await ms.edit("❌ <b>Operation Aborted!</b>\n\n⚡ @Nex_bots")
+
+                actual_file_size = os.path.getsize(file_path)
+
+                if not is_remux_needed:
+                    if download_path != final_file_path and os.path.exists(download_path):
+                        os.rename(download_path, final_file_path)
+                    file_path = final_file_path
+                    actual_file_size = os.path.getsize(file_path)
+                else:
+                    if metadata_bool:
+                        await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴄᴜꜱᴛᴏᴍ ᴍᴇᴛᴀᴅᴀᴛᴀ... 🏷️</b>")
+                        meta_file = os.path.join(work_dir, f"meta_{new_filename}")
+                        success = await inject_metadata(file_path, meta_file, metadata_code)
+                        if success and os.path.exists(meta_file) and os.path.getsize(meta_file) > 0:
+                            if os.path.exists(file_path):
+                                try:
+                                    os.remove(file_path)
+                                except Exception:
+                                    pass
+                            os.replace(meta_file, final_file_path)
+                            file_path = final_file_path
+                            actual_file_size = os.path.getsize(file_path)
+                            try:
+                                await db.increment_stat(user_id, "total_metadata_applied", 1)
+                            except Exception:
+                                pass
+
+                    if wm_enabled:
+                        wm_type = wm_info.get("type", "text")
+                        wm_img_path = None
+                        can_apply = False
+
+                        if wm_type == "image" and wm_info.get("image_id"):
+                            try:
+                                await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴡᴀᴛᴇʀᴍᴀʀᴋ ʟᴏɢᴏ... 🖼️</b>")
+                                logo_target = os.path.join(work_dir, "wm_logo.png")
+                                dl_logo = await client.download_media(wm_info.get("image_id"), file_name=logo_target)
+                                if dl_logo and os.path.exists(dl_logo):
+                                    wm_img_path = dl_logo
+                                    can_apply = True
+                            except Exception as err:
+                                print(f"Failed to download watermark logo: {err}")
+                        elif wm_info.get("text"):
+                            can_apply = True
+
+                        if can_apply:
+                            await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                            wm_file = os.path.join(work_dir, f"wm_{new_filename}")
+                            wm_ok = await apply_video_watermark(
+                                input_path=file_path,
+                                output_path=wm_file,
+                                text=wm_info.get("text", ""),
+                                wm_type=wm_type,
+                                image_path=wm_img_path,
+                                position=wm_info.get("position", "top_right"),
+                                size=wm_info.get("size", 28),
+                                opacity=wm_info.get("opacity", 0.85),
+                                color=wm_info.get("color", "white")
+                            )
+                            if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
+                                if os.path.exists(file_path) and file_path != wm_file:
+                                    try:
+                                        os.remove(file_path)
+                                    except Exception:
+                                        pass
+                                os.replace(wm_file, final_file_path)
+                                file_path = final_file_path
+                                actual_file_size = os.path.getsize(file_path)
+                                try:
+                                    await db.increment_stat(user_id, "total_watermarks_applied", 1)
+                                except Exception:
+                                    pass
+
+                    if file_path != final_file_path and os.path.exists(file_path):
+                        os.replace(file_path, final_file_path)
+                        file_path = final_file_path
+
+                # Re-fetch dims from local file if available
+                (f_dur, f_w, f_h) = await _fetch_dims(file_path)
+                if f_dur or f_w or f_h:
+                    duration, width, height = f_dur, f_w, f_h
+
+                await ms.edit(upload_mode_tag)
+                upload_start = time.time()
+                try:
+                    uploaded_file = await fast_upload(
+                        client=uploader,
+                        file_path=file_path,
+                        progress=progress_for_pyrogram,
+                        progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
+                        is_prem=is_prem or (effective_tier >= 1) or is_4gb
+                    )
+                except StopTransmission:
+                    raise
+                except Exception as up_err:
+                    print(f"⚠️ fast_upload failed ({up_err}). Falling back to standard Pyrogram send...")
+                    uploaded_file = None
 
             # 5. Format Clean Caption (100% Clean - NO copyright or branding inside file caption!)
             c_caption = await db.get_caption(user_id)
@@ -1271,44 +1365,16 @@ async def execute_rename_pipeline(
             # Check Bot Content Protection status
             protect_content = await db.get_protect_content()
 
-            # 6. Determine 4GB Routing & Bridge Channel
-            user_dump = await db.get_dump_channel(user_id)
-            bridge_channel = parse_channel_id(user_dump or Config.DUMP_CHANNEL or Config.FILES_CHANNEL or Config.LOG_CHANNEL)
-
-            is_4gb = actual_file_size > (1.95 * 1024 * 1024 * 1024)
-            client_4gb = getattr(client, "app_4gb", None) or app_4gb
-            uploader = client_4gb if (is_4gb and client_4gb) else client
-            upload_mode_tag = "<b>◈ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ ᴜᴘʟᴏᴀᴅɪɴɢ... 🚀</b>" if (is_4gb and client_4gb) else "<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 🚀</b>"
-
-            await ms.edit(upload_mode_tag)
-            upload_start = time.time()
-            user_sent_msgs = []
-            sent_msg = None
-
-            # Multi-Socket Parallel MTProto Upload (50-100+ MB/s)
-            uploaded_file = None
-            try:
-                uploaded_file = await fast_upload(
-                    client=uploader,
-                    file_path=file_path,
-                    progress=progress_for_pyrogram,
-                    progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
-                    is_prem=is_prem or (effective_tier >= 1) or is_4gb
-                )
-            except StopTransmission:
-                raise
-            except Exception as up_err:
-                print(f"⚠️ fast_upload failed ({up_err}). Falling back to standard Pyrogram send...")
-                uploaded_file = None
-
             upload_payload = uploaded_file if uploaded_file else file_path
             upload_progress = None if uploaded_file else progress_for_pyrogram
             upload_progress_args = None if uploaded_file else (upload_mode_tag, ms, upload_start, client, effective_tier)
 
+            user_sent_msgs = []
+            sent_msg = None
+
             try:
                 # 4GB Upload Flow (> 1.95GB)
                 if is_4gb and client_4gb:
-                    # Stage 1: Primary (Bridge Copy) - upload to bridge/dump channel via app_4gb and copy to user DM via Bot client
                     if bridge_channel and bridge_channel != 0:
                         try:
                             if upload_type == "document":
@@ -1347,7 +1413,6 @@ async def execute_rename_pipeline(
                                     progress_args=upload_progress_args
                                 )
 
-                            # Bot client copies the 4GB media message from bridge channel directly to the user!
                             sent_msg = await client.copy_message(
                                 chat_id=user_id,
                                 from_chat_id=bridge_channel,
@@ -1359,7 +1424,6 @@ async def execute_rename_pipeline(
                             print(f"Bridge copy delivery failed ({bridge_err}). Trying fallback direct delivery...")
                             sent_msg = None
 
-                    # Stage 2: Fallback (Direct app_4gb Delivery) if bridge copy failed or no bridge channel
                     if not sent_msg:
                         if upload_type == "document":
                             sent_msg = await uploader.send_document(
@@ -1401,7 +1465,7 @@ async def execute_rename_pipeline(
                             )
 
                 else:
-                    # Standard Upload Flow (<= 1.95GB) - direct to user chat via Bot client
+                    # Standard Upload Flow (<= 1.95GB)
                     if upload_type == "document":
                         sent_msg = await client.send_document(
                             chat_id=user_id,
@@ -1467,7 +1531,7 @@ async def execute_rename_pipeline(
 
                 # Automatic File Channel / Dump Channel Forwarding for ALL successful renames
                 dump_target = parse_channel_id(Config.DUMP_CHANNEL or Config.FILES_CHANNEL)
-                if dump_target and dump_target != 0 and dump_target != user_id:
+                if dump_target and dump_target != 0 and dump_target != user_id and dump_target != bridge_channel:
                     try:
                         user_mention = getattr(status_target.from_user, "mention", f"User {user_id}") if hasattr(status_target, "from_user") and status_target.from_user else f"<code>{user_id}</code>"
                         orig_name = getattr(file_msg, "name", None) or getattr(file_msg, "file_name", None) or (file_msg.document and file_msg.document.file_name) or (file_msg.video and file_msg.video.file_name) or new_filename
@@ -1488,19 +1552,35 @@ async def execute_rename_pipeline(
                 except Exception:
                     pass
 
-            # 7. Sample Video Generation (No Thumbnail + Custom Timeline Mode)
+            # 7. Sample Video & Screenshots Generation
             sample_settings = await db.get_sample_settings(user_id)
             sample_duration = sample_settings.get("duration", 0)
             should_sample = extras.get("sample", sample_duration > 0) if extras is not None else (sample_duration > 0)
+            screenshots_count = await db.get_screenshots(user_id)
+            should_ss = extras.get("ss", screenshots_count > 0) if extras is not None else (screenshots_count > 0)
 
-            if should_sample and sample_duration > 0 and is_video:
+            media_source_path = None
+            temp_slice_created = False
+            if (should_sample or should_ss) and is_video:
+                if os.path.exists(file_path):
+                    media_source_path = file_path
+                elif staged_msg is not None:
+                    try:
+                        slice_target = os.path.join(work_dir, f"slice_{new_filename}")
+                        media_source_path = await stream_virtual_disk_slice(client, staged_msg, slice_target, max_bytes=35 * 1024 * 1024)
+                        if media_source_path and os.path.exists(media_source_path):
+                            temp_slice_created = True
+                    except Exception as s_err:
+                        print(f"Slice stream error: {s_err}")
+
+            if should_sample and sample_duration > 0 and is_video and media_source_path:
                 try:
                     await ms.edit("<b>◈ ɢᴇɴᴇʀᴀᴛɪɴɢ ꜱᴀᴍᴘʟᴇ ᴠɪᴅᴇᴏ... 🎬</b>")
                     sample_path = os.path.join(work_dir, f"sample_{new_filename}")
                     sample_ok = await generate_sample_video(
-                        input_path=file_path,
+                        input_path=media_source_path,
                         output_path=sample_path,
-                        total_duration=duration,
+                        total_duration=duration or 300,
                         sample_sec=sample_duration,
                         start_mode=sample_settings.get("start_mode", "auto")
                     )
@@ -1527,15 +1607,11 @@ async def execute_rename_pipeline(
                 except Exception as e:
                     print(f"Sample video error: {e}")
 
-            # 8. Screenshots Generation (if enabled in settings)
-            screenshots_count = await db.get_screenshots(user_id)
-            should_ss = extras.get("ss", screenshots_count > 0) if extras is not None else (screenshots_count > 0)
-
-            if should_ss and screenshots_count > 0 and is_video:
+            if should_ss and screenshots_count > 0 and is_video and media_source_path:
                 try:
                     await ms.edit(f"<b>◈ ɢᴇɴᴇʀᴀᴛɪɴɢ {screenshots_count} ꜱᴄʀᴇᴇɴꜱʜᴏᴛꜱ... 📸</b>")
                     ss_dir = os.path.join(work_dir, "screenshots")
-                    ss_list = await generate_screenshots(file_path, ss_dir, duration, screenshots_count)
+                    ss_list = await generate_screenshots(media_source_path, ss_dir, duration or 300, screenshots_count)
                     if ss_list:
                         try:
                             await db.increment_stat(user_id, "total_screenshots_generated", 1)
@@ -1549,6 +1625,20 @@ async def execute_rename_pipeline(
                         user_sent_msgs.extend([m.id for m in ss_msgs])
                 except Exception as e:
                     print(f"Screenshots error: {e}")
+
+            if temp_slice_created and media_source_path and os.path.exists(media_source_path):
+                try:
+                    os.remove(media_source_path)
+                except Exception:
+                    pass
+
+            # Safe cleanup of temporary staged message from Virtual Disk
+            if staged_msg and vdisk_ch:
+                try:
+                    await delete_from_virtual_disk(client, staged_msg.id, vdisk_ch)
+                    staged_msg = None
+                except Exception:
+                    pass
 
             # Log activity to real-time tracker
             try:
@@ -1598,6 +1688,11 @@ async def execute_rename_pipeline(
         try:
             if 'task_id' in locals():
                 await db.remove_active_task(task_id)
+        except Exception:
+            pass
+        try:
+            if 'staged_msg' in locals() and staged_msg and 'vdisk_ch' in locals() and vdisk_ch:
+                await delete_from_virtual_disk(client, staged_msg.id, vdisk_ch)
         except Exception:
             pass
         try:
@@ -1671,6 +1766,17 @@ async def resume_interrupted_tasks(client):
                 except Exception as e:
                     print(f"⚠️ [Recovery] Failed to fetch source message {src_msg_id} in {chat_id}: {e}")
                     file_msg = None
+
+                if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+                    staged_id = extra.get("staged_msg_id")
+                    vdisk_target = extra.get("vdisk_ch") or get_virtual_disk_channel(client)
+                    if staged_id and vdisk_target:
+                        try:
+                            file_msg = await fetch_from_virtual_disk(client, int(staged_id), vdisk_target)
+                            if file_msg and (file_msg.document or file_msg.video or file_msg.audio):
+                                print(f"✅ [Recovery] Successfully retrieved staged media {staged_id} from Virtual Disk {vdisk_target}")
+                        except Exception as v_err:
+                            print(f"⚠️ [Recovery] Failed to fetch from Virtual Disk: {v_err}")
 
                 if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
                     try:

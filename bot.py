@@ -151,14 +151,13 @@ class Bot(Client):
 
     async def start(self):
         # 1. Immediately bind web server port for Render/Koyeb health checks
-        if Config.WEBHOOK or os.environ.get("RENDER"):
-            try:
-                app = web.AppRunner(await web_server())
-                await app.setup()       
-                await web.TCPSite(app, "0.0.0.0", Config.PORT).start()     
-                print(f"NeX Web Server running on port {Config.PORT} ✨️")
-            except Exception as e:
-                print(f"Error starting web server on port {Config.PORT}: {e}")
+        try:
+            app = web.AppRunner(await web_server())
+            await app.setup()       
+            await web.TCPSite(app, "0.0.0.0", Config.PORT).start()     
+            print(f"NeX Web Server running on port {Config.PORT} ✨️")
+        except Exception as e:
+            print(f"Error starting web server on port {Config.PORT}: {e}")
 
         await super().start()
         me = await self.get_me()
@@ -166,9 +165,14 @@ class Bot(Client):
         self.username = me.username  
         self.uptime = Config.BOT_UPTIME     
 
-        # Sync dynamic channels & force-sub from MongoDB
+        # Sync dynamic channels, virtual disk & force-sub from MongoDB
         try:
             bot_settings = await db.get_bot_settings()
+            if bot_settings.get("virtual_disk_channel"):
+                Config.VIRTUAL_DISK_CHANNEL = parse_channel_id(bot_settings["virtual_disk_channel"])
+            elif getattr(Config, "VIRTUAL_DISK_CHANNEL", None):
+                await db.update_bot_settings(virtual_disk_channel=Config.VIRTUAL_DISK_CHANNEL)
+
             if bot_settings.get("log_channel"):
                 Config.LOG_CHANNEL = parse_channel_id(bot_settings["log_channel"])
             elif Config.LOG_CHANNEL:
@@ -222,32 +226,33 @@ class Bot(Client):
             except Exception as e:
                 print(f"Error starting 4GB Premium Client: {e}")
 
-        # Check if Log Channel is accessible by bot
-        is_log_valid = False
-        if Config.LOG_CHANNEL and Config.LOG_CHANNEL != 0:
+        # Check if Virtual Disk / Log Channel is accessible by bot
+        vdisk_target = parse_channel_id(getattr(Config, "VIRTUAL_DISK_CHANNEL", None) or Config.LOG_CHANNEL)
+        is_vdisk_valid = False
+        if vdisk_target and vdisk_target != 0:
             try:
-                await self.get_chat(parse_channel_id(Config.LOG_CHANNEL))
-                is_log_valid = True
+                await self.get_chat(vdisk_target)
+                is_vdisk_valid = True
             except Exception as ch_err:
-                print(f"Configured Log Channel ({Config.LOG_CHANNEL}) not accessible by bot: {ch_err}")
-                is_log_valid = False
+                print(f"Configured Virtual Disk Channel ({vdisk_target}) not accessible by bot: {ch_err}")
+                is_vdisk_valid = False
 
-        # Auto-Create 4GB Bridge/Log Channel on Startup if Missing or Inaccessible
-        if not is_log_valid and self.app_4gb and self.app_4gb_started:
+        # Auto-Create Telegram Virtual Cloud Disk Channel on Startup if Missing or Inaccessible
+        if not is_vdisk_valid and self.app_4gb and self.app_4gb_started:
             try:
-                print("Creating auto 'NeX 4GB Cloud Bridge' channel via app_4gb...")
+                print("Creating auto 'NeX 4GB Virtual Cloud Disk' channel via app_4gb...")
                 created_chat = await self.app_4gb.create_channel(
-                    title="NeX 4GB Cloud Bridge",
-                    description="Auto-generated bridge channel for NeX 4GB Rename Bot transfers."
+                    title="NeX 4GB Virtual Cloud Disk",
+                    description="Auto-generated Virtual Cloud Disk for NeX 4GB Rename Bot transfers."
                 )
-                bridge_id = created_chat.id
+                vdisk_id = created_chat.id
                 try:
-                    await self.app_4gb.add_chat_members(bridge_id, me.username)
+                    await self.app_4gb.add_chat_members(vdisk_id, me.username)
                 except Exception:
                     pass
                 try:
                     await self.app_4gb.promote_chat_member(
-                        bridge_id,
+                        vdisk_id,
                         me.username,
                         privileges=ChatPrivileges(
                             can_post_messages=True,
@@ -258,19 +263,27 @@ class Bot(Client):
                         )
                     )
                 except Exception as prom_err:
-                    print(f"Bridge bot admin promotion info: {prom_err}")
+                    print(f"Virtual Disk bot admin promotion info: {prom_err}")
 
-                Config.LOG_CHANNEL = bridge_id
+                Config.VIRTUAL_DISK_CHANNEL = vdisk_id
+                Config.LOG_CHANNEL = vdisk_id
                 if not Config.FILES_CHANNEL or Config.FILES_CHANNEL == 0:
-                    Config.FILES_CHANNEL = bridge_id
-                    Config.DUMP_CHANNEL = bridge_id
-                    Config.BIN_CHANNEL = bridge_id
-                    await db.update_bot_settings(log_channel=bridge_id, dump_channel=bridge_id)
+                    Config.FILES_CHANNEL = vdisk_id
+                    Config.DUMP_CHANNEL = vdisk_id
+                    Config.BIN_CHANNEL = vdisk_id
+                    await db.update_bot_settings(virtual_disk_channel=vdisk_id, log_channel=vdisk_id, dump_channel=vdisk_id)
                 else:
-                    await db.update_bot_settings(log_channel=bridge_id)
-                print(f"✅ NeX 4GB Cloud Bridge channel created & configured: {bridge_id}")
+                    await db.update_bot_settings(virtual_disk_channel=vdisk_id, log_channel=vdisk_id)
+                print(f"✅ NeX 4GB Virtual Cloud Disk channel created & configured: {vdisk_id}")
             except Exception as create_err:
-                print(f"Failed to auto-create 4GB bridge channel: {create_err}")
+                print(f"Failed to auto-create Virtual Disk channel: {create_err}")
+
+        # Cache Virtual Disk peer on both client and app_4gb to prevent PeerIdInvalid
+        try:
+            from helper.tg_virtual_disk import TelegramVirtualDisk
+            await TelegramVirtualDisk.ensure_peer_cached(self)
+        except Exception as cache_err:
+            print(f"Virtual Disk peer caching note: {cache_err}")
 
         print(f"{me.first_name} [NeX 4GB Rename Bot] Is Started.....✨️")
         for admin_id in Config.ADMIN:
@@ -308,6 +321,33 @@ class Bot(Client):
         # Launch permanent background tasks for 24/7 zero-downtime operation
         asyncio.create_task(self._mtproto_watchdog())
         asyncio.create_task(self._temp_cleanup_worker())
+        asyncio.create_task(self._render_keep_alive())
+
+    async def _render_keep_alive(self):
+        """
+        Self-Ping Keep-Alive Worker running every 4 minutes (240s).
+        Pings RENDER_EXTERNAL_URL or PING_URL so Render Free Tier never spins down.
+        """
+        await asyncio.sleep(60)
+        ping_url = (
+            getattr(Config, "RENDER_EXTERNAL_URL", "") or
+            getattr(Config, "PING_URL", "") or
+            os.environ.get("RENDER_EXTERNAL_URL", "") or
+            os.environ.get("PING_URL", "")
+        ).strip()
+        if not ping_url:
+            return
+
+        import aiohttp
+        while self._is_running:
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                    async with session.get(ping_url) as resp:
+                        if resp.status == 200:
+                            print(f"⚡ [Keep-Alive] Self-ping successful: {ping_url} (200 OK)")
+            except Exception as ping_err:
+                print(f"⚠️ [Keep-Alive] Ping note: {ping_err}")
+            await asyncio.sleep(240)
 
     async def _mtproto_watchdog(self):
         """

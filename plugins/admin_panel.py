@@ -173,7 +173,7 @@ async def build_owner_panel(client: Client):
         ],
         [
             InlineKeyboardButton("📋 Cᴏᴍᴍᴀɴᴅꜱ Lɪꜱᴛ", callback_data="cb_owner_cmds"),
-            InlineKeyboardButton("📡 Cʜᴀɴɴᴇʟꜱ & FSᴜʙ", callback_data="cb_owner_channels")
+            InlineKeyboardButton("📡 Cʜᴀɴɴᴇʟꜱ & V-Dɪꜱᴋ", callback_data="cb_owner_channels")
         ],
         [
             InlineKeyboardButton("🔄 Rᴇꜱᴛᴀʀᴛ Bᴏᴛ", callback_data="cb_owner_restart"),
@@ -1657,6 +1657,35 @@ async def owner_state_input_handler(client: Client, message: Message):
         markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")]])
         return await message.reply_text(text, reply_markup=markup)
 
+    elif action == "set_vdisk_channel":
+        OWNER_STATE.pop(admin_id, None)
+        target = None
+        if message.forward_from_chat:
+            target = message.forward_from_chat.id
+        else:
+            raw = input_text
+            if raw.lower() in ("0", "none", "off", "disable"):
+                target = None
+            else:
+                target = parse_channel_id(raw)
+
+        await db.set_virtual_disk_channel(target)
+        Config.VIRTUAL_DISK_CHANNEL = target
+        from helper.tg_virtual_disk import TelegramVirtualDisk
+        try:
+            await TelegramVirtualDisk.ensure_peer_cached(client, target)
+        except Exception:
+            pass
+
+        text = (
+            "💿 <b><u>Virtual Cloud Disk Updated!</u></b>\n\n"
+            f"◈ <b>New Channel :</b> <code>{target or 'Disabled'}</code>\n\n"
+            "<i>Saved permanently in MongoDB and active immediately. Zero-disk RAM streaming and instant staging will use this channel.</i>\n\n"
+            "⚡ @Nex_bots"
+        )
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Cʜᴀɴɴᴇʟꜱ", callback_data="cb_owner_channels")]])
+        return await message.reply_text(text, reply_markup=markup)
+
     await message.continue_propagation()
 
 
@@ -1816,6 +1845,7 @@ async def build_owner_channels_view(client: Client, user_id: int):
     settings = await db.get_bot_settings()
     log_ch = settings.get("log_channel") or Config.LOG_CHANNEL
     dump_ch = settings.get("dump_channel") or getattr(Config, "FILES_CHANNEL", None) or getattr(Config, "DUMP_CHANNEL", None)
+    vdisk_ch = settings.get("virtual_disk_channel") or getattr(Config, "VIRTUAL_DISK_CHANNEL", None)
     fsub_ch = settings.get("force_sub") or Config.FORCE_SUB
     fsub_enabled = settings.get("force_sub_enabled", True) if settings.get("force_sub_enabled") is not None else bool(fsub_ch)
     owner_dump = await db.get_dump_channel(user_id)
@@ -1824,7 +1854,8 @@ async def build_owner_channels_view(client: Client, user_id: int):
     toggle_btn_text = "🔴 FSᴜʙ: Tᴜʀɴ OFF" if fsub_enabled else "🟢 FSᴜʙ: Tᴜʀɴ ON"
 
     text = (
-        "<b>◈ Cʜᴀɴɴᴇʟꜱ & Fᴏʀᴄᴇ-Sᴜʙ Mᴀɴᴀɢᴇʀ 📡</b>\n\n"
+        "<b>◈ Cʜᴀɴɴᴇʟꜱ & Vɪʀᴛᴜᴀʟ Dɪꜱᴋ Mᴀɴᴀɢᴇʀ 📡</b>\n\n"
+        f"◈ <b>💿 Vɪʀᴛᴜᴀʟ Cʟᴏᴜᴅ Dɪꜱᴋ :</b> <code>{vdisk_ch or 'Not Configured'}</code>\n"
         f"◈ <b>📜 Lᴏɢ Cʜᴀɴɴᴇʟ :</b> <code>{log_ch or 'Not Configured'}</code>\n"
         f"◈ <b>📂 Fɪʟᴇ/Dᴜᴍᴘ Cʜᴀɴɴᴇʟ :</b> <code>{dump_ch or 'Not Configured'}</code>\n"
         f"◈ <b>🔐 Fᴏʀᴄᴇ-Sᴜʙ Cʜᴀɴɴᴇʟ :</b> <code>{fsub_ch or 'Not Configured'}</code>\n"
@@ -1835,6 +1866,10 @@ async def build_owner_channels_view(client: Client, user_id: int):
     )
 
     markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("💿 Sᴇᴛ V-Dɪꜱᴋ", callback_data="cb_owner_set_vdisk"),
+            InlineKeyboardButton("🧪 Tᴇꜱᴛ V-Dɪꜱᴋ", callback_data="cb_owner_test_vdisk")
+        ],
         [
             InlineKeyboardButton("📜 Sᴇᴛ Lᴏɢ Cʜᴀɴɴᴇʟ", callback_data="cb_owner_set_log"),
             InlineKeyboardButton("🧪 Tᴇꜱᴛ Lᴏɢ", callback_data="cb_owner_test_log")
@@ -1865,6 +1900,41 @@ async def cb_owner_channels(client, query: CallbackQuery):
     text, markup = await build_owner_channels_view(client, query.from_user.id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_owner_set_vdisk$") & filters.user(Config.ADMIN))
+async def cb_owner_set_vdisk_wiz(client: Client, query: CallbackQuery):
+    OWNER_STATE[query.from_user.id] = {"action": "set_vdisk_channel"}
+    text = (
+        "💿 <b><u>Set Virtual Cloud Disk Channel Wizard</u></b>\n\n"
+        "Forward a message from your private cloud disk channel OR send the channel ID (e.g. <code>-100xxxxxxxxxx</code>) or <code>@username</code>:\n\n"
+        "<i>This channel powers zero-disk RAM chunk streaming and instant 0.05s staging for uninterrupted tasks. Send <code>0</code> or <code>off</code> to disable. Send /cancel to abort.</i>"
+    )
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cb_owner_channels")]])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^(cb_test_vdisk|cb_owner_test_vdisk)$") & filters.user(Config.ADMIN))
+async def cb_owner_test_vdisk_handler(client: Client, query: CallbackQuery):
+    settings = await db.get_bot_settings()
+    ch = settings.get("virtual_disk_channel") or getattr(Config, "VIRTUAL_DISK_CHANNEL", None)
+    if not ch:
+        return await query.answer("❌ Virtual Cloud Disk is not configured!", show_alert=True)
+    try:
+        from helper.tg_virtual_disk import TelegramVirtualDisk
+        target = parse_channel_id(ch)
+        await TelegramVirtualDisk.ensure_peer_cached(client, target)
+        test_msg = await client.send_message(
+            target,
+            "🧪 <b>NeX 4GB Bot: Telegram Virtual Disk Diagnostic Test!</b>\n\nChannel is accessible and ready for zero-disk RAM streaming! ✅\n\n⚡ @Nex_bots"
+        )
+        if test_msg:
+            await asyncio.sleep(2)
+            await test_msg.delete()
+        await query.answer("✅ Virtual Cloud Disk is 100% accessible and operational!", show_alert=True)
+    except Exception as e:
+        await query.answer(f"❌ Virtual Disk Error: {e}", show_alert=True)
 
 
 @Client.on_callback_query(filters.regex(r"^cb_owner_set_log$") & filters.user(Config.ADMIN))

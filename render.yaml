@@ -22,6 +22,8 @@ services:
         sync: false
       - key: LOG_CHANNEL
         sync: false
+      - key: VIRTUAL_DISK_CHANNEL
+        sync: false
       - key: DB_NAME
         sync: false
       - key: DB_URL
@@ -33,4 +35,10 @@ services:
       - key: OWNER_ONLY
         sync: false
       - key: WEBHOOK
+        sync: false
+      - key: PORT
+        value: 8080
+      - key: RENDER_EXTERNAL_URL
+        sync: false
+      - key: PING_URL
         sync: false

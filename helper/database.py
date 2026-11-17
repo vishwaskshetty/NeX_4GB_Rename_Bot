@@ -1464,6 +1464,7 @@ class Database:
             return cached
         cfg = await self.cfg.find_one({'_id': 'bot_settings'}) or {}
         raw_log = cfg.get("log_channel") if cfg.get("log_channel") is not None else Config.LOG_CHANNEL
+        raw_vdisk = cfg.get("virtual_disk_channel") if cfg.get("virtual_disk_channel") is not None else getattr(Config, "VIRTUAL_DISK_CHANNEL", Config.LOG_CHANNEL)
         raw_dump = cfg.get("dump_channel") or cfg.get("files_channel") if (cfg.get("dump_channel") is not None or cfg.get("files_channel") is not None) else Config.FILES_CHANNEL
         raw_fsub = cfg.get("force_sub") if cfg.get("force_sub") is not None else Config.FORCE_SUB
         fsub_enabled = bool(cfg.get("force_sub_enabled", True))
@@ -1472,6 +1473,7 @@ class Database:
         res = {
             "owner_only": bool(cfg.get("owner_only", Config.OWNER_ONLY)),
             "log_channel": parse_channel_id(raw_log),
+            "virtual_disk_channel": parse_channel_id(raw_vdisk),
             "dump_channel": parse_channel_id(raw_dump),
             "force_sub": raw_fsub,
             "force_sub_enabled": fsub_enabled,
@@ -1507,6 +1509,11 @@ class Database:
         cid = parse_channel_id(channel_id)
         Config.LOG_CHANNEL = cid
         return await self.update_bot_settings(log_channel=cid)
+
+    async def set_virtual_disk_channel(self, channel_id):
+        cid = parse_channel_id(channel_id)
+        Config.VIRTUAL_DISK_CHANNEL = cid
+        return await self.update_bot_settings(virtual_disk_channel=cid)
 
     async def set_dump_channel_global(self, channel_id):
         cid = parse_channel_id(channel_id)
