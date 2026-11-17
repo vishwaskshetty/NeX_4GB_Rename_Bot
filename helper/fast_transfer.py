@@ -83,72 +83,97 @@ async def get_media_session(client: Client, dc_id: int) -> Session:
     return session
 
 
-async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 8) -> List[Session]:
+class MediaSessionPool:
     """
-    Returns a pool of up to pool_size authorized independent media sessions for the specified DC
-    to enable true multi-socket parallel MTProto streaming (bypassing the single-connection TCP limit).
+    Dedicated Multi-Socket MTProto Media Session Pool Manager.
+    Maintains 10 independent parallel TCP Session connections per DC for multi-socket
+    simultaneous MTProto transfers, completely eliminating Telegram's 1000 KB/s per-socket throttle.
     """
-    if not hasattr(client, "_multi_media_sessions"):
-        client._multi_media_sessions = {}
+    @classmethod
+    async def get_pool(cls, client: Client, dc_id: int, pool_size: int = 10) -> List[Session]:
+        if not hasattr(client, "_media_pools"):
+            client._media_pools = {}
+        if not hasattr(client, "_dc_auth_keys"):
+            client._dc_auth_keys = {}
 
-    pool = client._multi_media_sessions.get(dc_id, [])
-    # Keep only active, connected sessions
-    valid_pool = []
-    for s in pool:
-        if getattr(s, "is_connected", None) and s.is_connected.is_set():
-            valid_pool.append(s)
-        else:
-            try:
-                asyncio.create_task(s.stop())
-            except Exception:
-                pass
-    pool = valid_pool
+        pool = client._media_pools.get(dc_id, [])
+        valid_pool = []
+        for s in pool:
+            if getattr(s, "is_connected", None) and s.is_connected.is_set():
+                valid_pool.append(s)
+            else:
+                try:
+                    asyncio.create_task(s.stop())
+                except Exception:
+                    pass
+        pool = valid_pool
 
-    primary = await get_media_session(client, dc_id)
-    if primary not in pool:
-        pool.insert(0, primary)
+        if len(pool) >= pool_size:
+            return pool[:pool_size]
 
-    if len(pool) < pool_size:
         test_mode = await asyncio.wait_for(client.storage.test_mode(), timeout=5.0)
         main_dc = await asyncio.wait_for(client.storage.dc_id(), timeout=5.0)
 
-        while len(pool) < pool_size:
-            try:
-                if dc_id == main_dc:
-                    auth_key = await client.storage.auth_key()
-                    extra_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
-                    await asyncio.wait_for(extra_session.start(), timeout=5.0)
-                    pool.append(extra_session)
-                else:
-                    auth_key = await asyncio.wait_for(Auth(client, dc_id, test_mode).create(), timeout=5.0)
-                    extra_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
-                    await asyncio.wait_for(extra_session.start(), timeout=5.0)
-                    # Export & Import authorization for this independent DC socket
-                    for _ in range(3):
-                        try:
-                            exported_auth = await asyncio.wait_for(
-                                client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id)),
-                                timeout=5.0
-                            )
-                            await asyncio.wait_for(
-                                extra_session.invoke(
-                                    raw.functions.auth.ImportAuthorization(
-                                        id=exported_auth.id,
-                                        bytes=exported_auth.bytes
-                                    )
-                                ),
-                                timeout=5.0
-                            )
-                            break
-                        except AuthBytesInvalid:
-                            continue
-                    pool.append(extra_session)
-            except Exception as e:
-                log.warning(f"Failed to spawn extra authorized session for DC {dc_id}: {e}")
-                break
+        # 1. Obtain or reuse the authorized auth_key for this DC
+        auth_key = client._dc_auth_keys.get(dc_id)
+        if not auth_key:
+            if dc_id == main_dc:
+                auth_key = await asyncio.wait_for(client.storage.auth_key(), timeout=5.0)
+                client._dc_auth_keys[dc_id] = auth_key
+            else:
+                auth_key = await asyncio.wait_for(Auth(client, dc_id, test_mode).create(), timeout=8.0)
+                client._dc_auth_keys[dc_id] = auth_key
+                # Export authorization from main DC and import into media DC
+                init_session = Session(client, dc_id, auth_key, test_mode, is_media=True)
+                await asyncio.wait_for(init_session.start(), timeout=8.0)
+                for _ in range(3):
+                    try:
+                        exported = await asyncio.wait_for(
+                            client.invoke(raw.functions.auth.ExportAuthorization(dc_id=dc_id)),
+                            timeout=6.0
+                        )
+                        await asyncio.wait_for(
+                            init_session.invoke(
+                                raw.functions.auth.ImportAuthorization(
+                                    id=exported.id,
+                                    bytes=exported.bytes
+                                )
+                            ),
+                            timeout=6.0
+                        )
+                        break
+                    except AuthBytesInvalid:
+                        continue
+                    except Exception as e:
+                        log.warning(f"Media auth export/import note: {e}")
+                        break
+                pool.append(init_session)
 
-    client._multi_media_sessions[dc_id] = pool
-    return pool if pool else [primary]
+        # 2. Spin up remaining independent sessions in parallel
+        needed = pool_size - len(pool)
+        if needed > 0:
+            new_sessions = [
+                Session(client, dc_id, auth_key, test_mode, is_media=True)
+                for _ in range(needed)
+            ]
+            start_tasks = [asyncio.wait_for(s.start(), timeout=8.0) for s in new_sessions]
+            results = await asyncio.gather(*start_tasks, return_exceptions=True)
+            for s, res in zip(new_sessions, results):
+                if not isinstance(res, Exception) and getattr(s, "is_connected", None) and s.is_connected.is_set():
+                    pool.append(s)
+                else:
+                    log.warning(f"Extra session init error: {res}")
+
+        client._media_pools[dc_id] = pool
+        if not pool:
+            prim = await get_media_session(client, dc_id)
+            return [prim]
+        return pool
+
+
+async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 10) -> List[Session]:
+    """Retrieves or builds the MediaSessionPool for the requested DC."""
+    return await MediaSessionPool.get_pool(client, dc_id, pool_size=pool_size)
 
 
 async def fast_download(
@@ -226,12 +251,12 @@ async def fast_download(
                 thumb_size=thumb_size
             )
 
-        pool_size = 8 if is_prem else 4
+        pool_size = 10
         try:
-            sessions = await asyncio.wait_for(get_media_session_pool(client, dc_id, pool_size=pool_size), timeout=15.0)
+            sessions = await asyncio.wait_for(MediaSessionPool.get_pool(client, dc_id, pool_size=pool_size), timeout=15.0)
         except Exception as sess_err:
-            log.warning(f"Media session pool init failed for DC {dc_id} ({sess_err}). Falling back to standard download_media...")
-            return await client.download_media(message_or_file, file_name=file_path, progress=progress, progress_args=progress_args)
+            log.warning(f"Media session pool init note for DC {dc_id} ({sess_err}). Using primary media session...")
+            sessions = [await get_media_session(client, dc_id)]
 
         total_parts = math.ceil(file_size / CHUNK_SIZE) if file_size > 0 else 1
         queue = asyncio.Queue()
@@ -354,7 +379,7 @@ async def fast_download(
         if not use_pwrite:
             writer_task = asyncio.create_task(writer())
 
-        worker_limit = CONCURRENT_WORKERS_PREM if is_prem else CONCURRENT_WORKERS_FREE
+        worker_limit = 10
         worker_count = min(worker_limit, total_parts)
         workers = [asyncio.create_task(worker(i)) for i in range(worker_count)]
 
@@ -429,14 +454,14 @@ async def fast_upload(
     file_name = os.path.basename(file_path)
     file_id = client.rnd_id() if hasattr(client, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
 
-    pool_size = 8 if is_prem else 4
-    worker_limit = CONCURRENT_WORKERS_PREM if is_prem else 8
+    pool_size = 10
+    worker_limit = 10
     worker_count = min(worker_limit, total_parts)
 
     main_dc = await client.storage.dc_id()
-    sessions = await get_media_session_pool(client, main_dc, pool_size=pool_size)
+    sessions = await MediaSessionPool.get_pool(client, main_dc, pool_size=pool_size)
 
-    queue = asyncio.Queue(maxsize=48)
+    queue = asyncio.Queue(maxsize=64)
     uploaded_bytes = 0
     error_holder = []
     lock = asyncio.Lock()
@@ -627,17 +652,17 @@ async def zero_disk_turbo_pipe(
             thumb_size=decoded.thumbnail_size or ""
         )
 
-    pool_size = 8 if is_prem else 4
-    worker_limit = CONCURRENT_WORKERS_PREM if is_prem else 8
+    pool_size = 10
+    worker_limit = 10
     down_worker_count = min(worker_limit, total_parts)
     up_worker_count = min(worker_limit, total_parts)
 
-    down_sessions = await get_media_session_pool(client, dc_id, pool_size=pool_size)
+    down_sessions = await MediaSessionPool.get_pool(client, dc_id, pool_size=pool_size)
     main_dc = await uploader.storage.dc_id()
-    up_sessions = await get_media_session_pool(uploader, main_dc, pool_size=pool_size)
+    up_sessions = await MediaSessionPool.get_pool(uploader, main_dc, pool_size=pool_size)
 
-    # 48 chunks * 512KB = 24MB max RAM buffer
-    pipe_queue = asyncio.Queue(maxsize=48)
+    # 64 chunks * 512KB = 32MB max RAM buffer
+    pipe_queue = asyncio.Queue(maxsize=64)
     part_indices = asyncio.Queue()
     for idx in range(total_parts):
         part_indices.put_nowait(idx)

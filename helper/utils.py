@@ -3,6 +3,7 @@ import re
 import math
 import time
 import asyncio
+from typing import Optional
 from datetime import datetime
 from pytz import timezone
 from config import Config, Txt, parse_channel_id 
@@ -182,6 +183,57 @@ def get_readable_time(seconds: int) -> str:
         result += f"{minutes}m "
     result += f"{seconds}s"
     return result.strip()
+
+
+def prepare_crisp_thumbnail(raw_image_path: str, out_path: str = None) -> Optional[str]:
+    """
+    Produces a razor-sharp, crystal-clear 4:4:4 chroma thumbnail (max edge 320px)
+    suitable for Telegram document/video thumbnails (< 200KB limit).
+    Uses LANCZOS resampling, subtle contrast/sharpness enhancement, and subsampling=0.
+    """
+    if not raw_image_path or not os.path.exists(raw_image_path):
+        return None
+    try:
+        from PIL import Image, ImageOps, ImageEnhance
+        out_path = out_path or raw_image_path
+
+        with Image.open(raw_image_path) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            orig_w, orig_h = img.size
+
+            # Compute aspect-ratio preserved dimensions (max edge 320)
+            max_edge = 320
+            if orig_w > max_edge or orig_h > max_edge:
+                if orig_w >= orig_h:
+                    new_w = max_edge
+                    new_h = max(1, int(round((orig_h * max_edge) / orig_w)))
+                else:
+                    new_h = max_edge
+                    new_w = max(1, int(round((orig_w * max_edge) / orig_h)))
+                
+                try:
+                    resample_method = Image.Resampling.LANCZOS
+                except AttributeError:
+                    resample_method = getattr(Image, "LANCZOS", 1)
+                img = img.resize((new_w, new_h), resample=resample_method)
+
+            # Subtle clarity & contrast enhancement for razor-sharp movie posters & text
+            try:
+                img = ImageEnhance.Sharpness(img).enhance(1.18)
+                img = ImageEnhance.Contrast(img).enhance(1.04)
+            except Exception:
+                pass
+
+            # Progressive quality fallback ensuring file stays < 195KB with 4:4:4 zero chroma blur
+            for q in [95, 92, 88, 85]:
+                img.save(out_path, format="JPEG", quality=q, optimize=True, subsampling=0)
+                if os.path.exists(out_path) and os.path.getsize(out_path) <= 195 * 1024:
+                    break
+
+            return out_path if (os.path.exists(out_path) and os.path.getsize(out_path) > 0) else raw_image_path
+    except Exception as e:
+        print(f"prepare_crisp_thumbnail error: {e}")
+        return raw_image_path
 
 
 TIER_SPEED_LIMITS = {

@@ -6,8 +6,16 @@ import socket
 try:
     import uvloop
     uvloop.install()
+    print("⚡ uvloop event loop installed successfully!")
 except ImportError:
     pass
+
+# C-accelerated TgCrypto AES/CTR engine (prevents 1 MB/s Python CPU throttling)
+try:
+    import tgcrypto
+    print("⚡ TgCrypto acceleration active for maximum MTProto transfer speed!")
+except ImportError:
+    print("⚠️ TgCrypto not found! Installing TgCrypto is recommended for 50-100+ MB/s speeds.")
 
 import time
 import gc

@@ -51,7 +51,8 @@ from helper.utils import (
     safe_reply_params,
     edit_message_content,
     sanitize_secrets,
-    is_duplicate_update
+    is_duplicate_update,
+    prepare_crisp_thumbnail
 )
 from helper.ffmpeg_utils import (
     inject_metadata,
@@ -1200,20 +1201,20 @@ async def execute_rename_pipeline(
             async def _prepare_thumb():
                 c_thumb = await db.get_thumbnail(user_id)
                 media = file_msg.document or file_msg.video or file_msg.audio
-                if c_thumb or (hasattr(media, 'thumbs') and media.thumbs):
-                    try:
-                        thumb_dest = os.path.join(work_dir, "thumb.jpg")
-                        if c_thumb:
-                            t_path = await client.download_media(c_thumb, file_name=thumb_dest)
-                        else:
-                            t_path = await client.download_media(media.thumbs[0].file_id, file_name=thumb_dest)
+                target_file_id = None
+                if c_thumb:
+                    target_file_id = c_thumb
+                elif hasattr(media, 'thumbs') and media.thumbs:
+                    # Pick highest resolution thumbnail from original media [-1]
+                    target_file_id = media.thumbs[-1].file_id
 
-                        if t_path and os.path.exists(t_path):
-                            with Image.open(t_path) as img:
-                                img = img.convert("RGB")
-                                img.thumbnail((320, 320))
-                                img.save(t_path, "JPEG")
-                            return t_path
+                if target_file_id:
+                    try:
+                        raw_thumb_dest = os.path.join(work_dir, "raw_thumb.jpg")
+                        t_path = await client.download_media(target_file_id, file_name=raw_thumb_dest)
+                        if t_path and os.path.exists(t_path) and os.path.getsize(t_path) > 0:
+                            crisp_dest = os.path.join(work_dir, "thumb.jpg")
+                            return prepare_crisp_thumbnail(t_path, crisp_dest)
                     except Exception as e:
                         print(f"Thumbnail processing error: {e}")
                 return None
@@ -1247,8 +1248,9 @@ async def execute_rename_pipeline(
             upload_start = time.time()
             actual_file_size = file_size
 
-            # Attempt single-pass Zero-Disk RAM Turbo Pipe if no remuxing needed and staged
-            if not is_remux_needed and staged_msg is not None:
+            # Attempt single-pass Zero-Disk RAM Turbo Pipe if no remuxing needed
+            target_media_msg = staged_msg or file_msg
+            if not is_remux_needed and target_media_msg is not None:
                 try:
                     await ms.edit(
                         f"{upload_mode_tag}\n\n<i>Zero-Disk RAM Turbo Pipe active (50-100+ MB/s)...</i>",
@@ -1258,7 +1260,7 @@ async def execute_rename_pipeline(
                     uploaded_file = await zero_disk_turbo_pipe(
                         client=client,
                         uploader=uploader,
-                        staged_msg=staged_msg,
+                        staged_msg=target_media_msg,
                         new_filename=new_filename,
                         progress=progress_for_pyrogram,
                         progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
@@ -1270,7 +1272,7 @@ async def execute_rename_pipeline(
                 except StopTransmission:
                     raise
                 except Exception as pipe_err:
-                    print(f"⚠️ zero_disk_turbo_pipe failed ({pipe_err}). Falling back to disk pipeline...")
+                    print(f"⚠️ zero_disk_turbo_pipe failed: {pipe_err}. Falling back to multi-socket disk pipeline...")
                     import traceback
                     traceback.print_exc()
                     use_zero_disk = False
@@ -1298,12 +1300,13 @@ async def execute_rename_pipeline(
                 except StopTransmission:
                     raise
                 except Exception as down_err:
-                    print(f"⚠️ fast_download failed ({down_err}). Falling back to standard download_media...")
+                    print(f"⚠️ fast_download error: {down_err}. Retrying fast_download with primary session...")
                     import traceback
                     traceback.print_exc()
-                    path = await client.download_media(
-                        file_msg,
-                        file_name=file_path,
+                    path = await fast_download(
+                        client=client,
+                        message_or_file=file_msg,
+                        file_path=file_path,
                         progress=progress_for_pyrogram,
                         progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
                     )

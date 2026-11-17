@@ -167,7 +167,7 @@ class Database:
             suffix=None,
             user_dump=None,
             dump_channel=None,
-            metadata_bool=True,
+            metadata_bool=False,
             metadata_code="Telegram : @Nex_bots",
             clean_words=None,
             replace_words=None,
@@ -298,8 +298,8 @@ class Database:
     async def get_metadata_bool(self, id):
         user = await self.col.find_one({'_id': int(id)})
         if not user or 'metadata_bool' not in user:
-            return True
-        return bool(user.get('metadata_bool', True))
+            return False
+        return bool(user.get('metadata_bool', False))
 
     async def set_metadata_code(self, id, metadata_code):
         await self.col.update_one({'_id': int(id)}, {'$set': {'metadata_code': metadata_code}}, upsert=True)
