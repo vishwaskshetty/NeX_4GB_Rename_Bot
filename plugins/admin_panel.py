@@ -1,10 +1,13 @@
 import os
 import sys
 import time
+import math
 import io
 import traceback
 import html
 import shutil
+import inspect
+import gc
 import psutil
 import asyncio
 import logging
@@ -24,6 +27,7 @@ from helper.utils import get_readable_file_size, humanbytes, edit_message_conten
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+log = logger
 
 _DB_TIMEOUT = 5
 
@@ -1590,11 +1594,11 @@ async def owner_state_input_handler(client: Client, message: Message):
         if message.forward_from_chat:
             target = message.forward_from_chat.id
         else:
-            raw = input_text
-            if raw.lower() in ("0", "none", "off", "disable"):
+            raw_val = input_text
+            if raw_val.lower() in ("0", "none", "off", "disable"):
                 target = None
             else:
-                target = parse_channel_id(raw)
+                target = parse_channel_id(raw_val)
         
         await db.set_log_channel(target)
         Config.LOG_CHANNEL = target
@@ -1613,11 +1617,11 @@ async def owner_state_input_handler(client: Client, message: Message):
         if message.forward_from_chat:
             target = message.forward_from_chat.id
         else:
-            raw = input_text
-            if raw.lower() in ("0", "none", "off", "disable"):
+            raw_val = input_text
+            if raw_val.lower() in ("0", "none", "off", "disable"):
                 target = None
             else:
-                target = parse_channel_id(raw)
+                target = parse_channel_id(raw_val)
         
         await db.set_dump_channel_global(target)
         Config.FILES_CHANNEL = target
@@ -1637,11 +1641,11 @@ async def owner_state_input_handler(client: Client, message: Message):
         if message.forward_from_chat:
             target = message.forward_from_chat.id
         else:
-            raw = input_text
-            if raw.lower() in ("0", "none", "off", "disable"):
+            raw_val = input_text
+            if raw_val.lower() in ("0", "none", "off", "disable"):
                 target = None
             else:
-                target = parse_channel_id(raw)
+                target = parse_channel_id(raw_val)
         
         await db.set_fsub_channel(target)
         if target:
@@ -1666,11 +1670,11 @@ async def owner_state_input_handler(client: Client, message: Message):
         if message.forward_from_chat:
             target = message.forward_from_chat.id
         else:
-            raw = input_text
-            if raw.lower() in ("0", "none", "off", "disable"):
+            raw_val = input_text
+            if raw_val.lower() in ("0", "none", "off", "disable"):
                 target = None
             else:
-                target = parse_channel_id(raw)
+                target = parse_channel_id(raw_val)
 
         await db.set_virtual_disk_channel(target)
         Config.VIRTUAL_DISK_CHANNEL = target

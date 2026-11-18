@@ -3,6 +3,7 @@ services:
     plan: free
     name: nex-4gb-rename-bot
     env: docker
+    region: frankfurt
     dockerfilePath: Dockerfile
     repo: https://github.com/vishwaskshetty/NeX_4GB_Rename_Bot
     branch: main

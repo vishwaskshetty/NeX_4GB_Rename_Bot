@@ -7,6 +7,7 @@ RUN apt-get update && \
         ffmpeg \
         p7zip-full \
         aria2 \
+        gcc \
         build-essential \
         python3-dev \
         procps && \

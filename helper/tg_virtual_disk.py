@@ -1,6 +1,14 @@
 import os
+import sys
+import time
 import math
+import html
+import shutil
 import asyncio
+import traceback
+import inspect
+import gc
+import random
 import logging
 from typing import Optional
 from pyrogram import Client, raw
@@ -9,7 +17,8 @@ from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from config import Config, parse_channel_id
 from helper.fast_transfer import get_media_session
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+log = logger
 
 
 def get_virtual_disk_channel(client: Optional[Client] = None) -> int:

@@ -1,10 +1,21 @@
 import os
 import sys
+import time
+import math
+import html
+import shutil
+import asyncio
+import traceback
+import inspect
+import gc
+import random
+import logging
 import socket
 import tempfile
-import traceback
-import html
 import aiohttp
+
+logger = logging.getLogger("BotShield")
+log = logger
 
 # High-Speed C++ based uvloop Event Loop for Linux (100-200 MB/s transfers)
 try:
@@ -17,14 +28,10 @@ except ImportError:
 # C-accelerated TgCrypto AES/CTR engine (prevents 1 MB/s Python CPU throttling)
 try:
     import tgcrypto
-    print("⚡ TgCrypto acceleration active for maximum MTProto transfer speed!")
+    print(f"✅ TgCrypto C-Extension Active: {tgcrypto.__file__}")
 except ImportError:
     print("⚠️ TgCrypto not found! Installing TgCrypto is recommended for 50-100+ MB/s speeds.")
 
-import time
-import gc
-import shutil
-import asyncio
 from datetime import datetime
 from pytz import timezone
 from pyrogram import Client, __version__
@@ -49,9 +56,6 @@ def is_in_drain_mode() -> bool:
 def get_bot_uptime() -> float:
     """Returns uptime in seconds."""
     return time.time() - BOT_START_TIME
-
-import logging
-log = logging.getLogger("BotShield")
 
 def _global_asyncio_exception_handler(loop, context):
     exc = context.get("exception")
@@ -191,6 +195,12 @@ class Bot(Client):
             print("🛡️ Global AsyncIO Exception Shield active.")
         except Exception as e:
             print(f"Exception shield note: {e}")
+
+        try:
+            import tgcrypto
+            log.info(f"✅ TgCrypto C-Extension Active: {tgcrypto.__file__}")
+        except ImportError:
+            log.warning("⚠️ TgCrypto not found! Installing TgCrypto is recommended for 50-100+ MB/s speeds.")
 
         me = await self.get_me()
         self.mention = me.mention

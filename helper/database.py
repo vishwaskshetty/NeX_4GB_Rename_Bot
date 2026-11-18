@@ -1,13 +1,24 @@
-import time
-import copy
+import os
 import sys
-import traceback
+import time
+import math
 import html
+import shutil
+import asyncio
+import traceback
+import inspect
+import gc
+import random
+import copy
+import logging
 from datetime import datetime
 import motor.motor_asyncio
 import pytz
 from config import Config, parse_channel_id
 from .utils import send_log
+
+logger = logging.getLogger(__name__)
+log = logger
 
 # NeX 4GB Rename Bot - Database Architecture
 # Developed by @Nex_bots
@@ -126,6 +137,8 @@ def _cache_invalidate(*prefixes):
         matched = [k for k in list(_CACHE.keys()) if k.startswith(prefix)]
         for k in matched:
             _CACHE.pop(k, None)
+
+_cache_delete = _cache_invalidate
 
 
 class Database:
@@ -972,7 +985,7 @@ class Database:
 
         if update_dict:
             await self.col.update_one({'_id': int(user_id)}, {'$set': update_dict}, upsert=True)
-            _cache_delete(f"user_settings:{user_id}")
+            _cache_invalidate(f"user_settings:{user_id}")
 
     async def reset_watermark(self, user_id: int):
         await self.col.update_one(
@@ -989,7 +1002,7 @@ class Database:
             }},
             upsert=True
         )
-        _cache_delete(f"user_settings:{user_id}")
+        _cache_invalidate(f"user_settings:{user_id}")
 
     get_watermark_settings = get_watermark
     update_watermark_settings = set_watermark
@@ -1367,9 +1380,9 @@ class Database:
             res = copy.deepcopy(PLAN_PRICING)
             _cache_set("premium_pricing", res)
             return res
-        raw = doc.get("pricing", {})
+        raw_pricing = doc.get("pricing", {})
         parsed = {}
-        for tier_k, tier_v in raw.items():
+        for tier_k, tier_v in raw_pricing.items():
             t_int = int(tier_k)
             parsed[t_int] = dict(tier_v)
             for d_k, d_v in tier_v.items():

@@ -1,8 +1,20 @@
 import os
-import json
+import sys
+import time
+import math
+import html
 import shutil
 import asyncio
+import traceback
+import inspect
+import gc
+import random
+import logging
+import json
 from typing import Tuple, List, Dict
+
+logger = logging.getLogger(__name__)
+log = logger
 
 try:
     from hachoir.metadata import extractMetadata

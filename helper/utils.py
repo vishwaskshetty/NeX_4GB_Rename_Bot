@@ -1,13 +1,24 @@
 import os
-import re
-import math
+import sys
 import time
+import math
+import html
+import shutil
 import asyncio
+import traceback
+import inspect
+import gc
+import random
+import re
+import logging
 from typing import Optional
 from datetime import datetime
 from pytz import timezone
 from config import Config, Txt, parse_channel_id 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+logger = logging.getLogger(__name__)
+log = logger
 try:
     from pyrogram.types import ReplyParameters
 except ImportError:
@@ -134,6 +145,7 @@ USER_STATE = {}
 # Global dicts to track progress edit timestamps and percentages for strictly 5.0s (min 2%) throttling
 PROGRESS_TIMESTAMPS = {}
 PROGRESS_PERCENTAGES = {}
+PROGRESS_SPEED_SAMPLES = {}
 
 # In-Memory Per-Message / Callback Deduplication Cache
 from collections import OrderedDict
@@ -266,6 +278,7 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     if msg_id in CANCEL_REQUESTS or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS)):
         PROGRESS_TIMESTAMPS.pop(key, None)
         PROGRESS_PERCENTAGES.pop(key, None)
+        PROGRESS_SPEED_SAMPLES.pop(key, None)
         raise StopTransmission("Operation Cancelled by User")
 
     now = time.time()
@@ -278,8 +291,21 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     if ((now - last_update >= 6.0 and pct_diff >= 3.0) or (now - last_update >= 12.0) or (current == total)):
         PROGRESS_TIMESTAMPS[key] = now
         PROGRESS_PERCENTAGES[key] = percentage
+
+        # Smooth 5-second rolling average speed
+        samples = PROGRESS_SPEED_SAMPLES.setdefault(key, [])
+        samples.append((now, current))
+        while len(samples) > 1 and now - samples[0][0] > 5.0:
+            samples.pop(0)
+        if len(samples) >= 2:
+            time_delta = samples[-1][0] - samples[0][0]
+            bytes_delta = samples[-1][1] - samples[0][1]
+            speed = (bytes_delta / time_delta) if time_delta > 0 else 0
+        else:
+            diff = max(now - start, 0.001)
+            speed = (current / diff) if diff > 0 else 0
+
         diff = max(now - start, 0.001)
-        speed = (current / diff) if diff > 0 else 0
         elapsed_time = round(diff) * 1000
         time_to_completion = (round((total - current) / speed) * 1000) if speed > 0 else 0
 
@@ -310,6 +336,7 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
                 pass
             PROGRESS_TIMESTAMPS.pop(key, None)
             PROGRESS_PERCENTAGES.pop(key, None)
+            PROGRESS_SPEED_SAMPLES.pop(key, None)
         else:
             async def _bg_edit():
                 try:

@@ -1,13 +1,24 @@
+import os
 import sys
-import asyncio
-import psutil
 import time
+import math
+import html
 import shutil
+import asyncio
+import traceback
+import inspect
+import gc
+import random
+import logging
+import psutil
 from pyrogram import Client, filters, enums, __version__
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from helper.database import db, TIER_NAMES
 from config import Config, Txt, parse_channel_id  
 from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content, is_duplicate_update
+
+logger = logging.getLogger(__name__)
+log = logger
 
 _DB_TIMEOUT = 5  # seconds – guard so DB never blocks message handlers
 
