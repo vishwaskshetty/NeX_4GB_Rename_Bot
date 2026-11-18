@@ -1,4 +1,8 @@
 import time
+import copy
+import sys
+import traceback
+import html
 from datetime import datetime
 import motor.motor_asyncio
 import pytz
@@ -1358,7 +1362,6 @@ class Database:
         cached = _cache_get("premium_pricing")
         if cached is not None:
             return cached
-        import copy
         doc = await self.cfg.find_one({'_id': 'premium_pricing'})
         if not doc or not doc.get("pricing"):
             res = copy.deepcopy(PLAN_PRICING)
@@ -1377,7 +1380,6 @@ class Database:
 
     async def set_plan_price(self, tier: int, days: int, price: int) -> bool:
         """Sets a plan price with strict 1:1 parity between INR and Stars."""
-        import copy
         pricing = await self.get_premium_pricing()
         tier = int(tier)
         days = int(days)
@@ -1412,7 +1414,6 @@ class Database:
 
     async def reset_pricing_defaults(self) -> dict:
         """Resets pricing back to default PLAN_PRICING with +30% 1:1 parity."""
-        import copy
         db_doc = {str(k): {str(sub_k): sub_v for sub_k, sub_v in v.items()} for k, v in PLAN_PRICING.items()}
         await self.cfg.update_one({'_id': 'premium_pricing'}, {'$set': {'pricing': db_doc}}, upsert=True)
         _cache_invalidate("premium_pricing")

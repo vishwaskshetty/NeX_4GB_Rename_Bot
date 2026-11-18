@@ -7,6 +7,7 @@ from pyrogram import Client, raw
 from pyrogram.types import Message
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from config import Config, parse_channel_id
+from helper.fast_transfer import get_media_session
 
 log = logging.getLogger(__name__)
 
@@ -127,8 +128,6 @@ class TelegramVirtualDisk:
         target_bytes = min(file_size, max_bytes) if file_size > 0 else max_bytes
         chunk_size = 512 * 1024
         total_parts_needed = max(1, math.ceil(target_bytes / chunk_size))
-
-        from helper.fast_transfer import get_media_session
 
         try:
             decoded = FileId.decode(file_obj.file_id)

@@ -1,6 +1,9 @@
 import os
 import sys
 import time
+import io
+import traceback
+import html
 import shutil
 import psutil
 import asyncio
@@ -751,7 +754,6 @@ async def cb_owner_export_users_handler(client, query: CallbackQuery):
         return await query.answer("❌ Owner only access!", show_alert=True)
     await query.answer("Generating CSV export... ⏳")
     csv_data = await db.export_all_users_csv()
-    import io
     bio = io.BytesIO(csv_data.encode("utf-8"))
     bio.name = f"nex_users_export_{int(time.time())}.csv"
     await client.send_document(

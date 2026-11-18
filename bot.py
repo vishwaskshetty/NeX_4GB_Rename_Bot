@@ -1,6 +1,10 @@
 import os
 import sys
 import socket
+import tempfile
+import traceback
+import html
+import aiohttp
 
 # High-Speed C++ based uvloop Event Loop for Linux (100-200 MB/s transfers)
 try:
@@ -371,7 +375,6 @@ class Bot(Client):
         if not ping_url:
             return
 
-        import aiohttp
         while self._is_running:
             try:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
@@ -440,7 +443,6 @@ class Bot(Client):
 
                 # Also write to OS temp directory (for Windows / container environments)
                 try:
-                    import tempfile
                     local_hb = os.path.join(tempfile.gettempdir(), "nex_bot_heartbeat.txt")
                     with open(local_hb, "w", encoding="utf-8") as f:
                         f.write(hb_ts)

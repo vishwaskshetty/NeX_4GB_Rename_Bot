@@ -8,6 +8,17 @@ from datetime import datetime
 from pytz import timezone
 from config import Config, Txt, parse_channel_id 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+try:
+    from pyrogram.types import ReplyParameters
+except ImportError:
+    ReplyParameters = None
+
+try:
+    from PIL import Image, ImageOps, ImageEnhance
+except ImportError:
+    Image = None
+    ImageOps = None
+    ImageEnhance = None
 from pyrogram.errors import FloodWait, MessageNotModified
 try:
     from pyrogram import StopTransmission
@@ -48,11 +59,12 @@ def safe_reply_params(message_id: int):
     """
     if not message_id:
         return {}
-    try:
-        from pyrogram.types import ReplyParameters
-        return {"reply_parameters": ReplyParameters(message_id=int(message_id))}
-    except (TypeError, ImportError, Exception):
-        return {"reply_to_message_id": int(message_id)}
+    if ReplyParameters is not None:
+        try:
+            return {"reply_parameters": ReplyParameters(message_id=int(message_id))}
+        except Exception:
+            pass
+    return {"reply_to_message_id": int(message_id)}
 
 
 def sanitize_secrets(text: str) -> str:
@@ -193,8 +205,9 @@ def prepare_crisp_thumbnail(raw_image_path: str, out_path: str = None) -> Option
     """
     if not raw_image_path or not os.path.exists(raw_image_path):
         return None
+    if not Image:
+        return raw_image_path
     try:
-        from PIL import Image, ImageOps, ImageEnhance
         out_path = out_path or raw_image_path
 
         with Image.open(raw_image_path) as img:

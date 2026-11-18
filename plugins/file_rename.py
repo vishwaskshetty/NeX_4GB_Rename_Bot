@@ -1,10 +1,14 @@
 import os
+import sys
 import time
 import re
 import math
 import gc
 import shutil
 import asyncio
+import traceback
+import html
+import random
 import mimetypes
 import warnings
 import humanize
@@ -1306,7 +1310,6 @@ async def execute_rename_pipeline(
                     raise
                 except Exception as down_err:
                     print(f"⚠️ fast_download error: {down_err}. Retrying fast_download with primary session...")
-                    import traceback
                     traceback.print_exc()
                     path = await fast_download(
                         client=client,
@@ -1417,7 +1420,6 @@ async def execute_rename_pipeline(
                     raise
                 except Exception as up_err:
                     print(f"⚠️ fast_upload failed ({up_err}). Falling back to standard Pyrogram send...")
-                    import traceback
                     traceback.print_exc()
                     uploaded_file = None
 
@@ -1851,7 +1853,6 @@ async def execute_rename_pipeline(
                 asyncio.create_task(_auto_delete_copyright_media(user_id, user_sent_msgs))
 
     except Exception as e:
-        import traceback
         err_trace = traceback.format_exc()
         print(f"❌ [PIPELINE ERROR] {type(e).__name__}: {e}\n{err_trace}")
         log_ch = parse_channel_id(Config.LOG_CHANNEL or -1003792044224)

@@ -1,9 +1,15 @@
 import os
+import sys
+import time
 import math
+import shutil
+import random
 import asyncio
 import inspect
 import logging
 import hashlib
+import traceback
+import html
 from typing import Callable, Optional, List, Union
 import pyrogram
 from pyrogram import Client, raw, types, utils, enums
@@ -633,7 +639,8 @@ async def zero_disk_turbo_pipe(
     file_obj_bot = (
         getattr(staged_msg, "document", None) or
         getattr(staged_msg, "video", None) or
-        getattr(staged_msg, "audio", None)
+        getattr(staged_msg, "audio", None) or
+        getattr(staged_msg, "photo", None)
     )
     if not file_obj_bot or not hasattr(file_obj_bot, "file_id"):
         raise ValueError("Invalid staged message media for zero-disk pipe")
@@ -657,7 +664,7 @@ async def zero_disk_turbo_pipe(
     dc_id = decoded_bot.dc_id
     file_type = decoded_bot.file_type
 
-    if file_type == FileType.PHOTO:
+    if file_type in (FileType.PHOTO, FileType.CHAT_PHOTO):
         location_bot = raw.types.InputPhotoFileLocation(
             id=decoded_bot.media_id,
             access_hash=decoded_bot.access_hash,
@@ -700,7 +707,7 @@ async def zero_disk_turbo_pipe(
                 )
                 if user_file_obj and hasattr(user_file_obj, "file_id"):
                     decoded_user = FileId.decode(user_file_obj.file_id)
-                    if decoded_user.file_type == FileType.PHOTO:
+                    if decoded_user.file_type in (FileType.PHOTO, FileType.CHAT_PHOTO):
                         location_user = raw.types.InputPhotoFileLocation(
                             id=decoded_user.media_id,
                             access_hash=decoded_user.access_hash,
@@ -729,7 +736,11 @@ async def zero_disk_turbo_pipe(
             user_sessions = []
 
     bot_pool_size = 6 if user_sessions else 16
-    bot_sessions = await MediaSessionPool.get_pool(client, dc_id, pool_size=bot_pool_size)
+    try:
+        bot_sessions = await MediaSessionPool.get_pool(client, dc_id, pool_size=bot_pool_size)
+    except Exception as bs_err:
+        log.warning(f"MediaSessionPool.get_pool for bot failed ({bs_err}). Falling back to primary media session.")
+        bot_sessions = [await get_media_session(client, dc_id)]
 
     down_streams = []
     for s in user_sessions:
@@ -741,7 +752,14 @@ async def zero_disk_turbo_pipe(
         down_streams.append((await get_media_session(client, dc_id), client, location_bot, "bot"))
 
     main_dc = await uploader.storage.dc_id()
-    up_sessions = await MediaSessionPool.get_pool(uploader, main_dc, pool_size=16)
+    try:
+        up_sessions = await MediaSessionPool.get_pool(uploader, main_dc, pool_size=16)
+    except Exception as up_pool_err:
+        log.warning(f"MediaSessionPool.get_pool for uploader failed ({up_pool_err}). Falling back to primary media session.")
+        up_sessions = [await get_media_session(uploader, main_dc)]
+
+    if not up_sessions:
+        up_sessions = [await get_media_session(uploader, main_dc)]
 
     # 4. In-Memory Sliding RAM Queue (96 parts of 512KB = 48MB buffer)
     pipe_queue = asyncio.Queue(maxsize=96)
@@ -1046,12 +1064,20 @@ async def send_input_file_big(
     msg_entities = None
     if caption:
         try:
-            parsed = await uploader_client.parser.parse(caption, "html")
+            if hasattr(uploader_client, "parser") and hasattr(uploader_client.parser, "parse"):
+                parsed = await uploader_client.parser.parse(caption, enums.ParseMode.HTML)
+            else:
+                parsed = utils.parse_text_entities(uploader_client, caption, parse_mode=enums.ParseMode.HTML, entities=None)
             msg_text = parsed.get("message", "")
             msg_entities = parsed.get("entities", [])
         except Exception:
-            msg_text = caption
-            msg_entities = None
+            try:
+                parsed = utils.parse_text_entities(uploader_client, caption, parse_mode=enums.ParseMode.HTML, entities=None)
+                msg_text = parsed.get("message", "")
+                msg_entities = parsed.get("entities", [])
+            except Exception:
+                msg_text = str(caption)
+                msg_entities = None
 
     # 7. Send Media via MTProto SendMedia
     rpc_kwargs = {

@@ -4,6 +4,13 @@ import shutil
 import asyncio
 from typing import Tuple, List, Dict
 
+try:
+    from hachoir.metadata import extractMetadata
+    from hachoir.parser import createParser
+except ImportError:
+    extractMetadata = None
+    createParser = None
+
 # NeX 4GB Rename Bot - FFmpeg Engine
 # Developed by @Nex_bots
 
@@ -270,10 +277,8 @@ async def get_video_duration_and_dims(file_path: str) -> Tuple[int, int, int]:
         pass
 
     # 2. Fallback to hachoir if ffprobe was missing or incomplete
-    if not (duration and width and height):
+    if not (duration and width and height) and createParser and extractMetadata:
         try:
-            from hachoir.metadata import extractMetadata
-            from hachoir.parser import createParser
             parser = createParser(file_path)
             if parser:
                 with parser:
