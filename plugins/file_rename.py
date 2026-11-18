@@ -68,8 +68,8 @@ from bot import app_4gb
 # Global concurrency queue lock - Max 10 heavy operations at once
 RENAME_SEMAPHORE = asyncio.Semaphore(10)
 
-# Smart High-Speed Concurrency Semaphore: Max 2 simultaneous 40-80+ MB/s turbo streams
-_TRANSFER_SEMAPHORE = asyncio.Semaphore(2)
+# Strict 1-File-At-A-Time Full-Bandwidth Execution Semaphore
+_TRANSFER_SEMAPHORE = asyncio.Semaphore(1)
 _TRANSFER_WAITING_TASKS: list[str] = []
 
 # Per-user active task tracking & pre-rename extras cache
@@ -1111,11 +1111,12 @@ async def execute_rename_pipeline(
             wm_info = await db.get_watermark(user_id)
             wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
 
-            # Zero-Disk Turbo Pipe is ALWAYS used when watermark is False and audio/sub stripping is not requested
+            # Zero-Disk Turbo Pipe is MANDATORY DEFAULT for all renames unless explicitly requested remux
             # Custom thumbnails, custom captions, and bottom captions attach natively in MTProto without disk remuxing!
             strip_audio = bool(extras.get("strip_audio")) if isinstance(extras, dict) else False
             strip_sub = bool(extras.get("strip_sub")) if isinstance(extras, dict) else False
-            is_remux_needed = bool(wm_enabled or strip_audio or strip_sub)
+            convert_container = bool(extras.get("convert_container") or extras.get("remux")) if isinstance(extras, dict) else False
+            is_remux_needed = bool(wm_enabled or strip_audio or strip_sub or convert_container)
 
             # 0. Telegram Virtual Disk Instant 0.05s Staging
             vdisk_ch = get_virtual_disk_channel(client)
@@ -1218,16 +1219,16 @@ async def execute_rename_pipeline(
 
             ph_path = await _prepare_thumb()
 
-            # 2-Task Concurrency Semaphore for high-speed turbo transfers
+            # 1-Task Concurrency Semaphore for full-bandwidth turbo transfers (100% bandwidth per file)
             task_queue_key = f"{user_id}_{ms.id}"
             transfer_sem_held = False
             if _TRANSFER_SEMAPHORE.locked():
                 _TRANSFER_WAITING_TASKS.append(task_queue_key)
-                pos = len(_TRANSFER_WAITING_TASKS)
                 try:
                     await ms.edit(
-                        f"⏳ <b>Qᴜᴇᴜᴇᴅ ꜰᴏʀ Tᴜʀʙᴏ Sᴛʀᴇᴀᴍɪɴɢ (Position #{pos})... ⚡</b>\n\n"
-                        f"<i>Direct 20-Socket high-speed streaming will begin automatically as soon as previous task finishes!</i>",
+                        "⏳ <b>Qᴜᴇᴜᴇᴅ ꜰᴏʀ Tᴜʀʙᴏ Sᴛʀᴇᴀᴍɪɴɢ... ⚡</b>\n\n"
+                        "▸ <i>Yᴏᴜʀ ꜰɪʟᴇ ᴡɪʟʟ ꜱᴛᴀʀᴛ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ɪɴ ᴀ ꜰᴇᴡ ꜱᴇᴄᴏɴᴅꜱ!</i>\n"
+                        "<i>(100% full gigabit bandwidth and 32 parallel workers focused on 1 task at a time)</i>",
                         reply_markup=cancel_btn
                     )
                 except Exception:
@@ -1257,7 +1258,7 @@ async def execute_rename_pipeline(
                 try:
                     turbo_header = "⚡ <b>ᴢᴇʀᴏ-ᴅɪꜱᴋ ᴛᴜʀʙᴏ ꜱᴛʀᴇᴀᴍɪɴɢ... 🚀</b>"
                     await ms.edit(
-                        f"{turbo_header}\n\n<i>Direct 20-Socket Dual-Client RAM Pipe active (40-80+ MB/s)...</i>",
+                        f"{turbo_header}\n\n<i>Direct 32-Worker Dual-Client RAM Pipe active (40-80+ MB/s)...</i>",
                         reply_markup=cancel_btn
                     )
                     upload_start = time.time()
@@ -1276,9 +1277,9 @@ async def execute_rename_pipeline(
                 except StopTransmission:
                     raise
                 except Exception as pipe_err:
-                    print(f"⚠️ zero_disk_turbo_pipe failed: {pipe_err}. Falling back to multi-socket disk pipeline...")
-                    import traceback
-                    traceback.print_exc()
+                    err_trace = traceback.format_exc()
+                    print(f"⚠️ [ZERO-DISK ERROR] zero_disk_turbo_pipe failed: {pipe_err}\n{err_trace}")
+                    log.error(f"zero_disk_turbo_pipe failed ({type(pipe_err).__name__}: {pipe_err}): {err_trace}")
                     use_zero_disk = False
                     uploaded_file = None
 
