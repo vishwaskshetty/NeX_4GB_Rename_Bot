@@ -163,6 +163,7 @@ class Database:
             username=username or "",
             file_id=None,
             caption=None,
+            bottom_caption=None,
             prefix=None,
             suffix=None,
             user_dump=None,
@@ -260,8 +261,23 @@ class Database:
         _cache_invalidate(f"user_settings:{id}")
 
     async def get_caption(self, id):
+        cached = _cache_get(f"user_settings:{id}")
+        if cached and "caption" in cached:
+            return cached["caption"]
         user = await self.col.find_one({'_id': int(id)})
         return user.get('caption', None) if user else None
+
+    # Bottom Caption / Footer methods
+    async def set_bottom_caption(self, id, bottom_caption):
+        await self.col.update_one({'_id': int(id)}, {'$set': {'bottom_caption': bottom_caption}}, upsert=True)
+        _cache_invalidate(f"user_settings:{id}")
+
+    async def get_bottom_caption(self, id):
+        cached = _cache_get(f"user_settings:{id}")
+        if cached and "bottom_caption" in cached:
+            return cached["bottom_caption"]
+        user = await self.col.find_one({'_id': int(id)})
+        return user.get('bottom_caption', None) if user else None
         
     # Prefix methods
     async def set_prefix(self, id, prefix):
@@ -377,6 +393,7 @@ class Database:
             res = {
                 "thumbnail": None,
                 "caption": None,
+                "bottom_caption": None,
                 "prefix": None,
                 "suffix": None,
                 "metadata_bool": True,
@@ -394,6 +411,7 @@ class Database:
         res = {
             "thumbnail": user.get('file_id', None),
             "caption": user.get('caption', None),
+            "bottom_caption": user.get('bottom_caption', None),
             "prefix": user.get('prefix', None),
             "suffix": user.get('suffix', None),
             "metadata_bool": bool(user.get('metadata_bool', True)),

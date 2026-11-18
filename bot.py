@@ -35,13 +35,12 @@ from helper.database import db
 # Support for channels with large IDs
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 
-# Bot Process Start Time & Drain Mode Tracker
+# Bot Process Start Time & Continuous Uptime Tracker
 BOT_START_TIME = time.time()
-BOT_HANDOFF_DURATION = 10500  # 2h 55m handoff threshold for 3-hour cron cycle
 
 def is_in_drain_mode() -> bool:
-    """Returns True if the bot has been running for >= 2 hours 55 minutes (10,500s) and is preparing for high-speed cloud handoff."""
-    return (time.time() - BOT_START_TIME) >= BOT_HANDOFF_DURATION
+    """Always returns False - continuous 24/7 high-speed operation without task pausing or cloud handoff blocking."""
+    return False
 
 def get_bot_uptime() -> float:
     """Returns uptime in seconds."""

@@ -44,6 +44,8 @@ async def build_settings_panel(user_id: int):
     wm_status = "✅ ON" if wm["enabled"] else "❌ OFF"
     thumb_status = "✅ Set" if settings["thumbnail"] else "❌ None"
     caption_status = "✅ Set" if settings["caption"] else "❌ None"
+    b_caption_val = settings.get("bottom_caption")
+    b_caption_status = "✅ Set" if b_caption_val else "❌ None"
     
     prefix_val = settings["prefix"]
     prefix_status = f"<code>{prefix_val[:8]}..</code>" if prefix_val and len(prefix_val) > 8 else (f"<code>{prefix_val}</code>" if prefix_val else "None")
@@ -63,7 +65,7 @@ async def build_settings_panel(user_id: int):
         f"▸ <b>🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ :</b> <code>{sample_status}</code>\n"
         f"▸ <b>📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ :</b> <code>{ss_status}</code>\n"
         f"▸ <b>🖼️ Tʜᴜᴍʙɴᴀɪʟ :</b> <code>{thumb_status}</code>\n"
-        f"▸ <b>📑 Cᴀᴘᴛɪᴏɴ :</b> <code>{caption_status}</code>\n"
+        f"▸ <b>📑 Cᴀᴘᴛɪᴏɴ :</b> <code>{caption_status}</code> | <b>Bᴏᴛᴛᴏᴍ :</b> <code>{b_caption_status}</code>\n"
         f"▸ <b>🔤 Pʀᴇꜰɪx / Sᴜꜰꜰɪx :</b> <code>{prefix_status}</code> / <code>{suffix_status}</code>\n"
         f"▸ <b>📤 Uᴘʟᴏᴀᴅ Mᴏᴅᴇ :</b> <code>{upload_mode}</code>\n"
         f"▸ <b>🏷️ Mᴇᴛᴀᴅᴀᴛᴀ :</b> {meta_status} (<code>{settings['metadata_code'][:16]}..</code>)\n"
@@ -100,11 +102,15 @@ async def build_settings_panel(user_id: int):
         ],
         [
             InlineKeyboardButton("📑 Cᴜꜱᴛᴏᴍ Cᴀᴘᴛɪᴏɴ", callback_data="cb_caption_menu"),
-            InlineKeyboardButton(f"📤 Uᴘʟᴏᴀᴅ: {upload_mode}", callback_data="cb_upload_mode_cycle")
+            InlineKeyboardButton("📝 Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ", callback_data="cb_bottom_caption_menu")
         ],
         [
-            InlineKeyboardButton("🔤 Pʀᴇꜰɪx / Sᴜꜰꜰɪx", callback_data="cb_prefix_suffix_menu"),
-            InlineKeyboardButton("🧹 Cʟᴇᴀɴᴇʀ Rᴜʟᴇꜱ", callback_data="set_view_cleaner")
+            InlineKeyboardButton(f"📤 Uᴘʟᴏᴀᴅ: {upload_mode}", callback_data="cb_upload_mode_cycle"),
+            InlineKeyboardButton("🔤 Pʀᴇꜰɪx / Sᴜꜰꜰɪx", callback_data="cb_prefix_suffix_menu")
+        ],
+        [
+            InlineKeyboardButton("🧹 Cʟᴇᴀɴᴇʀ Rᴜʟᴇꜱ", callback_data="set_view_cleaner"),
+            InlineKeyboardButton("📦 Dᴜᴍᴘ Cʜᴀɴɴᴇʟ", callback_data="set_view_dump")
         ],
         [
             meta_btn,
@@ -119,15 +125,14 @@ async def build_settings_panel(user_id: int):
             extract_btn
         ],
         [
-            InlineKeyboardButton("📦 Dᴜᴍᴘ Cʜᴀɴɴᴇʟ", callback_data="set_view_dump"),
-            InlineKeyboardButton("🌍 Tɪᴍᴇᴢᴏɴᴇ", callback_data="open_timezone_menu")
+            InlineKeyboardButton("🌍 Tɪᴍᴇᴢᴏɴᴇ", callback_data="open_timezone_menu"),
+            InlineKeyboardButton("👤 Mʏ Pʀᴏꜰɪʟᴇ", callback_data="cb_user_profile")
         ],
         [
-            InlineKeyboardButton("👤 Mʏ Pʀᴏꜰɪʟᴇ", callback_data="cb_user_profile"),
-            InlineKeyboardButton("🔄 Rᴇꜰʀᴇꜱʜ", callback_data="open_settings")
+            InlineKeyboardButton("🔄 Rᴇꜰʀᴇꜱʜ", callback_data="open_settings"),
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start")
         ],
         [
-            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start"),
             InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
         ]
     ]
@@ -556,6 +561,70 @@ async def cb_caption_menu(client, query: CallbackQuery):
 async def cb_clear_caption(client, query: CallbackQuery):
     await db.set_caption(query.from_user.id, None)
     await query.answer("Custom caption cleared! 🗑️")
+    text, markup = await build_settings_panel(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+
+
+# ==================== BOTTOM CAPTION / FOOTER CALLBACKS ====================
+
+@Client.on_callback_query(filters.regex(r"^cb_bottom_caption_menu$"))
+async def cb_bottom_caption_menu(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    current_b_cap = await db.get_bottom_caption(user_id)
+    b_cap_display = f"<code>{current_b_cap}</code>" if current_b_cap else "<i>None (Default)</i>"
+    text = (
+        "<b>◈ Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ / Fᴏᴏᴛᴇʀ Sᴇᴛᴛɪɴɢꜱ 📝</b>\n\n"
+        f"▸ <b>Cᴜʀʀᴇɴᴛ Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ :</b>\n{b_cap_display}\n\n"
+        "<i>This text appears automatically beneath your clean renamed file name on every delivery!</i>\n\n"
+        "<b>Cᴏᴍᴍᴀɴᴅꜱ :</b>\n"
+        "• <code>/set_bottom_caption &lt;text&gt;</code> - Set bottom caption\n"
+        "• <code>/see_bottom_caption</code> - View current bottom caption\n"
+        "• <code>/del_bottom_caption</code> - Delete bottom caption\n\n"
+        "⚡ @Nex_bots"
+    )
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Sᴇᴛ", callback_data="cb_set_bottom_caption"),
+            InlineKeyboardButton("👁️ Vɪᴇᴡ", callback_data="cb_view_bottom_caption"),
+            InlineKeyboardButton("🗑️ Dᴇʟᴇᴛᴇ", callback_data="cb_delete_bottom_caption")
+        ],
+        [InlineKeyboardButton("⬅️ Bᴀᴄᴋ", callback_data="open_settings"),
+         InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
+    ])
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_set_bottom_caption$"))
+async def cb_set_bottom_caption(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    USER_STATE[user_id] = "waiting_bottom_caption"
+    await query.message.reply_text(
+        "📝 <b>◈ Sᴇᴛ Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ / Fᴏᴏᴛᴇʀ</b>\n\n"
+        "<i>Please reply to this message with your desired footer text:</i>\n\n"
+        "<b>Example:</b>\n"
+        "<code>⚡ Powered by @Nex_bots\n📢 Join @Nex_Update</code>",
+        reply_markup=ForceReply(True)
+    )
+    await query.answer("Send your bottom caption text!")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_view_bottom_caption$"))
+async def cb_view_bottom_caption(client, query: CallbackQuery):
+    b_cap = await db.get_bottom_caption(query.from_user.id)
+    if b_cap:
+        await query.message.reply_text(
+            f"📝 <b><u>Your Active Bottom Caption</u>:</b>\n\n<code>{b_cap}</code>\n\n⚡ @Nex_bots"
+        )
+        await query.answer()
+    else:
+        await query.answer("❌ No bottom caption set!", show_alert=True)
+
+
+@Client.on_callback_query(filters.regex(r"^cb_delete_bottom_caption$"))
+async def cb_delete_bottom_caption(client, query: CallbackQuery):
+    await db.set_bottom_caption(query.from_user.id, None)
+    await query.answer("Bottom caption deleted! 🗑️", show_alert=True)
     text, markup = await build_settings_panel(query.from_user.id)
     await edit_message_content(query.message, text, reply_markup=markup)
 
@@ -1209,6 +1278,9 @@ async def commands_list_cmd(client, message):
         "• <code>/set_caption &lt;text&gt;</code> - Set custom formatted caption\n"
         "• <code>/see_caption</code> - View current caption\n"
         "• <code>/del_caption</code> - Delete custom caption\n"
+        "• <code>/set_bottom_caption &lt;text&gt;</code> - Set bottom caption footer\n"
+        "• <code>/see_bottom_caption</code> - View current bottom caption\n"
+        "• <code>/del_bottom_caption</code> - Delete bottom caption\n"
         "• <code>/view_thumb</code> - View current thumbnail\n"
         "• <code>/del_thumb</code> - Delete current thumbnail\n\n"
         "🏷️ <b>Prefix & Suffix:</b>\n"

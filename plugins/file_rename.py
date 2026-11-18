@@ -120,43 +120,6 @@ def get_full_mime_type(f: str) -> str:
     return mime or "application/octet-stream"
 
 
-_USER_FILE_COOLDOWN: dict[int, float] = {}
-
-async def check_user_cooldown(client, message_or_query, user_id: int) -> bool:
-    """
-    Enforces a mandatory 10-second per-user cooldown between file submissions and renames.
-    Returns True if on cooldown (request rejected), False if allowed to proceed.
-    """
-    now = time.time()
-    last_time = _USER_FILE_COOLDOWN.get(user_id, 0)
-    diff = now - last_time
-    if diff < 10.0:
-        wait_sec = int(math.ceil(10.0 - diff))
-        warn_text = (
-            f"⏳ <b>Cᴏᴏʟᴅᴏᴡɴ Aᴄᴛɪᴠᴇ!</b>\n\n"
-            f"▸ Pʟᴇᴀꜱᴇ ᴡᴀɪᴛ <b>{wait_sec} ꜱᴇᴄᴏɴᴅꜱ</b> ʙᴇꜰᴏʀᴇ ꜱᴇɴᴅɪɴɢ ᴏʀ ʀᴇɴᴀᴍɪɴɢ ᴀɴᴏᴛʜᴇʀ ꜰɪʟᴇ."
-        )
-        if isinstance(message_or_query, CallbackQuery):
-            await message_or_query.answer(f"⏳ Cooldown Active! Please wait {wait_sec}s.", show_alert=True)
-            return True
-        else:
-            try:
-                warn_msg = await message_or_query.reply_text(warn_text)
-                async def _auto_del(msg, delay):
-                    await asyncio.sleep(delay)
-                    try:
-                        await msg.delete()
-                    except Exception:
-                        pass
-                asyncio.create_task(_auto_del(warn_msg, wait_sec))
-            except Exception:
-                pass
-            return True
-
-    _USER_FILE_COOLDOWN[user_id] = now
-    return False
-
-
 def apply_cleaner(filename: str, clean_words: str, replace_words: str) -> str:
     base_name, ext = os.path.splitext(filename)
 
@@ -202,8 +165,6 @@ async def rename_start(client, message):
     if not message.from_user or message.from_user.is_bot:
         return
     user_id = message.from_user.id
-    if await check_user_cooldown(client, message, user_id):
-        return
     if message.chat and await is_duplicate_update(f"media_{message.chat.id}_{message.id}"):
         return
     file = message.document or message.video or message.audio
@@ -393,8 +354,6 @@ async def rename_start(client, message):
 @Client.on_callback_query(filters.regex(r'^auto_rename(?:_(\d+))?$'))
 async def auto_rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
-    if await check_user_cooldown(client, update, user_id):
-        return
     target_id = (
         (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
         or update.message.reply_to_message_id
@@ -443,8 +402,6 @@ async def auto_rename_handler(client, update: CallbackQuery):
 @Client.on_callback_query(filters.regex(r'^rename(?:_(\d+))?$'))
 async def rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
-    if await check_user_cooldown(client, update, user_id):
-        return
     file_msg_id = (
         (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
         or update.message.reply_to_message_id
@@ -791,6 +748,29 @@ async def refunc(client, message):
                 reply_markup=m
             )
 
+        # Check if user was replying to a Bottom Caption prompt
+        if user_state == "waiting_bottom_caption" or "bottom caption" in reply_prompt.lower():
+            USER_STATE.pop(user_id, None)
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+            if not message.text:
+                return await message.reply_text("❌ Please send text for your bottom caption.")
+            b_caption = message.text.strip()
+            await db.set_bottom_caption(user_id, bottom_caption=b_caption)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            from plugins.extra_features import build_settings_panel
+            t, m = await build_settings_panel(user_id)
+            return await client.send_message(
+                chat_id=user_id,
+                text=f"✅ <b>Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Fᴏᴏᴛᴇʀ :</b>\n<code>{b_caption}</code>\n\n⚡ @Nex_bots",
+                reply_markup=m
+            )
+
         new_name = message.text.strip()
         try:
             await message.delete()
@@ -1050,20 +1030,6 @@ async def execute_rename_pipeline(
     if await is_duplicate_update(task_key, ttl=10.0):
         print(f"⚠️ Duplicate execution prevented for task {task_key}")
         return
-    _USER_FILE_COOLDOWN[user_id] = time.time()
-
-    # 0. Check Drain Mode (Server 24/7 Cloud Handoff Window)
-    try:
-        from bot import is_in_drain_mode
-        if is_in_drain_mode():
-            return await ms.edit(
-                "🔄 <b>Server is performing a 30-second high-speed cloud handoff...</b>\n\n"
-                "To ensure 100% transfer integrity, new tasks are briefly paused.\n"
-                "Please wait ~30-60 seconds and try again! ⚡",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close")]])
-            )
-    except Exception:
-        pass
 
     # Verify Concurrency & Queue Limit (Free = 1 conc / 3 queue, Premium = 4 conc / 15 queue)
     prem_info = await db.get_premium_info(user_id)
@@ -1416,19 +1382,27 @@ async def execute_rename_pipeline(
                     traceback.print_exc()
                     uploaded_file = None
 
-            # 5. Format Clean Caption (100% Clean - NO copyright or branding inside file caption!)
+            # 5. Format Clean Caption (Clean filename on top, custom caption, and bottom caption / footer)
             c_caption = await db.get_caption(user_id)
+            b_caption = await db.get_bottom_caption(user_id)
             if c_caption:
                 try:
-                    caption = c_caption.format(
-                        filename=new_filename,
-                        filesize=humanbytes(actual_file_size),
-                        duration=convert(duration)
-                    )
+                    if "{filename}" in c_caption:
+                        caption = c_caption.format(
+                            filename=new_filename,
+                            filesize=humanbytes(actual_file_size),
+                            duration=convert(duration)
+                        )
+                    else:
+                        caption = f"<b>{new_filename}</b>\n\n{c_caption}"
                 except Exception:
-                    caption = f"**{new_filename}**"
+                    caption = f"<b>{new_filename}</b>\n\n{c_caption}"
+                if b_caption and b_caption.strip() not in caption:
+                    caption = f"{caption}\n\n{b_caption.strip()}"
+            elif b_caption and b_caption.strip():
+                caption = f"<b>{new_filename}</b>\n\n{b_caption.strip()}"
             else:
-                caption = f"**{new_filename}**"
+                caption = f"<b>{new_filename}</b>"
 
             # Check Bot Content Protection status
             protect_content = await db.get_protect_content()
@@ -1796,8 +1770,6 @@ async def execute_rename_pipeline(
             pass
         if 'work_dir' in locals() and os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
-        if 'user_id' in locals() and user_id:
-            _USER_FILE_COOLDOWN[user_id] = time.time()
         gc.collect()
 
 

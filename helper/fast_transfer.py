@@ -302,7 +302,7 @@ async def fast_download(
                 chunk_len = min(CHUNK_SIZE, file_size - offset_bytes) if file_size > 0 else CHUNK_SIZE
                 success = False
 
-                for attempt in range(3):
+                for attempt in range(5):
                     if error_holder:
                         break
                     try:
@@ -344,10 +344,26 @@ async def fast_download(
                         error_holder.append(StopTransmission("Download Cancelled"))
                         break
                     except Exception as ex:
-                        if attempt == 2:
+                        err_name = type(ex).__name__
+                        if "FileReference" in err_name or "file_reference" in str(ex).lower():
+                            if hasattr(message_or_file, "chat") and hasattr(message_or_file, "id") and message_or_file.chat:
+                                try:
+                                    refreshed = await client.get_messages(message_or_file.chat.id, message_or_file.id)
+                                    if refreshed:
+                                        ref_obj = refreshed.document or refreshed.video or refreshed.audio or refreshed.photo
+                                        if ref_obj and hasattr(ref_obj, "file_id"):
+                                            ref_decoded = FileId.decode(ref_obj.file_id)
+                                            location.file_reference = ref_decoded.file_reference
+                                except Exception:
+                                    pass
+                        if "FloodWait" in err_name:
+                            wait_s = getattr(ex, "value", 5) or 5
+                            await asyncio.sleep(min(wait_s, 30))
+                        elif attempt == 4:
                             error_holder.append(ex)
                             break
-                        await asyncio.sleep(0.5 * (attempt + 1))
+                        else:
+                            await asyncio.sleep(0.5 * (attempt + 1))
                 queue.task_done()
 
         async def writer():
@@ -702,7 +718,7 @@ async def zero_disk_turbo_pipe(
             )
 
             chunk_data = None
-            for attempt in range(3):
+            for attempt in range(5):
                 if error_holder:
                     break
                 try:
@@ -717,7 +733,23 @@ async def zero_disk_turbo_pipe(
                     break
                 except Exception as ex:
                     log.warning(f"zero_disk_turbo_pipe download worker {wid} part {part_idx} attempt {attempt+1} error: {ex}")
-                    if attempt == 2:
+                    err_name = type(ex).__name__
+                    if "FileReference" in err_name or "file_reference" in str(ex).lower():
+                        if hasattr(staged_msg, "chat") and hasattr(staged_msg, "id") and staged_msg.chat:
+                            try:
+                                refreshed = await client.get_messages(staged_msg.chat.id, staged_msg.id)
+                                if refreshed:
+                                    ref_obj = refreshed.document or refreshed.video or refreshed.audio or refreshed.photo
+                                    if ref_obj and hasattr(ref_obj, "file_id"):
+                                        ref_decoded = FileId.decode(ref_obj.file_id)
+                                        location.file_reference = ref_decoded.file_reference
+                                        rpc.location.file_reference = ref_decoded.file_reference
+                            except Exception:
+                                pass
+                    if "FloodWait" in err_name:
+                        wait_s = getattr(ex, "value", 5) or 5
+                        await asyncio.sleep(min(wait_s, 30))
+                    elif attempt == 4:
                         import traceback
                         traceback.print_exc()
                         error_holder.append(ex)
@@ -765,7 +797,7 @@ async def zero_disk_turbo_pipe(
                 )
 
             success = False
-            for attempt in range(3):
+            for attempt in range(5):
                 if error_holder:
                     break
                 try:
@@ -780,7 +812,11 @@ async def zero_disk_turbo_pipe(
                     break
                 except Exception as ex:
                     log.warning(f"zero_disk_turbo_pipe upload worker {wid} part {part_idx} attempt {attempt+1} error: {ex}")
-                    if attempt == 2:
+                    err_name = type(ex).__name__
+                    if "FloodWait" in err_name:
+                        wait_s = getattr(ex, "value", 5) or 5
+                        await asyncio.sleep(min(wait_s, 30))
+                    elif attempt == 4:
                         import traceback
                         traceback.print_exc()
                         error_holder.append(ex)

@@ -42,6 +42,40 @@ async def see_caption(client, message):
         await message.reply_text("❌ <b>You do not have any custom caption set!</b>\n\nUse <code>/set_caption &lt;text&gt;</code> to set one.")
 
 
+# ==================== BOTTOM CAPTION / FOOTER COMMANDS ====================
+
+@Client.on_message(filters.private & filters.command(['set_bottom_caption', 'bottom_caption']))
+async def add_bottom_caption(client, message):
+    if len(message.command) == 1:
+        return await message.reply_text(
+            "<b>Please provide a bottom caption / footer!</b>\n\n"
+            "This caption appears automatically beneath your clean renamed file name on every file.\n\n"
+            "<b>Example:</b>\n"
+            "<code>/set_bottom_caption ⚡ Powered by @Nex_bots\n📢 Join @Nex_Update</code>"
+        )
+    bottom_caption = message.text.split(" ", 1)[1]
+    await db.set_bottom_caption(message.from_user.id, bottom_caption=bottom_caption)
+    await message.reply_text("✅ <b>Your Bottom Caption / Footer has been saved successfully!</b>\n\n⚡ @Nex_bots")
+
+
+@Client.on_message(filters.private & filters.command(['del_bottom_caption', 'delbottom_caption', 'delete_bottom_caption']))
+async def delete_bottom_caption(client, message):
+    b_cap = await db.get_bottom_caption(message.from_user.id)
+    if not b_cap:
+        return await message.reply_text("❌ <b>You do not have any active bottom caption!</b>")
+    await db.set_bottom_caption(message.from_user.id, bottom_caption=None)
+    await message.reply_text("🗑️ <b>Bottom Caption Deleted Successfully!</b>\n\n⚡ @Nex_bots")
+
+
+@Client.on_message(filters.private & filters.command(['see_bottom_caption', 'view_bottom_caption']))
+async def see_bottom_caption(client, message):
+    b_cap = await db.get_bottom_caption(message.from_user.id)
+    if b_cap:
+        await message.reply_text(f"📝 <b><u>Your Current Bottom Caption</u>:</b>\n\n<code>{b_cap}</code>\n\n⚡ @Nex_bots")
+    else:
+        await message.reply_text("❌ <b>You do not have any bottom caption set!</b>\n\nUse <code>/set_bottom_caption &lt;text&gt;</code> to set one.")
+
+
 @Client.on_message(filters.private & filters.command(['view_thumb', 'viewthumb']))
 async def viewthumb(client, message):    
     thumb = await db.get_thumbnail(message.from_user.id)
