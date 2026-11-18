@@ -40,7 +40,14 @@ try:
 except ImportError:
     from pyrogram.errors import StopTransmission
 
-from helper.fast_transfer import fast_download, fast_upload, zero_disk_turbo_pipe, send_input_file_big
+from helper.fast_transfer import (
+    fast_download,
+    fast_upload,
+    zero_disk_turbo_pipe,
+    send_input_file_big,
+    _TRANSFER_SEMAPHORE,
+    _cleanup_memory
+)
 from helper.tg_virtual_disk import (
     TelegramVirtualDisk,
     get_virtual_disk_channel,
@@ -77,8 +84,7 @@ from bot import app_4gb
 # Global concurrency queue lock - Max 10 heavy operations at once
 RENAME_SEMAPHORE = asyncio.Semaphore(10)
 
-# Strict 1-File-At-A-Time Full-Bandwidth Execution Semaphore
-_TRANSFER_SEMAPHORE = asyncio.Semaphore(1)
+# Strict 1-File-At-A-Time Full-Bandwidth Execution Semaphore (imported from helper.fast_transfer)
 _TRANSFER_WAITING_TASKS: list[str] = []
 
 # Per-user active task tracking & pre-rename extras cache
@@ -557,6 +563,7 @@ async def extract_sample_only_cb(client, query: CallbackQuery):
         ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
         if os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
+        _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
 
 
 @Client.on_callback_query(filters.regex(r"^extract_ss_only(?:_(\d+))?$"))
@@ -660,6 +667,7 @@ async def extract_ss_only_cb(client, query: CallbackQuery):
         ACTIVE_WORK_DIRS.discard(os.path.abspath(work_dir))
         if os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
+        _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
 
 
 @Client.on_callback_query(filters.regex(r"^extract_streams(?:_(\d+))?$"))
@@ -1935,7 +1943,7 @@ async def execute_rename_pipeline(
             pass
         if 'work_dir' in locals() and os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
-        gc.collect()
+        _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
 
 
 @Client.on_message(filters.private & filters.command(["reset_task", "cleartask", "unfreeze"]))
@@ -1945,6 +1953,7 @@ async def reset_task_cmd(client, message):
     USER_FILE_CONTEXT.pop(user_id, None)
     USER_RENAME_CACHE.pop(user_id, None)
     await db.reset_user_tasks(user_id)
+    _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
     await message.reply_text(
         "✅ <b>Your active task queue and cache have been completely cleared!</b>\n\n"
         "You can now send files again smoothly. 🚀\n\n"

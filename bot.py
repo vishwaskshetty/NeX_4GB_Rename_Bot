@@ -50,6 +50,7 @@ from aiohttp import web
 from route import web_server
 import pyrogram.utils
 from helper.database import db
+from helper.fast_transfer import _cleanup_memory
 
 # Support for channels with large IDs
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
@@ -70,10 +71,14 @@ def _global_asyncio_exception_handler(loop, context):
     msg = context.get("message", "")
     if exc:
         exc_str = str(exc)
-        if any(err in exc_str for err in ["FloodWait", "PeerIdInvalid", "ConnectionResetError", "TimeoutError", "MessageNotModified", "MessageIdInvalid", "StopTransmission", "CancelledError"]):
-            log.warning(f"🛡️ Handled background task exception: {type(exc).__name__}: {exc}")
+        if any(err in exc_str for err in [
+            "FloodWait", "PeerIdInvalid", "ConnectionResetError", "TimeoutError",
+            "MessageNotModified", "MessageIdInvalid", "StopTransmission", "CancelledError",
+            "ServerDisconnectedError", "ClientConnectorError", "ClientOSError", "BrokenPipeError"
+        ]):
+            log.warning(f"🛡️ Handled non-fatal background task exception: {type(exc).__name__}: {exc}")
             return
-    log.error(f"🛡️ Caught unhandled asyncio task exception: {msg} | Exception: {exc}")
+    log.error(f"🛡️ Caught background asyncio task exception: {msg} | Exception: {exc}")
 
 # Bot Commands Definitions
 # 1. Public User Commands (Default Scope - 32 Commands with /start strictly #1)
@@ -380,29 +385,37 @@ class Bot(Client):
 
     async def _render_keep_alive(self):
         """
-        Self-Ping Keep-Alive Worker running every 4 minutes (240s).
-        Pings RENDER_EXTERNAL_URL or PING_URL so Render Free Tier never spins down.
+        Resilient background self-ping keep-alive task running every 240 seconds (4 minutes).
+        Pings https://nex-4gb-rename-bot-1.onrender.com/health inside a while True: loop
+        with full exception catching so it never dies and Render container stays awake 24/7.
         """
-        await asyncio.sleep(60)
-        ping_url = (
+        await asyncio.sleep(15)
+        raw_url = (
             getattr(Config, "RENDER_EXTERNAL_URL", "") or
             getattr(Config, "PING_URL", "") or
             os.environ.get("RENDER_EXTERNAL_URL", "") or
             os.environ.get("PING_URL", "") or
             "https://nex-4gb-rename-bot-1.onrender.com"
-        ).strip()
-        if not ping_url:
-            return
+        ).strip().rstrip("/")
+        ping_url = raw_url if raw_url.endswith("/health") else f"{raw_url}/health"
 
-        while self._is_running:
+        while True:
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
                     async with session.get(ping_url) as resp:
                         if resp.status == 200:
-                            print(f"⚡ [Keep-Alive] Self-ping successful: {ping_url} (200 OK)")
+                            data = await resp.json()
+                            ram_mb = data.get("ram_usage_mb", "?")
+                            print(f"⚡ [Keep-Alive] Self-ping successful: {ping_url} (200 OK | RAM: {ram_mb} MB)")
+                        else:
+                            print(f"⚠️ [Keep-Alive] Self-ping status {resp.status} for {ping_url}")
             except Exception as ping_err:
                 print(f"⚠️ [Keep-Alive] Ping note: {ping_err}")
-            await asyncio.sleep(240)
+
+            try:
+                await asyncio.sleep(240)
+            except Exception:
+                await asyncio.sleep(10)
 
     async def _mtproto_watchdog(self):
         """
@@ -425,18 +438,22 @@ class Bot(Client):
                 consecutive_socket_failures = 0
             except (asyncio.TimeoutError, Exception) as socket_err:
                 consecutive_socket_failures += 1
-                print(f"⚠️ [Watchdog] Telegram socket check failed (#{consecutive_socket_failures}/2): {socket_err}")
-                if consecutive_socket_failures >= 2:
-                    print("⚠️ [Watchdog] Telegram socket unresponsive! Triggering instant clean self-restart...")
+                print(f"⚠️ [Watchdog] Telegram socket check failed (#{consecutive_socket_failures}/3): {socket_err}")
+                if consecutive_socket_failures >= 3:
+                    print("🚨 [Watchdog] Fatal unrecoverable Telegram disconnect! Exiting with code 1 for container supervisor restart...")
                     try:
                         if self.app_4gb:
                             try:
                                 await self.app_4gb.stop()
                             except Exception:
                                 pass
+                        await self.stop()
                     except Exception:
                         pass
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                    try:
+                        sys.exit(1)
+                    finally:
+                        os._exit(1)
 
             # 3. Ping MongoDB via db.client.admin.command("ping")
             try:
@@ -470,11 +487,11 @@ class Bot(Client):
             except Exception:
                 pass
 
-            # 5. Run gc.collect() every 10 minutes (600s) to prevent memory fragmentation
+            # 5. Run memory scrubbing & malloc_trim every 10 minutes (600s) to lock RAM around ~100-140MB
             try:
                 now = time.time()
                 if now - last_gc_time >= 600:
-                    gc.collect()
+                    _cleanup_memory(self, getattr(self, "app_4gb", None))
                     last_gc_time = now
             except Exception:
                 pass
@@ -587,6 +604,9 @@ class Bot(Client):
 
                 if deleted_files > 0:
                     print(f"🧹 [Sweeper] Cleaned {deleted_files} orphaned files, freed {freed_bytes / (1024*1024):.2f} MB disk space.")
+
+                # Release freed memory pages back to Linux glibc
+                _cleanup_memory(self, getattr(self, "app_4gb", None))
 
             except Exception as sweeper_err:
                 print(f"⚠️ [Sweeper] Error during cleanup sweep: {sweeper_err}")

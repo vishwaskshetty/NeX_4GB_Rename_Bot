@@ -47,6 +47,111 @@ CONCURRENT_WORKERS_FREE = 12         # 12 concurrent MTProto worker coroutines
 CONCURRENT_WORKERS = 12              # 12 concurrent MTProto worker coroutines
 BUFFER_SIZE = 8 * 1024 * 1024        # 8MB RAM write/read buffer (strict RAM cap for 512MB container)
 
+# Activity timestamp to detect idle TCP sockets and trigger auto-reset (> 120s)
+_LAST_POOL_ACTIVITY: float = time.time()
+
+# Strict 1-File-At-A-Time Full-Bandwidth Execution Semaphore
+_TRANSFER_SEMAPHORE = asyncio.Semaphore(1)
+
+
+def _cleanup_memory(client: Optional[Client] = None, app_4gb: Optional[Client] = None) -> None:
+    """
+    Dedicated post-transfer memory scrubbing:
+    1. Clear Pyrogram's internal message cache (client.message_cache.clear() and app_4gb.message_cache.clear()).
+    2. Remove temporary files in /tmp or /dev/shm older than 15 minutes.
+    3. Run gc.collect() and release freed glibc heap pages back to Linux via ctypes CDLL malloc_trim(0).
+    """
+    # 1. Clear Pyrogram internal message caches
+    for c in (client, app_4gb):
+        if c is not None:
+            try:
+                mc = getattr(c, "message_cache", None)
+                if mc and hasattr(mc, "clear"):
+                    mc.clear()
+            except Exception:
+                pass
+            try:
+                st = getattr(c, "storage", None)
+                if st and hasattr(st, "message_cache"):
+                    st.message_cache.clear()
+            except Exception:
+                pass
+
+    # 2. Remove temporary files older than 15 minutes in /tmp and /dev/shm
+    try:
+        now = time.time()
+        cutoff_sec = 15 * 60  # 15 minutes
+        for tmp_dir in ("/tmp", "/dev/shm"):
+            if not os.path.exists(tmp_dir):
+                continue
+            for entry in os.listdir(tmp_dir):
+                if entry.startswith("nex_bot_heartbeat") or entry.startswith(".") or entry.endswith(".sock"):
+                    continue
+                full_path = os.path.join(tmp_dir, entry)
+                try:
+                    mtime = os.path.getmtime(full_path)
+                    if (now - mtime) >= cutoff_sec:
+                        if os.path.isdir(full_path):
+                            shutil.rmtree(full_path, ignore_errors=True)
+                        elif os.path.isfile(full_path):
+                            os.remove(full_path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 3. Python garbage collection
+    try:
+        gc.collect()
+    except Exception:
+        pass
+
+    # 4. Release freed glibc heap pages back to Linux OS
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+async def check_and_reset_idle_sessions(client: Client) -> None:
+    """
+    Checks if the session pool has been idle for more than 120 seconds.
+    If idle, cleanly closes and clears existing pooled sockets so that fresh TCP
+    sessions are instantiated, preventing stale TCP socket stalls at 0% or 50%.
+    """
+    global _LAST_POOL_ACTIVITY
+    now = time.time()
+    if (now - _LAST_POOL_ACTIVITY) > 120:
+        idle_duration = now - _LAST_POOL_ACTIVITY
+        log.info(f"🔄 Idle period of {idle_duration:.1f}s (> 120s) detected. Cleanly resetting pooled media sockets...")
+        clients = [client]
+        app_4gb = getattr(client, "app_4gb", None)
+        if app_4gb and app_4gb not in clients:
+            clients.append(app_4gb)
+
+        for cl in clients:
+            pools = getattr(cl, "_media_pools", {})
+            for dc_id, pool in list(pools.items()):
+                for s in pool:
+                    try:
+                        await asyncio.wait_for(s.stop(), timeout=2.0)
+                    except Exception:
+                        pass
+            if hasattr(cl, "_media_pools"):
+                cl._media_pools.clear()
+
+            media_sessions = getattr(cl, "media_sessions", {})
+            for dc_id, s in list(media_sessions.items()):
+                try:
+                    await asyncio.wait_for(s.stop(), timeout=2.0)
+                except Exception:
+                    pass
+            if hasattr(cl, "media_sessions"):
+                cl.media_sessions.clear()
+
+        _LAST_POOL_ACTIVITY = now
+
 
 def _instantiate_session(client: Client, dc_id: int, auth_key: bytes, test_mode: bool, is_media: bool = True) -> Session:
     """Instantiates a Session dynamically checking Session.__init__ signature for cross-fork compatibility."""
@@ -65,6 +170,8 @@ async def _get_or_create_session_pool(client: Client, dc_id: int, pool_size: int
     Step B: Extracts verified auth_key from base_session and clones independent TCP Session sockets.
     Step C: Handles cross-DC AuthExport/Import reliably with automatic retry.
     """
+    await check_and_reset_idle_sessions(client)
+
     if not hasattr(client, "_media_pools"):
         client._media_pools = {}
     if not hasattr(client, "_dc_auth_keys"):
@@ -188,17 +295,29 @@ async def get_media_session_pool(client: Client, dc_id: int, pool_size: int = 8)
 
 async def fast_download(
     client: Client,
-    message_or_file,
-    file_path: str,
+    message_or_file=None,
+    file_path: Optional[str] = None,
     progress: Optional[Callable] = None,
     progress_args: tuple = (),
-    is_prem: bool = False
+    is_prem: bool = False,
+    **kwargs
 ) -> str:
     """
-    Downloads media using multi-socket parallel MTProto chunk streaming with 8 independent TCP sessions
-    and 64MB buffered file I/O. Achieves 50-100+ MB/s transfers on gigabit cloud connections.
-    Safely falls back to client.download_media if any DC migration, CDN redirect, or FloodWait occurs.
+    Downloads media using multi-socket parallel MTProto chunk streaming with independent TCP sessions
+    and buffered file I/O. Achieves high-speed transfers on gigabit cloud connections.
+    Includes 25.0s per-chunk watchdog, 6 retries with automatic socket rotation, and idle session auto-reset.
+    Safely falls back to client.download_media if any unrecoverable error occurs.
     """
+    if message_or_file is None:
+        message_or_file = kwargs.get("message")
+    if file_path is None:
+        directory = kwargs.get("directory", ".")
+        file_name = kwargs.get("file_name", "downloaded_file")
+        file_path = os.path.join(directory, file_name)
+
+    # 0. Idle-Socket Auto-Reset for download client (> 120s idle)
+    await check_and_reset_idle_sessions(client)
+
     # Detect premium status from progress_args if provided
     try:
         if not is_prem and len(progress_args) >= 5 and progress_args[4] is not None:
@@ -299,7 +418,7 @@ async def fast_download(
 
         async def worker(worker_id: int):
             nonlocal downloaded_bytes
-            session = sessions[worker_id % len(sessions)]
+            global _LAST_POOL_ACTIVITY
             while not queue.empty():
                 if error_holder:
                     break
@@ -312,9 +431,11 @@ async def fast_download(
                 chunk_len = min(CHUNK_SIZE, file_size - offset_bytes) if file_size > 0 else CHUNK_SIZE
                 success = False
 
-                for attempt in range(5):
+                for attempt in range(6):
                     if error_holder:
                         break
+                    # Automatic socket rotation across pooled sessions
+                    session = sessions[(attempt + worker_id) % len(sessions)]
                     try:
                         r = await asyncio.wait_for(
                             session.invoke(
@@ -325,9 +446,10 @@ async def fast_download(
                                 ),
                                 sleep_threshold=getattr(client, "sleep_threshold", 60)
                             ),
-                            timeout=35.0
+                            timeout=25.0
                         )
                         if isinstance(r, raw.types.upload.File):
+                            _LAST_POOL_ACTIVITY = time.time()
                             if use_pwrite and fd is not None:
                                 os.pwrite(fd, r.bytes, offset_bytes)
                                 async with lock:
@@ -369,7 +491,7 @@ async def fast_download(
                         if "FloodWait" in err_name:
                             wait_s = getattr(ex, "value", 5) or 5
                             await asyncio.sleep(min(wait_s, 30))
-                        elif attempt == 4:
+                        elif attempt == 5:
                             error_holder.append(ex)
                             break
                         else:
@@ -428,6 +550,7 @@ async def fast_download(
             raise error_holder[0]
 
         if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            _cleanup_memory(client)
             return file_path
         else:
             raise ValueError("Zero-byte file produced by parallel stream")
@@ -467,6 +590,9 @@ async def fast_upload(
     file_size = os.path.getsize(file_path)
     if file_size == 0:
         raise ValueError("File size is 0 bytes")
+
+    # 0. Idle-Socket Auto-Reset for upload client (> 120s idle)
+    await check_and_reset_idle_sessions(client)
 
     # Detect premium status from progress_args if provided
     try:
@@ -513,7 +639,7 @@ async def fast_upload(
 
     async def worker(worker_id: int):
         nonlocal uploaded_bytes
-        session = sessions[worker_id % len(sessions)]
+        global _LAST_POOL_ACTIVITY
         while True:
             if error_holder:
                 break
@@ -543,27 +669,35 @@ async def fast_upload(
                 )
 
             success = False
-            for attempt in range(3):
+            for attempt in range(6):
                 if error_holder:
                     break
+                # Automatic socket rotation across pooled sessions
+                session = sessions[(attempt + worker_id) % len(sessions)]
                 try:
                     await asyncio.wait_for(
                         session.invoke(
                             rpc,
                             sleep_threshold=getattr(client, "sleep_threshold", 60)
                         ),
-                        timeout=35.0
+                        timeout=25.0
                     )
+                    _LAST_POOL_ACTIVITY = time.time()
                     success = True
                     break
                 except StopTransmission:
                     error_holder.append(StopTransmission("Upload Cancelled"))
                     break
                 except Exception as ex:
-                    if attempt == 4:
+                    err_name = type(ex).__name__
+                    if "FloodWait" in err_name:
+                        wait_s = getattr(ex, "value", 5) or 5
+                        await asyncio.sleep(min(wait_s, 30))
+                    elif attempt == 5:
                         error_holder.append(ex)
                         break
-                    await asyncio.sleep(0.5 * (attempt + 1))
+                    else:
+                        await asyncio.sleep(0.5 * (attempt + 1))
 
             if not success or error_holder:
                 queue.task_done()
@@ -595,6 +729,8 @@ async def fast_upload(
 
     if error_holder:
         raise error_holder[0]
+
+    _cleanup_memory(client)
 
     if is_big:
         return raw.types.InputFileBig(
@@ -652,6 +788,11 @@ async def zero_disk_turbo_pipe(
     file_size = getattr(file_obj_bot, "file_size", 0)
     if file_size == 0:
         raise ValueError("File size is 0 bytes")
+
+    # 0. Idle-Socket Auto-Reset for clients (> 120s idle)
+    await check_and_reset_idle_sessions(client)
+    if uploader and uploader != client:
+        await check_and_reset_idle_sessions(uploader)
 
     # Detect premium status from progress_args if provided
     try:
@@ -794,7 +935,7 @@ async def zero_disk_turbo_pipe(
     # 12 concurrent download worker coroutines across pooled media sessions (2 per socket, optimal for 0.1 vCPU)
     num_down_workers = min(12, total_parts)
     async def download_worker(wid: int):
-        session, acc_client, loc, tag = down_streams[wid % len(down_streams)]
+        global _LAST_POOL_ACTIVITY
         while True:
             if error_holder:
                 break
@@ -804,22 +945,23 @@ async def zero_disk_turbo_pipe(
                 break
 
             offset = part_idx * CHUNK_SIZE
-            rpc = raw.functions.upload.GetFile(
-                location=loc,
-                offset=offset,
-                limit=CHUNK_SIZE
-            )
-
             chunk_data = None
-            for attempt in range(5):
+            for attempt in range(6):
                 if error_holder:
                     break
+                session, acc_client, loc, tag = down_streams[(attempt + wid) % len(down_streams)]
+                rpc = raw.functions.upload.GetFile(
+                    location=loc,
+                    offset=offset,
+                    limit=CHUNK_SIZE
+                )
                 try:
                     res = await asyncio.wait_for(
                         session.invoke(rpc, sleep_threshold=getattr(acc_client, "sleep_threshold", 60)),
-                        timeout=35.0
+                        timeout=25.0
                     )
                     chunk_data = getattr(res, "bytes", b"")
+                    _LAST_POOL_ACTIVITY = time.time()
                     break
                 except StopTransmission:
                     error_holder.append(StopTransmission("Download Cancelled"))
@@ -846,7 +988,7 @@ async def zero_disk_turbo_pipe(
                     if "FloodWait" in err_name:
                         wait_s = getattr(ex, "value", 5) or 5
                         await asyncio.sleep(min(wait_s, 30))
-                    elif attempt == 4:
+                    elif attempt == 5:
                         log.warning(f"zero_disk_turbo_pipe {tag} download worker {wid} part {part_idx} failed: {ex}")
                         error_holder.append(ex)
                     else:
@@ -866,7 +1008,7 @@ async def zero_disk_turbo_pipe(
     num_up_workers = min(12, total_parts)
     async def upload_worker(wid: int):
         nonlocal uploaded_bytes, last_progress_time
-        session = up_sessions[wid % len(up_sessions)]
+        global _LAST_POOL_ACTIVITY
         while True:
             if error_holder:
                 break
@@ -899,14 +1041,16 @@ async def zero_disk_turbo_pipe(
                 )
 
             success = False
-            for attempt in range(5):
+            for attempt in range(6):
                 if error_holder:
                     break
+                session = up_sessions[(attempt + wid) % len(up_sessions)]
                 try:
                     await asyncio.wait_for(
                         session.invoke(rpc, sleep_threshold=getattr(uploader, "sleep_threshold", 60)),
-                        timeout=35.0
+                        timeout=25.0
                     )
+                    _LAST_POOL_ACTIVITY = time.time()
                     success = True
                     break
                 except StopTransmission:
@@ -917,7 +1061,7 @@ async def zero_disk_turbo_pipe(
                     if "FloodWait" in err_name:
                         wait_s = getattr(ex, "value", 5) or 5
                         await asyncio.sleep(min(wait_s, 30))
-                    elif attempt == 4:
+                    elif attempt == 5:
                         log.warning(f"zero_disk_turbo_pipe upload worker {wid} part {part_idx} failed: {ex}")
                         error_holder.append(ex)
                     else:
@@ -970,7 +1114,7 @@ async def zero_disk_turbo_pipe(
             if not t.done():
                 t.cancel()
         gc.enable()
-        gc.collect()
+        _cleanup_memory(client, uploader)
 
     if error_holder:
         raise error_holder[0]
@@ -1164,6 +1308,10 @@ __all__ = [
     "send_input_file_big",
     "get_media_session",
     "get_media_session_pool",
+    "check_and_reset_idle_sessions",
+    "_cleanup_memory",
+    "_TRANSFER_SEMAPHORE",
+    "_LAST_POOL_ACTIVITY",
     "CHUNK_SIZE",
     "UPLOAD_PART_SIZE",
     "CONCURRENT_WORKERS_PREM",

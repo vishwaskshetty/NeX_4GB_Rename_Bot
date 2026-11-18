@@ -48,7 +48,13 @@ from helper.utils import (
     prepare_crisp_thumbnail,
     safe_reply_params,
 )
-from helper.fast_transfer import fast_download, fast_upload, send_input_file_big
+from helper.fast_transfer import (
+    fast_download,
+    fast_upload,
+    send_input_file_big,
+    _TRANSFER_SEMAPHORE,
+    _cleanup_memory
+)
 from config import Config, parse_channel_id
 
 # In-memory track state per user:
@@ -285,6 +291,8 @@ async def inspect_tracks_handler(client, query: CallbackQuery):
             except Exception:
                 pass
             shutil.rmtree(work_dir, ignore_errors=True)
+            from bot import app_4gb
+            _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
             return
 
     if not os.path.exists(local_path) or os.path.getsize(local_path) == 0:
@@ -293,6 +301,8 @@ async def inspect_tracks_handler(client, query: CallbackQuery):
         except Exception:
             pass
         shutil.rmtree(work_dir, ignore_errors=True)
+        from bot import app_4gb
+        _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
         return
 
     # Run ffprobe stream extraction
@@ -311,6 +321,8 @@ async def inspect_tracks_handler(client, query: CallbackQuery):
         except Exception:
             pass
         shutil.rmtree(work_dir, ignore_errors=True)
+        from bot import app_4gb
+        _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
         return
 
     # Initialize selection: all tracks checked ✅ by default
@@ -473,252 +485,269 @@ async def _execute_track_mux_and_upload(client, message, ctx: dict, new_filename
     selection = ctx.get("selection", {})
 
     status_msg = None
+    transfer_sem_held = False
     try:
-        status_msg = await client.send_message(
-            chat_id=chat_id,
-            text=(
-                "<b>◈ NᴇX Tʀᴀᴄᴋ Mᴜxᴇʀ ⚡</b>\n\n"
-                f"▸ <b>Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
-                "▸ <b>Sᴛᴀᴛᴜꜱ :</b> Muxing streams losslessly with <code>ffmpeg -c copy</code>...\n\n"
-                "⏳ <i>Stream copy takes ~5–10 seconds with zero re-encoding!</i>"
-            ),
-            **safe_reply_params(file_msg_id)
-        )
-    except Exception:
-        pass
+        await _TRANSFER_SEMAPHORE.acquire()
+        transfer_sem_held = True
 
-    # Build exact ffmpeg -map command
-    # ffmpeg -y -i "<input>" -map 0:v:0 -map 0:a:0 -map 0:s:0 -c copy "<output>"
-    output_path = os.path.join(work_dir, f"out_{new_filename}")
-    cmd = [
-        "ffmpeg", "-y",
-        "-threads", "0",
-        "-i", local_path,
-        "-map", "0:v:0"  # keep primary video
-    ]
-
-    # Map kept audio streams
-    audio_mapped = 0
-    for mid, kept in selection.items():
-        if mid.startswith("0:a:") and kept:
-            cmd.extend(["-map", mid])
-            audio_mapped += 1
-
-    if audio_mapped == 0:
-        # Fallback: keep first audio or -an
-        first_audio = next((m for m in selection if m.startswith("0:a:")), None)
-        if first_audio:
-            cmd.extend(["-map", first_audio])
-        else:
-            cmd.append("-an")
-
-    # Map kept subtitle streams
-    sub_mapped = 0
-    for mid, kept in selection.items():
-        if mid.startswith("0:s:") and kept:
-            cmd.extend(["-map", mid])
-            sub_mapped += 1
-
-    if sub_mapped == 0:
-        cmd.append("-sn")
-
-    cmd.extend(["-c", "copy", output_path])
-
-    log.info(f"Running track mux command: {' '.join(cmd)}")
-
-    mux_ok = False
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
-        mux_ok = os.path.exists(output_path) and os.path.getsize(output_path) > 0
-        if not mux_ok:
-            log.error(f"Track mux failed: {stderr_bytes.decode(errors='replace')[-500:]}")
-    except Exception as mux_err:
-        log.error(f"Track mux exception: {mux_err}")
-
-    if not mux_ok:
-        if status_msg:
-            try:
-                await status_msg.edit("❌ <b>Stream muxing failed!</b> Please verify the file format.")
-            except Exception:
-                pass
-        shutil.rmtree(work_dir, ignore_errors=True)
-        return
-
-    output_size = os.path.getsize(output_path)
-
-    if status_msg:
         try:
-            await status_msg.edit(
-                "<b>◈ NᴇX Tʀᴀᴄᴋ Mᴜxᴇʀ ⚡</b>\n\n"
-                f"▸ <b>Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
-                f"▸ <b>Sɪᴢᴇ :</b> <code>{humanbytes(output_size)}</code>\n"
-                "▸ <b>Sᴛᴀᴛᴜꜱ :</b> Uploading remuxed file... 🚀\n\n"
-                "⚡ <i>Fast multi-socket streaming in progress...</i>"
+            status_msg = await client.send_message(
+                chat_id=chat_id,
+                text=(
+                    "<b>◈ NᴇX Tʀᴀᴄᴋ Mᴜxᴇʀ ⚡</b>\n\n"
+                    f"▸ <b>Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
+                    "▸ <b>Sᴛᴀᴛᴜꜱ :</b> Muxing streams losslessly with <code>ffmpeg -c copy</code>...\n\n"
+                    "⏳ <i>Stream copy takes ~5–10 seconds with zero re-encoding!</i>"
+                ),
+                **safe_reply_params(file_msg_id)
             )
         except Exception:
             pass
 
-    # Setup 4GB routing & uploader
-    from bot import app_4gb
-    is_4gb = output_size > (1.95 * 1024 * 1024 * 1024)
-    client_4gb = getattr(client, "app_4gb", None) or app_4gb
-    uploader = client_4gb if (is_4gb and client_4gb) else client
+        # Build exact ffmpeg -map command
+        # ffmpeg -y -i "<input>" -map 0:v:0 -map 0:a:0 -map 0:s:0 -c copy "<output>"
+        output_path = os.path.join(work_dir, f"out_{new_filename}")
+        cmd = [
+            "ffmpeg", "-y",
+            "-threads", "0",
+            "-i", local_path,
+            "-map", "0:v:0"  # keep primary video
+        ]
 
-    # Prepare crisp LANCZOS 4:4:4 thumbnail
-    thumb_path = None
-    try:
-        c_thumb = await db.get_thumbnail(user_id)
-        if c_thumb:
-            t_dir = os.path.join(work_dir, "thumb")
-            os.makedirs(t_dir, exist_ok=True)
-            t_raw = os.path.join(t_dir, "thumb_raw.jpg")
-            t_crisp = os.path.join(t_dir, "thumb_crisp.jpg")
-            await client.download_media(c_thumb, file_name=t_raw)
-            if os.path.exists(t_raw):
-                thumb_path = prepare_crisp_thumbnail(t_raw, t_crisp)
-    except Exception as th_err:
-        log.warning(f"Track manager thumb error: {th_err}")
-        thumb_path = None
+        # Map kept audio streams
+        audio_mapped = 0
+        for mid, kept in selection.items():
+            if mid.startswith("0:a:") and kept:
+                cmd.extend(["-map", mid])
+                audio_mapped += 1
 
-    # Prepare Bottom Caption: {new_file_name}\n\n{bottom_caption}
-    b_caption = await db.get_bottom_caption(user_id)
-    base_name, _ = os.path.splitext(new_filename)
-    if b_caption:
-        caption = f"<b>{base_name}</b>\n\n{b_caption}"
-    else:
-        caption = f"<b>{base_name}</b>"
-
-    # Determine upload type
-    low = new_filename.lower()
-    if low.endswith((".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".flv")):
-        upload_type = "video"
-    elif low.endswith((".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac")):
-        upload_type = "audio"
-    else:
-        upload_type = "document"
-
-    # Upload using fast_upload
-    sent_msg = None
-    uploaded_file = None
-    try:
-        uploaded_file = await fast_upload(
-            client=uploader,
-            file_path=output_path,
-            progress=None,
-            progress_args=(),
-            is_prem=is_4gb
-        )
-    except Exception as up_err:
-        log.warning(f"fast_upload error in track manager: {up_err}")
-
-    # Determine bridge channel for 4GB transfers
-    user_dump = await db.get_dump_channel(user_id)
-    bridge_channel = parse_channel_id(
-        user_dump or Config.DUMP_CHANNEL or Config.FILES_CHANNEL or Config.LOG_CHANNEL or -1003792044224
-    )
-
-    try:
-        if is_4gb and client_4gb and bridge_channel and bridge_channel != 0:
-            bridge_msg = None
-            if uploaded_file:
-                bridge_msg = await send_input_file_big(
-                    uploader_client=uploader,
-                    target_chat_id=bridge_channel,
-                    input_file_big=uploaded_file,
-                    thumb_path=thumb_path,
-                    media_msg=None,
-                    new_filename=new_filename,
-                    caption=caption,
-                    upload_type=upload_type,
-                )
-            elif upload_type == "video":
-                bridge_msg = await uploader.send_video(
-                    chat_id=bridge_channel,
-                    video=output_path,
-                    file_name=new_filename,
-                    caption=caption,
-                    thumb=thumb_path,
-                    supports_streaming=True
-                )
+        if audio_mapped == 0:
+            # Fallback: keep first audio or -an
+            first_audio = next((m for m in selection if m.startswith("0:a:")), None)
+            if first_audio:
+                cmd.extend(["-map", first_audio])
             else:
-                bridge_msg = await uploader.send_document(
-                    chat_id=bridge_channel,
-                    document=output_path,
-                    file_name=new_filename,
-                    caption=caption,
-                    thumb=thumb_path
-                )
+                cmd.append("-an")
 
-            if bridge_msg and hasattr(bridge_msg, "id"):
-                sent_msg = await client.copy_message(
-                    chat_id=chat_id,
-                    from_chat_id=bridge_channel,
-                    message_id=bridge_msg.id,
-                    caption=caption
-                )
-        else:
-            if uploaded_file:
-                sent_msg = await send_input_file_big(
-                    uploader_client=uploader,
-                    target_chat_id=chat_id,
-                    input_file_big=uploaded_file,
-                    thumb_path=thumb_path,
-                    media_msg=None,
-                    new_filename=new_filename,
-                    caption=caption,
-                    upload_type=upload_type,
-                )
-            elif upload_type == "video":
-                sent_msg = await uploader.send_video(
-                    chat_id=chat_id,
-                    video=output_path,
-                    file_name=new_filename,
-                    caption=caption,
-                    thumb=thumb_path,
-                    supports_streaming=True,
-                    **safe_reply_params(file_msg_id)
-                )
-            else:
-                sent_msg = await uploader.send_document(
-                    chat_id=chat_id,
-                    document=output_path,
-                    file_name=new_filename,
-                    caption=caption,
-                    thumb=thumb_path,
-                    **safe_reply_params(file_msg_id)
-                )
-    except Exception as send_err:
-        log.error(f"Track manager message delivery error: {send_err}")
+        # Map kept subtitle streams
+        sub_mapped = 0
+        for mid, kept in selection.items():
+            if mid.startswith("0:s:") and kept:
+                cmd.extend(["-map", mid])
+                sub_mapped += 1
 
-    # Immediately wipe /tmp/nex_tracks scratch directory
-    try:
-        shutil.rmtree(work_dir, ignore_errors=True)
-    except Exception:
-        pass
+        if sub_mapped == 0:
+            cmd.append("-sn")
 
-    if sent_msg:
+        cmd.extend(["-c", "copy", output_path])
+
+        log.info(f"Running track mux command: {' '.join(cmd)}")
+
+        mux_ok = False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            _, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=300)
+            mux_ok = os.path.exists(output_path) and os.path.getsize(output_path) > 0
+            if not mux_ok:
+                log.error(f"Track mux failed: {stderr_bytes.decode(errors='replace')[-500:]}")
+        except Exception as mux_err:
+            log.error(f"Track mux exception: {mux_err}")
+
+        if not mux_ok:
+            if status_msg:
+                try:
+                    await status_msg.edit("❌ <b>Stream muxing failed!</b> Please verify the file format.")
+                except Exception:
+                    pass
+            return
+
+        output_size = os.path.getsize(output_path)
+
         if status_msg:
             try:
                 await status_msg.edit(
-                    "<b>◈ NᴇX Tʀᴀᴄᴋ Mᴀɴᴀɢᴇʀ ⚡</b>\n\n"
+                    "<b>◈ NᴇX Tʀᴀᴄᴋ Mᴜxᴇʀ ⚡</b>\n\n"
                     f"▸ <b>Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
                     f"▸ <b>Sɪᴢᴇ :</b> <code>{humanbytes(output_size)}</code>\n"
-                    "▸ <b>Sᴛᴀᴛᴜꜱ :</b> ✅ <b>Tʀᴀᴄᴋꜱ Eᴅɪᴛᴇᴅ & Dᴇʟɪᴠᴇʀᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n"
-                    "⚡ <b>Powered by :</b> @Nex_bots"
+                    "▸ <b>Sᴛᴀᴛᴜꜱ :</b> Uploading remuxed file... 🚀\n\n"
+                    "⚡ <i>Fast multi-socket streaming in progress...</i>"
                 )
             except Exception:
                 pass
-    else:
+
+        # Setup 4GB routing & uploader
+        from bot import app_4gb
+        is_4gb = output_size > (1.95 * 1024 * 1024 * 1024)
+        client_4gb = getattr(client, "app_4gb", None) or app_4gb
+        uploader = client_4gb if (is_4gb and client_4gb) else client
+
+        # Prepare crisp LANCZOS 4:4:4 thumbnail
+        thumb_path = None
+        try:
+            c_thumb = await db.get_thumbnail(user_id)
+            if c_thumb:
+                t_dir = os.path.join(work_dir, "thumb")
+                os.makedirs(t_dir, exist_ok=True)
+                t_raw = os.path.join(t_dir, "thumb_raw.jpg")
+                t_crisp = os.path.join(t_dir, "thumb_crisp.jpg")
+                await client.download_media(c_thumb, file_name=t_raw)
+                if os.path.exists(t_raw):
+                    thumb_path = prepare_crisp_thumbnail(t_raw, t_crisp)
+        except Exception as th_err:
+            log.warning(f"Track manager thumb error: {th_err}")
+            thumb_path = None
+
+        # Prepare Bottom Caption: {new_file_name}\n\n{bottom_caption}
+        b_caption = await db.get_bottom_caption(user_id)
+        base_name, _ = os.path.splitext(new_filename)
+        if b_caption:
+            caption = f"<b>{base_name}</b>\n\n{b_caption}"
+        else:
+            caption = f"<b>{base_name}</b>"
+
+        # Determine upload type
+        low = new_filename.lower()
+        if low.endswith((".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".flv")):
+            upload_type = "video"
+        elif low.endswith((".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac")):
+            upload_type = "audio"
+        else:
+            upload_type = "document"
+
+        # Upload using fast_upload
+        sent_msg = None
+        uploaded_file = None
+        try:
+            uploaded_file = await fast_upload(
+                client=uploader,
+                file_path=output_path,
+                progress=None,
+                progress_args=(),
+                is_prem=is_4gb
+            )
+        except Exception as up_err:
+            log.warning(f"fast_upload error in track manager: {up_err}")
+
+        # Determine bridge channel for 4GB transfers
+        user_dump = await db.get_dump_channel(user_id)
+        bridge_channel = parse_channel_id(
+            user_dump or Config.DUMP_CHANNEL or Config.FILES_CHANNEL or Config.LOG_CHANNEL or -1003792044224
+        )
+
+        try:
+            if is_4gb and client_4gb and bridge_channel and bridge_channel != 0:
+                bridge_msg = None
+                if uploaded_file:
+                    bridge_msg = await send_input_file_big(
+                        uploader_client=uploader,
+                        target_chat_id=bridge_channel,
+                        input_file_big=uploaded_file,
+                        thumb_path=thumb_path,
+                        media_msg=None,
+                        new_filename=new_filename,
+                        caption=caption,
+                        upload_type=upload_type,
+                    )
+                elif upload_type == "video":
+                    bridge_msg = await uploader.send_video(
+                        chat_id=bridge_channel,
+                        video=output_path,
+                        file_name=new_filename,
+                        caption=caption,
+                        thumb=thumb_path,
+                        supports_streaming=True
+                    )
+                else:
+                    bridge_msg = await uploader.send_document(
+                        chat_id=bridge_channel,
+                        document=output_path,
+                        file_name=new_filename,
+                        caption=caption,
+                        thumb=thumb_path
+                    )
+
+                if bridge_msg and hasattr(bridge_msg, "id"):
+                    sent_msg = await client.copy_message(
+                        chat_id=chat_id,
+                        from_chat_id=bridge_channel,
+                        message_id=bridge_msg.id,
+                        caption=caption
+                    )
+            else:
+                if uploaded_file:
+                    sent_msg = await send_input_file_big(
+                        uploader_client=uploader,
+                        target_chat_id=chat_id,
+                        input_file_big=uploaded_file,
+                        thumb_path=thumb_path,
+                        media_msg=None,
+                        new_filename=new_filename,
+                        caption=caption,
+                        upload_type=upload_type,
+                    )
+                elif upload_type == "video":
+                    sent_msg = await uploader.send_video(
+                        chat_id=chat_id,
+                        video=output_path,
+                        file_name=new_filename,
+                        caption=caption,
+                        thumb=thumb_path,
+                        supports_streaming=True,
+                        **safe_reply_params(file_msg_id)
+                    )
+                else:
+                    sent_msg = await uploader.send_document(
+                        chat_id=chat_id,
+                        document=output_path,
+                        file_name=new_filename,
+                        caption=caption,
+                        thumb=thumb_path,
+                        **safe_reply_params(file_msg_id)
+                    )
+        except Exception as send_err:
+            log.error(f"Track manager message delivery error: {send_err}")
+
+        if sent_msg:
+            if status_msg:
+                try:
+                    await status_msg.edit(
+                        "<b>◈ NᴇX Tʀᴀᴄᴋ Mᴀɴᴀɢᴇʀ ⚡</b>\n\n"
+                        f"▸ <b>Fɪʟᴇ :</b> <code>{new_filename}</code>\n"
+                        f"▸ <b>Sɪᴢᴇ :</b> <code>{humanbytes(output_size)}</code>\n"
+                        "▸ <b>Sᴛᴀᴛᴜꜱ :</b> ✅ <b>Tʀᴀᴄᴋꜱ Eᴅɪᴛᴇᴅ & Dᴇʟɪᴠᴇʀᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n"
+                        "⚡ <b>Powered by :</b> @Nex_bots"
+                    )
+                except Exception:
+                    pass
+        else:
+            if status_msg:
+                try:
+                    await status_msg.edit("❌ <b>Delivery failed.</b> Please try again.")
+                except Exception:
+                    pass
+    except Exception as e:
+        log.error(f"Track manager execution error: {e}")
         if status_msg:
             try:
-                await status_msg.edit("❌ <b>Delivery failed.</b> Please try again.")
+                await status_msg.edit(f"❌ <b>Error:</b> <code>{e}</code>")
             except Exception:
                 pass
+    finally:
+        if transfer_sem_held:
+            try:
+                _TRANSFER_SEMAPHORE.release()
+            except Exception:
+                pass
+        try:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        except Exception:
+            pass
+        from bot import app_4gb
+        _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -736,4 +765,6 @@ async def trk_cancel_handler(client, query: CallbackQuery):
         await query.message.delete()
     except Exception:
         pass
+    from bot import app_4gb
+    _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
     await query.answer("Track editing cancelled! ❌")
