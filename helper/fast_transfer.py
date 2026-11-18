@@ -4,9 +4,9 @@ import asyncio
 import inspect
 import logging
 import hashlib
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Union
 import pyrogram
-from pyrogram import Client, raw
+from pyrogram import Client, raw, types, utils, enums
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Session, Auth
 from pyrogram.errors import AuthBytesInvalid
@@ -611,30 +611,34 @@ async def zero_disk_turbo_pipe(
     is_prem: bool = False
 ):
     """
-    Single-Pass Multi-Session Zero-Disk RAM Chunk Pipe.
-    Pipes 512KB media chunks directly from the staged Virtual Disk Telegram message
-    into the target uploader client's MTProto Session upload stream simultaneously in memory.
-    Bypasses disk I/O completely, uses a sliding RAM buffer capped at 24MB, and updates
-    the progress bar non-blockingly via asyncio.create_task every 5.0 seconds.
-    Returns raw.types.InputFileBig (for files > 10MB) or raw.types.InputFile (<= 10MB).
+    Dual-Account Split-Horizon Multi-Session Zero-Disk RAM Chunk Pipe.
+    Combines app_4gb (Telegram Premium User Session, 12 sockets, high priority)
+    and client (Bot, 8 sockets) to download 20 parallel MTProto streams simultaneously in RAM,
+    directly piped into 16 parallel upload MTProto sockets on the target uploader.
+    Uses an in-memory 48MB sliding queue (96 chunks of 512KB) and bypasses disk I/O completely.
+    Returns raw.types.InputFileBig (files > 10MB) or raw.types.InputFile (<= 10MB).
     """
-    if hasattr(staged_msg, "chat") and hasattr(staged_msg, "id") and staged_msg.chat:
+    staged_chat_id = staged_msg.chat.id if hasattr(staged_msg, "chat") and staged_msg.chat else -1003792044224
+    staged_msg_id = getattr(staged_msg, "id", None)
+
+    # 1. Refresh Bot staged message if needed
+    if staged_chat_id and staged_msg_id:
         try:
-            refreshed = await client.get_messages(staged_msg.chat.id, staged_msg.id)
+            refreshed = await client.get_messages(staged_chat_id, staged_msg_id)
             if refreshed and not getattr(refreshed, "empty", False):
                 staged_msg = refreshed
         except Exception:
             pass
 
-    file_obj = (
+    file_obj_bot = (
         getattr(staged_msg, "document", None) or
         getattr(staged_msg, "video", None) or
         getattr(staged_msg, "audio", None)
     )
-    if not file_obj or not hasattr(file_obj, "file_id"):
+    if not file_obj_bot or not hasattr(file_obj_bot, "file_id"):
         raise ValueError("Invalid staged message media for zero-disk pipe")
 
-    file_size = getattr(file_obj, "file_size", 0)
+    file_size = getattr(file_obj_bot, "file_size", 0)
     if file_size == 0:
         raise ValueError("File size is 0 bytes")
 
@@ -649,36 +653,88 @@ async def zero_disk_turbo_pipe(
     is_big = file_size > 10 * 1024 * 1024
     new_file_id = uploader.rnd_id() if hasattr(uploader, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
 
-    decoded = FileId.decode(file_obj.file_id)
-    dc_id = decoded.dc_id
-    file_type = decoded.file_type
+    decoded_bot = FileId.decode(file_obj_bot.file_id)
+    dc_id = decoded_bot.dc_id
+    file_type = decoded_bot.file_type
 
     if file_type == FileType.PHOTO:
-        location = raw.types.InputPhotoFileLocation(
-            id=decoded.media_id,
-            access_hash=decoded.access_hash,
-            file_reference=decoded.file_reference,
-            thumb_size=decoded.thumbnail_size or ""
+        location_bot = raw.types.InputPhotoFileLocation(
+            id=decoded_bot.media_id,
+            access_hash=decoded_bot.access_hash,
+            file_reference=decoded_bot.file_reference,
+            thumb_size=decoded_bot.thumbnail_size or ""
         )
     else:
-        location = raw.types.InputDocumentFileLocation(
-            id=decoded.media_id,
-            access_hash=decoded.access_hash,
-            file_reference=decoded.file_reference,
-            thumb_size=decoded.thumbnail_size or ""
+        location_bot = raw.types.InputDocumentFileLocation(
+            id=decoded_bot.media_id,
+            access_hash=decoded_bot.access_hash,
+            file_reference=decoded_bot.file_reference,
+            thumb_size=decoded_bot.thumbnail_size or ""
         )
 
-    pool_size = 10
-    worker_limit = 10
-    down_worker_count = min(worker_limit, total_parts)
-    up_worker_count = min(worker_limit, total_parts)
+    # 2. Check for app_4gb (Telegram Premium User Session) for Dual-Account Acceleration
+    user_client = getattr(client, "app_4gb", None)
+    if not user_client:
+        try:
+            from bot import app_4gb
+            user_client = app_4gb
+        except Exception:
+            user_client = None
 
-    down_sessions = await MediaSessionPool.get_pool(client, dc_id, pool_size=pool_size)
+    is_user_ready = (
+        user_client is not None
+        and (getattr(client, "app_4gb_started", False) or getattr(user_client, "is_connected", False))
+    )
+
+    staged_msg_user = None
+    location_user = None
+    if is_user_ready and staged_chat_id and staged_msg_id:
+        try:
+            staged_msg_user = await user_client.get_messages(staged_chat_id, staged_msg_id)
+            if staged_msg_user and not getattr(staged_msg_user, "empty", False):
+                user_file_obj = (
+                    getattr(staged_msg_user, "document", None) or
+                    getattr(staged_msg_user, "video", None) or
+                    getattr(staged_msg_user, "audio", None)
+                )
+                if user_file_obj and hasattr(user_file_obj, "file_id"):
+                    decoded_user = FileId.decode(user_file_obj.file_id)
+                    if decoded_user.file_type == FileType.PHOTO:
+                        location_user = raw.types.InputPhotoFileLocation(
+                            id=decoded_user.media_id,
+                            access_hash=decoded_user.access_hash,
+                            file_reference=decoded_user.file_reference,
+                            thumb_size=decoded_user.thumbnail_size or ""
+                        )
+                    else:
+                        location_user = raw.types.InputDocumentFileLocation(
+                            id=decoded_user.media_id,
+                            access_hash=decoded_user.access_hash,
+                            file_reference=decoded_user.file_reference,
+                            thumb_size=decoded_user.thumbnail_size or ""
+                        )
+        except Exception as u_fetch_err:
+            log.warning(f"Dual-account staged message fetch on app_4gb note: {u_fetch_err}")
+            location_user = None
+            staged_msg_user = None
+
+    # 3. Spin up Session Pools
+    user_sessions = []
+    if location_user and user_client:
+        try:
+            user_sessions = await MediaSessionPool.get_pool(user_client, dc_id, pool_size=12)
+        except Exception as us_err:
+            log.warning(f"app_4gb media session pool note ({us_err}). Falling back to Bot-only pool.")
+            user_sessions = []
+
+    bot_pool_size = 8 if user_sessions else 16
+    bot_sessions = await MediaSessionPool.get_pool(client, dc_id, pool_size=bot_pool_size)
+
     main_dc = await uploader.storage.dc_id()
-    up_sessions = await MediaSessionPool.get_pool(uploader, main_dc, pool_size=pool_size)
+    up_sessions = await MediaSessionPool.get_pool(uploader, main_dc, pool_size=16)
 
-    # 64 chunks * 512KB = 32MB max RAM buffer
-    pipe_queue = asyncio.Queue(maxsize=64)
+    # 4. In-Memory Sliding RAM Queue (96 chunks * 512KB = 48MB buffer)
+    pipe_queue = asyncio.Queue(maxsize=96)
     part_indices = asyncio.Queue()
     for idx in range(total_parts):
         part_indices.put_nowait(idx)
@@ -700,8 +756,15 @@ async def zero_disk_turbo_pipe(
         except Exception:
             pass
 
-    async def download_worker(wid: int):
-        session = down_sessions[wid % len(down_sessions)]
+    async def download_worker(
+        wid: int,
+        session: Session,
+        loc: Union[raw.types.InputDocumentFileLocation, raw.types.InputPhotoFileLocation],
+        acc_client: Client,
+        chat_id: int,
+        msg_id: int,
+        tag: str
+    ):
         while True:
             if error_holder:
                 break
@@ -712,7 +775,7 @@ async def zero_disk_turbo_pipe(
 
             offset = part_idx * CHUNK_SIZE
             rpc = raw.functions.upload.GetFile(
-                location=location,
+                location=loc,
                 offset=offset,
                 limit=CHUNK_SIZE
             )
@@ -723,7 +786,7 @@ async def zero_disk_turbo_pipe(
                     break
                 try:
                     res = await asyncio.wait_for(
-                        session.invoke(rpc, sleep_threshold=getattr(client, "sleep_threshold", 60)),
+                        session.invoke(rpc, sleep_threshold=getattr(acc_client, "sleep_threshold", 60)),
                         timeout=25.0
                     )
                     chunk_data = getattr(res, "bytes", b"")
@@ -732,17 +795,21 @@ async def zero_disk_turbo_pipe(
                     error_holder.append(StopTransmission("Download Cancelled"))
                     break
                 except Exception as ex:
-                    log.warning(f"zero_disk_turbo_pipe download worker {wid} part {part_idx} attempt {attempt+1} error: {ex}")
                     err_name = type(ex).__name__
                     if "FileReference" in err_name or "file_reference" in str(ex).lower():
-                        if hasattr(staged_msg, "chat") and hasattr(staged_msg, "id") and staged_msg.chat:
+                        if chat_id and msg_id:
                             try:
-                                refreshed = await client.get_messages(staged_msg.chat.id, staged_msg.id)
-                                if refreshed:
-                                    ref_obj = refreshed.document or refreshed.video or refreshed.audio or refreshed.photo
+                                refreshed = await acc_client.get_messages(chat_id, msg_id)
+                                if refreshed and not getattr(refreshed, "empty", False):
+                                    ref_obj = (
+                                        getattr(refreshed, "document", None) or
+                                        getattr(refreshed, "video", None) or
+                                        getattr(refreshed, "audio", None) or
+                                        getattr(refreshed, "photo", None)
+                                    )
                                     if ref_obj and hasattr(ref_obj, "file_id"):
                                         ref_decoded = FileId.decode(ref_obj.file_id)
-                                        location.file_reference = ref_decoded.file_reference
+                                        loc.file_reference = ref_decoded.file_reference
                                         rpc.location.file_reference = ref_decoded.file_reference
                             except Exception:
                                 pass
@@ -750,8 +817,7 @@ async def zero_disk_turbo_pipe(
                         wait_s = getattr(ex, "value", 5) or 5
                         await asyncio.sleep(min(wait_s, 30))
                     elif attempt == 4:
-                        import traceback
-                        traceback.print_exc()
+                        log.warning(f"zero_disk_turbo_pipe {tag} download worker {wid} part {part_idx} failed: {ex}")
                         error_holder.append(ex)
                     else:
                         await asyncio.sleep(0.5 * (attempt + 1))
@@ -766,6 +832,7 @@ async def zero_disk_turbo_pipe(
             await pipe_queue.put((part_idx, chunk_data))
             part_indices.task_done()
 
+    up_worker_count = min(len(up_sessions), total_parts)
     async def upload_worker(wid: int):
         nonlocal uploaded_bytes, last_progress_time
         session = up_sessions[wid % len(up_sessions)]
@@ -773,7 +840,11 @@ async def zero_disk_turbo_pipe(
             if error_holder:
                 break
             try:
-                item = await pipe_queue.get()
+                item = await asyncio.wait_for(pipe_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if error_holder:
+                    break
+                continue
             except asyncio.QueueEmpty:
                 break
 
@@ -811,14 +882,12 @@ async def zero_disk_turbo_pipe(
                     error_holder.append(StopTransmission("Upload Cancelled"))
                     break
                 except Exception as ex:
-                    log.warning(f"zero_disk_turbo_pipe upload worker {wid} part {part_idx} attempt {attempt+1} error: {ex}")
                     err_name = type(ex).__name__
                     if "FloodWait" in err_name:
                         wait_s = getattr(ex, "value", 5) or 5
                         await asyncio.sleep(min(wait_s, 30))
                     elif attempt == 4:
-                        import traceback
-                        traceback.print_exc()
+                        log.warning(f"zero_disk_turbo_pipe upload worker {wid} part {part_idx} failed: {ex}")
                         error_holder.append(ex)
                     else:
                         await asyncio.sleep(0.5 * (attempt + 1))
@@ -838,17 +907,56 @@ async def zero_disk_turbo_pipe(
 
             pipe_queue.task_done()
 
-    # Launch concurrent download workers
-    down_tasks = [asyncio.create_task(download_worker(i)) for i in range(down_worker_count)]
+    down_tasks = []
+    if user_sessions and location_user:
+        u_count = min(len(user_sessions), total_parts)
+        for i in range(u_count):
+            down_tasks.append(
+                asyncio.create_task(
+                    download_worker(
+                        i, user_sessions[i % len(user_sessions)], location_user,
+                        user_client, staged_chat_id, staged_msg_id, "app_4gb"
+                    )
+                )
+            )
+    b_count = min(len(bot_sessions), total_parts)
+    for i in range(b_count):
+        down_tasks.append(
+            asyncio.create_task(
+                download_worker(
+                    i, bot_sessions[i % len(bot_sessions)], location_bot,
+                    client, staged_chat_id, staged_msg_id, "bot"
+                )
+            )
+        )
+
     up_tasks = [asyncio.create_task(upload_worker(i)) for i in range(up_worker_count)]
 
     async def feeder():
-        await part_indices.join()
-        for _ in range(up_worker_count):
-            await pipe_queue.put(None)
+        while not error_holder:
+            if part_indices.empty():
+                try:
+                    await asyncio.wait_for(part_indices.join(), timeout=0.5)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+            await asyncio.sleep(0.1)
+        for _ in range(up_worker_count + 5):
+            try:
+                pipe_queue.put_nowait(None)
+            except Exception:
+                pass
 
     feeder_task = asyncio.create_task(feeder())
-    await asyncio.gather(*down_tasks, feeder_task, *up_tasks)
+    try:
+        await asyncio.gather(*down_tasks, feeder_task, *up_tasks)
+    except Exception as e:
+        if not error_holder:
+            error_holder.append(e)
+    finally:
+        for t in down_tasks + up_tasks + [feeder_task]:
+            if not t.done():
+                t.cancel()
 
     if error_holder:
         raise error_holder[0]
@@ -871,10 +979,128 @@ async def zero_disk_turbo_pipe(
         )
 
 
+async def send_input_file_big(
+    uploader_client: Client,
+    target_chat_id: Union[int, str],
+    input_file_big: Union[raw.types.InputFileBig, raw.types.InputFile],
+    thumb_path: Optional[str] = None,
+    media_msg = None,
+    new_filename: str = "file.mkv",
+    caption: str = "",
+    upload_type: str = "document",
+    protect_content: bool = False,
+    duration: int = 0,
+    width: int = 0,
+    height: int = 0
+) -> Optional[types.Message]:
+    """
+    Directly invokes raw.functions.messages.SendMedia using an uploaded InputFileBig / InputFile.
+    Bypasses Pyrogram's high-level send_document/send_video file path validation checks,
+    natively attaching thumbnails, attributes, and parsed HTML captions.
+    """
+    # 1. Resolve Target Chat Peer
+    peer = await uploader_client.resolve_peer(target_chat_id)
+
+    # 2. Upload thumbnail if provided and exists on disk
+    thumb_input = None
+    if thumb_path and os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+        try:
+            thumb_input = await uploader_client.save_file(thumb_path)
+        except Exception as t_err:
+            log.warning(f"send_input_file_big thumbnail upload error: {t_err}")
+            thumb_input = None
+
+    # 3. Build Document Attributes
+    attributes = [raw.types.DocumentAttributeFilename(file_name=new_filename)]
+    is_video = (upload_type == "video") or (media_msg and getattr(media_msg, "video", None)) or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
+    is_audio = (upload_type == "audio") or (media_msg and getattr(media_msg, "audio", None)) or new_filename.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))
+
+    if upload_type == "video" or (upload_type != "document" and is_video):
+        attributes.append(
+            raw.types.DocumentAttributeVideo(
+                duration=int(duration or 0),
+                w=int(width or 0),
+                h=int(height or 0),
+                supports_streaming=True
+            )
+        )
+    elif upload_type == "audio" or (upload_type != "document" and is_audio):
+        audio_obj = getattr(media_msg, "audio", None) if media_msg else None
+        title = getattr(audio_obj, "title", None) or os.path.splitext(new_filename)[0]
+        performer = getattr(audio_obj, "performer", None) or ""
+        attributes.append(
+            raw.types.DocumentAttributeAudio(
+                duration=int(duration or 0),
+                title=title,
+                performer=performer
+            )
+        )
+
+    # 4. Determine MIME Type
+    mime = uploader_client.guess_mime_type(new_filename) or "application/octet-stream"
+    if upload_type == "video" and not mime.startswith("video/"):
+        mime = "video/mp4"
+    elif upload_type == "audio" and not mime.startswith("audio/"):
+        mime = "audio/mpeg"
+
+    force_file = True if upload_type == "document" else None
+
+    # 5. Build InputMediaUploadedDocument
+    media = raw.types.InputMediaUploadedDocument(
+        file=input_file_big,
+        mime_type=mime,
+        attributes=attributes,
+        thumb=thumb_input,
+        force_file=force_file
+    )
+
+    # 6. Parse HTML Caption & Entities
+    caption_args = await utils.parse_text_entities(
+        uploader_client,
+        caption or "",
+        parse_mode=enums.ParseMode.HTML,
+        caption_entities=None
+    )
+
+    # 7. Send Media via MTProto SendMedia
+    rpc = raw.functions.messages.SendMedia(
+        peer=peer,
+        media=media,
+        random_id=uploader_client.rnd_id(),
+        noforwards=protect_content or None,
+        **caption_args
+    )
+
+    r = await uploader_client.invoke(rpc)
+
+    # 8. Extract sent Message object
+    for i in getattr(r, "updates", []):
+        if isinstance(
+            i,
+            (
+                raw.types.UpdateNewMessage,
+                raw.types.UpdateNewChannelMessage,
+                raw.types.UpdateNewScheduledMessage
+            )
+        ):
+            users = {u.id: u for u in getattr(r, "users", [])}
+            chats = {c.id: c for c in getattr(r, "chats", [])}
+            return await types.Message._parse(
+                uploader_client,
+                i.message,
+                users,
+                chats,
+                is_scheduled=isinstance(i, raw.types.UpdateNewScheduledMessage)
+            )
+
+    return None
+
+
 __all__ = [
     "fast_download",
     "fast_upload",
     "zero_disk_turbo_pipe",
+    "send_input_file_big",
     "get_media_session",
     "get_media_session_pool",
     "CHUNK_SIZE",

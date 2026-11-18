@@ -31,7 +31,7 @@ try:
 except ImportError:
     from pyrogram.errors import StopTransmission
 
-from helper.fast_transfer import fast_download, fast_upload, zero_disk_turbo_pipe
+from helper.fast_transfer import fast_download, fast_upload, zero_disk_turbo_pipe, send_input_file_big
 from helper.tg_virtual_disk import (
     TelegramVirtualDisk,
     get_virtual_disk_channel,
@@ -67,6 +67,10 @@ from bot import app_4gb
 
 # Global concurrency queue lock - Max 10 heavy operations at once
 RENAME_SEMAPHORE = asyncio.Semaphore(10)
+
+# Smart High-Speed Concurrency Semaphore: Max 2 simultaneous 40-80+ MB/s turbo streams
+_TRANSFER_SEMAPHORE = asyncio.Semaphore(2)
+_TRANSFER_WAITING_TASKS: list[str] = []
 
 # Per-user active task tracking & pre-rename extras cache
 ACTIVE_USER_TASKS = {}
@@ -1106,7 +1110,12 @@ async def execute_rename_pipeline(
             is_prem = (user_tier >= 1) or (user_id in Config.ADMIN)
             wm_info = await db.get_watermark(user_id)
             wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
-            is_remux_needed = bool(metadata_bool or wm_enabled)
+
+            # Zero-Disk Turbo Pipe is ALWAYS used when watermark is False and audio/sub stripping is not requested
+            # Custom thumbnails, custom captions, and bottom captions attach natively in MTProto without disk remuxing!
+            strip_audio = bool(extras.get("strip_audio")) if isinstance(extras, dict) else False
+            strip_sub = bool(extras.get("strip_sub")) if isinstance(extras, dict) else False
+            is_remux_needed = bool(wm_enabled or strip_audio or strip_sub)
 
             # 0. Telegram Virtual Disk Instant 0.05s Staging
             vdisk_ch = get_virtual_disk_channel(client)
@@ -1209,6 +1218,34 @@ async def execute_rename_pipeline(
 
             ph_path = await _prepare_thumb()
 
+            # 2-Task Concurrency Semaphore for high-speed turbo transfers
+            task_queue_key = f"{user_id}_{ms.id}"
+            transfer_sem_held = False
+            if _TRANSFER_SEMAPHORE.locked():
+                _TRANSFER_WAITING_TASKS.append(task_queue_key)
+                pos = len(_TRANSFER_WAITING_TASKS)
+                try:
+                    await ms.edit(
+                        f"⏳ <b>Qᴜᴇᴜᴇᴅ ꜰᴏʀ Tᴜʀʙᴏ Sᴛʀᴇᴀᴍɪɴɢ (Position #{pos})... ⚡</b>\n\n"
+                        f"<i>Direct 20-Socket high-speed streaming will begin automatically as soon as previous task finishes!</i>",
+                        reply_markup=cancel_btn
+                    )
+                except Exception:
+                    pass
+
+            await _TRANSFER_SEMAPHORE.acquire()
+            transfer_sem_held = True
+            if task_queue_key in _TRANSFER_WAITING_TASKS:
+                try:
+                    _TRANSFER_WAITING_TASKS.remove(task_queue_key)
+                except ValueError:
+                    pass
+
+            if ms.id in CANCEL_REQUESTS or user_id in CANCEL_REQUESTS:
+                _TRANSFER_SEMAPHORE.release()
+                transfer_sem_held = False
+                return await ms.edit("❌ <b>Operation Aborted!</b>\n\n⚡ @Nex_bots")
+
             uploaded_file = None
             use_zero_disk = False
             upload_start = time.time()
@@ -1218,8 +1255,9 @@ async def execute_rename_pipeline(
             target_media_msg = staged_msg or file_msg
             if not is_remux_needed and target_media_msg is not None:
                 try:
+                    turbo_header = "⚡ <b>ᴢᴇʀᴏ-ᴅɪꜱᴋ ᴛᴜʀʙᴏ ꜱᴛʀᴇᴀᴍɪɴɢ... 🚀</b>"
                     await ms.edit(
-                        f"{upload_mode_tag}\n\n<i>Zero-Disk RAM Turbo Pipe active (50-100+ MB/s)...</i>",
+                        f"{turbo_header}\n\n<i>Direct 20-Socket Dual-Client RAM Pipe active (40-80+ MB/s)...</i>",
                         reply_markup=cancel_btn
                     )
                     upload_start = time.time()
@@ -1229,7 +1267,7 @@ async def execute_rename_pipeline(
                         staged_msg=target_media_msg,
                         new_filename=new_filename,
                         progress=progress_for_pyrogram,
-                        progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
+                        progress_args=("⚡ ᴢᴇʀᴏ-ᴅɪꜱᴋ ᴛᴜʀʙᴏ ꜱᴛʀᴇᴀᴍɪɴɢ... 🚀", ms, upload_start, client, effective_tier),
                         is_prem=is_prem or (effective_tier >= 1) or is_4gb
                     )
                     if uploaded_file:
@@ -1419,7 +1457,22 @@ async def execute_rename_pipeline(
                 if is_4gb and client_4gb:
                     if bridge_channel and bridge_channel != 0:
                         try:
-                            if upload_type == "document":
+                            if uploaded_file:
+                                bridge_msg = await send_input_file_big(
+                                    uploader_client=uploader,
+                                    target_chat_id=bridge_channel,
+                                    input_file_big=uploaded_file,
+                                    thumb_path=ph_path,
+                                    media_msg=staged_msg or file_msg,
+                                    new_filename=new_filename,
+                                    caption=caption,
+                                    upload_type=upload_type,
+                                    protect_content=False,
+                                    duration=duration,
+                                    width=width,
+                                    height=height
+                                )
+                            elif upload_type == "document":
                                 bridge_msg = await uploader.send_document(
                                     chat_id=bridge_channel,
                                     document=upload_payload,
@@ -1455,19 +1508,35 @@ async def execute_rename_pipeline(
                                     progress_args=upload_progress_args
                                 )
 
-                            sent_msg = await client.copy_message(
-                                chat_id=user_id,
-                                from_chat_id=bridge_channel,
-                                message_id=bridge_msg.id,
-                                caption=caption,
-                                protect_content=protect_content
-                            )
+                            if bridge_msg and hasattr(bridge_msg, "id"):
+                                sent_msg = await client.copy_message(
+                                    chat_id=user_id,
+                                    from_chat_id=bridge_channel,
+                                    message_id=bridge_msg.id,
+                                    caption=caption,
+                                    protect_content=protect_content
+                                )
                         except Exception as bridge_err:
                             print(f"Bridge copy delivery failed ({bridge_err}). Trying fallback direct delivery...")
                             sent_msg = None
 
                     if not sent_msg:
-                        if upload_type == "document":
+                        if uploaded_file:
+                            sent_msg = await send_input_file_big(
+                                uploader_client=uploader,
+                                target_chat_id=user_id,
+                                input_file_big=uploaded_file,
+                                thumb_path=ph_path,
+                                media_msg=staged_msg or file_msg,
+                                new_filename=new_filename,
+                                caption=caption,
+                                upload_type=upload_type,
+                                protect_content=protect_content,
+                                duration=duration,
+                                width=width,
+                                height=height
+                            )
+                        elif upload_type == "document":
                             sent_msg = await uploader.send_document(
                                 chat_id=user_id,
                                 document=upload_payload,
@@ -1508,7 +1577,22 @@ async def execute_rename_pipeline(
 
                 else:
                     # Standard Upload Flow (<= 1.95GB)
-                    if upload_type == "document":
+                    if uploaded_file:
+                        sent_msg = await send_input_file_big(
+                            uploader_client=client,
+                            target_chat_id=user_id,
+                            input_file_big=uploaded_file,
+                            thumb_path=ph_path,
+                            media_msg=staged_msg or file_msg,
+                            new_filename=new_filename,
+                            caption=caption,
+                            upload_type=upload_type,
+                            protect_content=protect_content,
+                            duration=duration,
+                            width=width,
+                            height=height
+                        )
+                    elif upload_type == "document":
                         sent_msg = await client.send_document(
                             chat_id=user_id,
                             document=upload_payload,
@@ -1550,6 +1634,11 @@ async def execute_rename_pipeline(
                 # Strict Verification: sent_msg MUST be a valid message delivered to the user
                 if not sent_msg or not hasattr(sent_msg, "id"):
                     return await ms.edit("❌ <b>Delivery Failed: Renamed file could not be delivered to your chat. Please contact support.</b>")
+
+                # Release the turbo transfer semaphore as early as possible so queued tasks can start!
+                if transfer_sem_held:
+                    _TRANSFER_SEMAPHORE.release()
+                    transfer_sem_held = False
 
                 user_sent_msgs.append(sent_msg.id)
 
@@ -1737,6 +1826,17 @@ async def execute_rename_pipeline(
 
     finally:
         ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
+        if 'transfer_sem_held' in locals() and transfer_sem_held:
+            try:
+                _TRANSFER_SEMAPHORE.release()
+                transfer_sem_held = False
+            except Exception:
+                pass
+        if 'task_queue_key' in locals() and task_queue_key in _TRANSFER_WAITING_TASKS:
+            try:
+                _TRANSFER_WAITING_TASKS.remove(task_queue_key)
+            except Exception:
+                pass
         # 9. Strict Cleanup of Temporary Files, Concurrency Counter & Persistent Task
         try:
             if 'task_id' in locals():
