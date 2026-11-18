@@ -287,15 +287,15 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     percentage = (current * 100 / total) if (total and total > 0) else 0
     pct_diff = abs(percentage - last_pct)
 
-    # Strictly throttle UI progress edits to once every 6.0 seconds (or min 3% change) or upon completion
-    if ((now - last_update >= 6.0 and pct_diff >= 3.0) or (now - last_update >= 12.0) or (current == total)):
+    # Strictly throttle UI progress edits to once every 8.0 seconds (or min 3% change) or upon completion
+    if ((now - last_update >= 8.0 and pct_diff >= 3.0) or (now - last_update >= 16.0) or (current == total)):
         PROGRESS_TIMESTAMPS[key] = now
         PROGRESS_PERCENTAGES[key] = percentage
 
         # Smooth 5-second rolling average speed
         samples = PROGRESS_SPEED_SAMPLES.setdefault(key, [])
         samples.append((now, current))
-        while len(samples) > 1 and now - samples[0][0] > 5.0:
+        while len(samples) > 1 and now - samples[0][0] > 6.0:
             samples.pop(0)
         if len(samples) >= 2:
             time_delta = samples[-1][0] - samples[0][0]
