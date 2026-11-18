@@ -40,6 +40,6 @@ services:
       - key: PORT
         value: 8080
       - key: RENDER_EXTERNAL_URL
-        sync: false
+        value: https://nex-4gb-rename-bot-1.onrender.com
       - key: PING_URL
-        sync: false
+        value: https://nex-4gb-rename-bot-1.onrender.com

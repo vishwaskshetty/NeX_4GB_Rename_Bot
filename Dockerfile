@@ -8,15 +8,17 @@ RUN apt-get update && \
         p7zip-full \
         aria2 \
         gcc \
+        g++ \
         build-essential \
         python3-dev \
         procps && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip3 install --no-cache-dir tgcrypto uvloop && \
-    pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir TgCrypto uvloop && \
+    pip install --no-cache-dir -r requirements.txt && \
+    python3 -c "import tgcrypto, uvloop; print('✅ VERIFIED C-EXTENSION BUILD:', tgcrypto.__file__)"
 
 COPY . .
 

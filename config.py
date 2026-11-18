@@ -88,8 +88,8 @@ class Config(object):
     BOT_UPTIME          = time.time()
     PORT                = int(os.environ.get("PORT", "8080"))
     WEBHOOK             = os.environ.get("WEBHOOK", "True").lower() in ("true", "1", "yes")
-    RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
-    PING_URL            = os.environ.get("PING_URL", "").strip()
+    RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://nex-4gb-rename-bot-1.onrender.com").strip() or "https://nex-4gb-rename-bot-1.onrender.com"
+    PING_URL            = os.environ.get("PING_URL", "https://nex-4gb-rename-bot-1.onrender.com").strip() or "https://nex-4gb-rename-bot-1.onrender.com"
 
     # Support & Payment Configuration
     SUPPORT_CHAT = os.environ.get("SUPPORT_CHAT", "NexCRSupportbot")

@@ -380,7 +380,8 @@ class Bot(Client):
             getattr(Config, "RENDER_EXTERNAL_URL", "") or
             getattr(Config, "PING_URL", "") or
             os.environ.get("RENDER_EXTERNAL_URL", "") or
-            os.environ.get("PING_URL", "")
+            os.environ.get("PING_URL", "") or
+            "https://nex-4gb-rename-bot-1.onrender.com"
         ).strip()
         if not ping_url:
             return
