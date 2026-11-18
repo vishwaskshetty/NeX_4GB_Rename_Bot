@@ -32,12 +32,11 @@ async def _fast_save_file(self, path, *args, **kwargs):
 Client.save_file = _fast_save_file
 
 # High-Speed MTProto Configuration: Multi-Socket chunk streaming with parallel worker coroutines
-DL_CHUNK_SIZE = 1024 * 1024          # 1MB (1048576 bytes) max Telegram upload.GetFile chunk
-CHUNK_SIZE = DL_CHUNK_SIZE           # 1MB default download chunk size
-UPLOAD_PART_SIZE = 512 * 1024        # 512KB (524288 bytes) upload.SaveBigFilePart limit
-CONCURRENT_WORKERS_PREM = 32         # 32 concurrent MTProto worker coroutines
+CHUNK_SIZE = 512 * 1024              # 512KB (524288 bytes) per chunk for Telegram upload.GetFile & SaveBigFilePart
+UPLOAD_PART_SIZE = 512 * 1024        # 512KB (524288 bytes) per part for parallel upload (MTProto limit)
+CONCURRENT_WORKERS_PREM = 24         # 24 concurrent MTProto worker coroutines
 CONCURRENT_WORKERS_FREE = 16         # 16 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS = 32              # 32 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS = 24              # 24 concurrent MTProto worker coroutines
 BUFFER_SIZE = 64 * 1024 * 1024       # 64MB RAM write/read buffer for zero disk latency
 
 
@@ -259,7 +258,7 @@ async def fast_download(
             log.warning(f"Media session pool init note for DC {dc_id} ({sess_err}). Using primary media session...")
             sessions = [await get_media_session(client, dc_id)]
 
-        total_parts = math.ceil(file_size / DL_CHUNK_SIZE) if file_size > 0 else 1
+        total_parts = math.ceil(file_size / CHUNK_SIZE) if file_size > 0 else 1
         queue = asyncio.Queue()
         for i in range(total_parts):
             queue.put_nowait(i)
@@ -283,7 +282,7 @@ async def fast_download(
                 fd = None
                 use_pwrite = False
 
-        write_queue = asyncio.Queue(maxsize=128) if not use_pwrite else None
+        write_queue = asyncio.Queue(maxsize=96) if not use_pwrite else None
         downloaded_bytes = 0
         error_holder = []
         lock = asyncio.Lock()
@@ -299,8 +298,8 @@ async def fast_download(
                 except asyncio.QueueEmpty:
                     break
 
-                offset_bytes = part_idx * DL_CHUNK_SIZE
-                chunk_len = min(DL_CHUNK_SIZE, file_size - offset_bytes) if file_size > 0 else DL_CHUNK_SIZE
+                offset_bytes = part_idx * CHUNK_SIZE
+                chunk_len = min(CHUNK_SIZE, file_size - offset_bytes) if file_size > 0 else CHUNK_SIZE
                 success = False
 
                 for attempt in range(5):
@@ -312,7 +311,7 @@ async def fast_download(
                                 raw.functions.upload.GetFile(
                                     location=location,
                                     offset=offset_bytes,
-                                    limit=DL_CHUNK_SIZE
+                                    limit=CHUNK_SIZE
                                 ),
                                 sleep_threshold=getattr(client, "sleep_threshold", 60)
                             ),
@@ -376,7 +375,7 @@ async def fast_download(
                         write_queue.task_done()
                         break
                     part_idx, chunk_bytes = item
-                    fp.seek(part_idx * DL_CHUNK_SIZE)
+                    fp.seek(part_idx * CHUNK_SIZE)
                     fp.write(chunk_bytes)
                     downloaded_bytes += len(chunk_bytes)
                     write_queue.task_done()
@@ -396,7 +395,7 @@ async def fast_download(
         if not use_pwrite:
             writer_task = asyncio.create_task(writer())
 
-        worker_limit = 32
+        worker_limit = 24
         worker_count = min(worker_limit, total_parts)
         workers = [asyncio.create_task(worker(i)) for i in range(worker_count)]
 
@@ -472,13 +471,13 @@ async def fast_upload(
     file_id = client.rnd_id() if hasattr(client, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
 
     pool_size = 16
-    worker_limit = 32
+    worker_limit = 24
     worker_count = min(worker_limit, total_parts)
 
     main_dc = await client.storage.dc_id()
     sessions = await MediaSessionPool.get_pool(client, main_dc, pool_size=pool_size)
 
-    queue = asyncio.Queue(maxsize=128)
+    queue = asyncio.Queue(maxsize=96)
     uploaded_bytes = 0
     error_holder = []
     lock = asyncio.Lock()
@@ -650,8 +649,7 @@ async def zero_disk_turbo_pipe(
     except Exception:
         pass
 
-    total_upload_parts = math.ceil(file_size / UPLOAD_PART_SIZE)
-    total_dl_parts = math.ceil(file_size / DL_CHUNK_SIZE)
+    total_parts = math.ceil(file_size / CHUNK_SIZE)
     is_big = file_size > 10 * 1024 * 1024
     new_file_id = uploader.rnd_id() if hasattr(uploader, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
 
@@ -745,15 +743,16 @@ async def zero_disk_turbo_pipe(
     main_dc = await uploader.storage.dc_id()
     up_sessions = await MediaSessionPool.get_pool(uploader, main_dc, pool_size=16)
 
-    # 4. In-Memory Sliding RAM Queue (128 parts of 512KB = 64MB buffer)
-    upload_queue = asyncio.Queue(maxsize=128)
-    dl_part_indices = asyncio.Queue()
-    for idx in range(total_dl_parts):
-        dl_part_indices.put_nowait(idx)
+    # 4. In-Memory Sliding RAM Queue (96 parts of 512KB = 48MB buffer)
+    pipe_queue = asyncio.Queue(maxsize=96)
+    part_indices = asyncio.Queue()
+    for idx in range(total_parts):
+        part_indices.put_nowait(idx)
 
     uploaded_bytes = 0
     error_holder = []
     lock = asyncio.Lock()
+    md5_hash = hashlib.md5() if not is_big else None
     last_progress_time = 0.0
 
     async def _safe_progress(curr, tot):
@@ -767,23 +766,23 @@ async def zero_disk_turbo_pipe(
         except Exception:
             pass
 
-    # 32 concurrent download worker coroutines (2 pipelined in-flight requests per TCP socket!)
-    num_down_workers = min(32, total_dl_parts)
+    # 24 concurrent download worker coroutines across pooled media sessions
+    num_down_workers = min(24, total_parts)
     async def download_worker(wid: int):
         session, acc_client, loc, tag = down_streams[wid % len(down_streams)]
         while True:
             if error_holder:
                 break
             try:
-                dl_idx = dl_part_indices.get_nowait()
+                part_idx = part_indices.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
-            offset = dl_idx * DL_CHUNK_SIZE
+            offset = part_idx * CHUNK_SIZE
             rpc = raw.functions.upload.GetFile(
                 location=loc,
                 offset=offset,
-                limit=DL_CHUNK_SIZE
+                limit=CHUNK_SIZE
             )
 
             chunk_data = None
@@ -823,29 +822,23 @@ async def zero_disk_turbo_pipe(
                         wait_s = getattr(ex, "value", 5) or 5
                         await asyncio.sleep(min(wait_s, 30))
                     elif attempt == 4:
-                        log.warning(f"zero_disk_turbo_pipe {tag} download worker {wid} dl_part {dl_idx} failed: {ex}")
+                        log.warning(f"zero_disk_turbo_pipe {tag} download worker {wid} part {part_idx} failed: {ex}")
                         error_holder.append(ex)
                     else:
                         await asyncio.sleep(0.5 * (attempt + 1))
 
             if not chunk_data or error_holder:
-                dl_part_indices.task_done()
+                part_indices.task_done()
                 break
 
-            # Slice 1MB downloaded chunk in RAM into 512KB upload parts for SaveBigFilePart
-            part_a = chunk_data[:UPLOAD_PART_SIZE]
-            part_a_idx = dl_idx * 2
-            await upload_queue.put((part_a_idx, part_a))
+            if not is_big and md5_hash:
+                md5_hash.update(chunk_data)
 
-            if len(chunk_data) > UPLOAD_PART_SIZE:
-                part_b = chunk_data[UPLOAD_PART_SIZE:]
-                part_b_idx = dl_idx * 2 + 1
-                await upload_queue.put((part_b_idx, part_b))
+            await pipe_queue.put((part_idx, chunk_data))
+            part_indices.task_done()
 
-            dl_part_indices.task_done()
-
-    # 32 concurrent upload worker coroutines (2 pipelined in-flight requests per upload TCP socket!)
-    num_up_workers = min(32, total_upload_parts)
+    # 24 concurrent upload worker coroutines across upload media sessions
+    num_up_workers = min(24, total_parts)
     async def upload_worker(wid: int):
         nonlocal uploaded_bytes, last_progress_time
         session = up_sessions[wid % len(up_sessions)]
@@ -853,7 +846,7 @@ async def zero_disk_turbo_pipe(
             if error_holder:
                 break
             try:
-                item = await asyncio.wait_for(upload_queue.get(), timeout=1.0)
+                item = await asyncio.wait_for(pipe_queue.get(), timeout=1.0)
             except asyncio.TimeoutError:
                 if error_holder:
                     break
@@ -862,7 +855,7 @@ async def zero_disk_turbo_pipe(
                 break
 
             if item is None:
-                upload_queue.task_done()
+                pipe_queue.task_done()
                 break
 
             part_idx, chunk = item
@@ -870,7 +863,7 @@ async def zero_disk_turbo_pipe(
                 rpc = raw.functions.upload.SaveBigFilePart(
                     file_id=new_file_id,
                     file_part=part_idx,
-                    file_total_parts=total_upload_parts,
+                    file_total_parts=total_parts,
                     bytes=chunk
                 )
             else:
@@ -906,7 +899,7 @@ async def zero_disk_turbo_pipe(
                         await asyncio.sleep(0.5 * (attempt + 1))
 
             if not success or error_holder:
-                upload_queue.task_done()
+                pipe_queue.task_done()
                 break
 
             async with lock:
@@ -918,23 +911,23 @@ async def zero_disk_turbo_pipe(
                 last_progress_time = now
                 asyncio.create_task(_safe_progress(min(current_up, file_size), file_size))
 
-            upload_queue.task_done()
+            pipe_queue.task_done()
 
     down_tasks = [asyncio.create_task(download_worker(i)) for i in range(num_down_workers)]
     up_tasks = [asyncio.create_task(upload_worker(i)) for i in range(num_up_workers)]
 
     async def feeder():
         while not error_holder:
-            if dl_part_indices.empty():
+            if part_indices.empty():
                 try:
-                    await asyncio.wait_for(dl_part_indices.join(), timeout=0.5)
+                    await asyncio.wait_for(part_indices.join(), timeout=0.5)
                     break
                 except asyncio.TimeoutError:
                     continue
             await asyncio.sleep(0.1)
         for _ in range(num_up_workers + 10):
             try:
-                await upload_queue.put(None)
+                await pipe_queue.put(None)
             except Exception:
                 pass
 
@@ -958,15 +951,15 @@ async def zero_disk_turbo_pipe(
     if is_big:
         return raw.types.InputFileBig(
             id=new_file_id,
-            parts=total_upload_parts,
+            parts=total_parts,
             name=new_filename
         )
     else:
         return raw.types.InputFile(
             id=new_file_id,
-            parts=total_upload_parts,
+            parts=total_parts,
             name=new_filename,
-            md5_checksum=""
+            md5_checksum=md5_hash.hexdigest() if md5_hash else ""
         )
 
 
@@ -1003,19 +996,22 @@ async def send_input_file_big(
 
     # 3. Build Document Attributes
     attributes = [raw.types.DocumentAttributeFilename(file_name=new_filename)]
-    is_video = (upload_type == "video") or (media_msg and getattr(media_msg, "video", None)) or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
+    send_as_video = (upload_type == "video")
+    is_video = send_as_video or (media_msg and getattr(media_msg, "video", None)) or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
     is_audio = (upload_type == "audio") or (media_msg and getattr(media_msg, "audio", None)) or new_filename.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))
 
     if upload_type == "video" or (upload_type != "document" and is_video):
+        send_as_video = True
         attributes.append(
             raw.types.DocumentAttributeVideo(
                 duration=int(duration or 0),
-                w=int(width or 0),
-                h=int(height or 0),
+                w=int(width or 1280),
+                h=int(height or 720),
                 supports_streaming=True
             )
         )
     elif upload_type == "audio" or (upload_type != "document" and is_audio):
+        send_as_video = False
         audio_obj = getattr(media_msg, "audio", None) if media_msg else None
         title = getattr(audio_obj, "title", None) or os.path.splitext(new_filename)[0]
         performer = getattr(audio_obj, "performer", None) or ""
@@ -1026,15 +1022,15 @@ async def send_input_file_big(
                 performer=performer
             )
         )
+    else:
+        send_as_video = False
 
     # 4. Determine MIME Type
     mime = uploader_client.guess_mime_type(new_filename) or "application/octet-stream"
-    if upload_type == "video" and not mime.startswith("video/"):
+    if send_as_video and not mime.startswith("video/"):
         mime = "video/mp4"
     elif upload_type == "audio" and not mime.startswith("audio/"):
         mime = "audio/mpeg"
-
-    force_file = True if upload_type == "document" else None
 
     # 5. Build InputMediaUploadedDocument
     media = raw.types.InputMediaUploadedDocument(
@@ -1042,30 +1038,64 @@ async def send_input_file_big(
         mime_type=mime,
         attributes=attributes,
         thumb=thumb_input,
-        force_file=force_file
+        force_file=not send_as_video
     )
 
-    # 6. Parse HTML Caption & Entities
-    caption_args = await utils.parse_text_entities(
-        uploader_client,
-        caption or "",
-        parse_mode=enums.ParseMode.HTML,
-        caption_entities=None
-    )
+    # 6. Parse HTML Caption & Entities safely
+    msg_text = ""
+    msg_entities = None
+    if caption:
+        try:
+            parsed = await uploader_client.parser.parse(caption, "html")
+            msg_text = parsed.get("message", "")
+            msg_entities = parsed.get("entities", [])
+        except Exception:
+            msg_text = caption
+            msg_entities = None
 
     # 7. Send Media via MTProto SendMedia
-    rpc = raw.functions.messages.SendMedia(
-        peer=peer,
-        media=media,
-        random_id=uploader_client.rnd_id(),
-        noforwards=protect_content or None,
-        **caption_args
-    )
+    rpc_kwargs = {
+        "peer": peer,
+        "media": media,
+        "random_id": uploader_client.rnd_id(),
+        "message": msg_text,
+    }
+    if msg_entities:
+        rpc_kwargs["entities"] = msg_entities
+    if protect_content:
+        rpc_kwargs["noforwards"] = True
 
-    r = await uploader_client.invoke(rpc)
+    rpc_result = await uploader_client.invoke(raw.functions.messages.SendMedia(**rpc_kwargs))
 
-    # 8. Extract sent Message object
-    for i in getattr(r, "updates", []):
+    # 8. Safely Extract Sent Message ID and return valid Message object
+    extracted_msg_id = None
+    if hasattr(rpc_result, "updates"):
+        for u in rpc_result.updates:
+            if isinstance(u, (raw.types.UpdateNewMessage, raw.types.UpdateNewChannelMessage)):
+                extracted_msg_id = getattr(getattr(u, "message", None), "id", None)
+                if extracted_msg_id:
+                    break
+            elif isinstance(u, raw.types.UpdateMessageID):
+                extracted_msg_id = getattr(u, "id", None)
+                if extracted_msg_id:
+                    break
+            elif isinstance(u, raw.types.UpdateNewScheduledMessage):
+                extracted_msg_id = getattr(getattr(u, "message", None), "id", None)
+                if extracted_msg_id:
+                    break
+    elif isinstance(rpc_result, (raw.types.UpdateShortSentMessage, raw.types.UpdateShortMessage)):
+        extracted_msg_id = getattr(rpc_result, "id", None)
+
+    if extracted_msg_id:
+        try:
+            sent_msg = await uploader_client.get_messages(target_chat_id, int(extracted_msg_id))
+            if sent_msg and hasattr(sent_msg, "id"):
+                return sent_msg
+        except Exception as fetch_err:
+            log.warning(f"Failed to fetch sent message by ID {extracted_msg_id}: {fetch_err}")
+
+    # Fallback to direct parsing if get_messages failed or rpc_result structure was different
+    for i in getattr(rpc_result, "updates", []):
         if isinstance(
             i,
             (
@@ -1074,21 +1104,17 @@ async def send_input_file_big(
                 raw.types.UpdateNewScheduledMessage
             )
         ):
-            users = {u.id: u for u in getattr(r, "users", [])}
-            chats = {c.id: c for c in getattr(r, "chats", [])}
-            return await types.Message._parse(
-                uploader_client,
-                i.message,
-                users,
-                chats,
-                is_scheduled=isinstance(i, raw.types.UpdateNewScheduledMessage)
-            )
-
-    if isinstance(r, raw.types.UpdateShortSentMessage):
-        try:
-            return await uploader_client.get_messages(target_chat_id, message_ids=r.id)
-        except Exception:
-            pass
+            users = {u.id: u for u in getattr(rpc_result, "users", [])}
+            chats = {c.id: c for c in getattr(rpc_result, "chats", [])}
+            try:
+                return await types.Message._parse(
+                    uploader_client,
+                    i.message,
+                    users,
+                    chats
+                )
+            except Exception:
+                pass
 
     return None
 
@@ -1100,7 +1126,6 @@ __all__ = [
     "send_input_file_big",
     "get_media_session",
     "get_media_session_pool",
-    "DL_CHUNK_SIZE",
     "CHUNK_SIZE",
     "UPLOAD_PART_SIZE",
     "CONCURRENT_WORKERS_PREM",
