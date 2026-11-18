@@ -32,6 +32,14 @@ try:
 except ImportError:
     print("⚠️ TgCrypto not found! Installing TgCrypto is recommended for 50-100+ MB/s speeds.")
 
+# FFmpeg / FFprobe static binary path injection
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+    print("✅ static_ffmpeg paths registered in PATH")
+except Exception as ffe:
+    print(f"⚠️ static_ffmpeg init note: {ffe}")
+
 from datetime import datetime
 from pytz import timezone
 from pyrogram import Client, __version__

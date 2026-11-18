@@ -329,6 +329,9 @@ async def rename_start(client, message):
                 InlineKeyboardButton("⚡ Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ", callback_data=f"auto_rename_{message.id}")
             ],
             [
+                InlineKeyboardButton("🎧 Eᴅɪᴛ Tʀᴀᴄᴋꜱ (Aᴜᴅɪᴏ / Sᴜʙ)", callback_data=f"inspect_tracks_{message.id}")
+            ],
+            [
                 InlineKeyboardButton("🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ", callback_data=f"extract_sample_only_{message.id}"),
                 InlineKeyboardButton("📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ", callback_data=f"extract_ss_only_{message.id}")
             ],
@@ -662,14 +665,20 @@ async def extract_ss_only_cb(client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^extract_streams(?:_(\d+))?$"))
 async def extract_streams_cb(client, query: CallbackQuery):
     await query.answer("Opening Stream Inspector... 🎵")
+    t_id = query.matches[0].group(1) if query.matches and query.matches[0].groups() and query.matches[0].group(1) else ""
+    cb_target = f"inspect_tracks_{t_id}" if t_id else "inspect_tracks"
     await query.message.reply_text(
         "<b>◈ Sᴛʀᴇᴀᴍ Iɴꜱᴘᴇᴄᴛᴏʀ 🎵</b>\n"
         "\n"
-        "▸ Reply to the video file with:\n"
+        "▸ Tap <b>🎧 Interactive Track Manager</b> to toggle audio/sub tracks,\n"
+        "or reply to the video file with:\n"
         "• <code>/streams</code> : View all audio & subtitle tracks\n"
         "• <code>/streams strip_subs</code> : Remove all subtitles\n"
         "• <code>/streams audio 1</code> : Keep only audio stream 1",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]])
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎧 Interactive Track Manager", callback_data=cb_target)],
+            [InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
+        ])
     )
 
 
@@ -783,6 +792,11 @@ async def refunc(client, message):
                 text=f"✅ <b>Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Fᴏᴏᴛᴇʀ :</b>\n<code>{b_caption}</code>\n\n⚡ @Nex_bots",
                 reply_markup=m
             )
+
+        # Check if user was replying to Track Rename prompt
+        if user_state == "waiting_track_rename" or "track-edited file" in reply_prompt.lower():
+            from plugins.track_manager import handle_track_rename_reply
+            return await handle_track_rename_reply(client, message)
 
         new_name = message.text.strip()
         try:
