@@ -568,3 +568,12 @@ def apply_episode_template(filename: str, template: str) -> str:
     return res
 
 
+def get_private_mode_markup() -> InlineKeyboardMarkup:
+    """Returns inline keyboard markup directing users to the public renamer bot."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Use Public Renamer Bot", url=Config.PUBLIC_BOT_URL)],
+        [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/Nex_bots")]
+    ])
+
+
+

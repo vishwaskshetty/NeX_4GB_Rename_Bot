@@ -42,10 +42,17 @@ Client.save_file = _fast_save_file
 # High-Speed MTProto Configuration: Multi-Socket chunk streaming with parallel worker coroutines
 CHUNK_SIZE = 512 * 1024              # 512KB (524288 bytes) per chunk for Telegram upload.GetFile & SaveBigFilePart
 UPLOAD_PART_SIZE = 512 * 1024        # 512KB (524288 bytes) per part for parallel upload (MTProto limit)
-CONCURRENT_WORKERS_PREM = 12         # 12 concurrent MTProto worker coroutines (optimal for 0.1 vCPU Render Free)
-CONCURRENT_WORKERS_FREE = 12         # 12 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS = 12              # 12 concurrent MTProto worker coroutines
-BUFFER_SIZE = 8 * 1024 * 1024        # 8MB RAM write/read buffer (strict RAM cap for 512MB container)
+DL_POOL_SIZE_PREM = 8                # 8 parallel TCP sockets on app_4gb (Azure 2-vCPU / 4 GB)
+DL_POOL_SIZE_BOT = 4                 # 4 parallel TCP sockets on bot client (Azure 2-vCPU / 4 GB)
+DL_POOL_SIZE = 12                    # 12 parallel TCP sockets total (8 app_4gb + 4 client)
+UL_POOL_SIZE = 10                    # 10 parallel TCP upload sockets
+DL_WORKERS = 24                      # 24 download workers (Azure 2-vCPU / 4 GB)
+UL_WORKERS = 24                      # 24 upload workers (Azure 2-vCPU / 4 GB)
+QUEUE_SIZE = 96                      # 96 * 512KB = 48MB RAM ring buffer
+BUFFER_SIZE = 32 * 1024 * 1024       # 32MB RAM write/read buffer (Azure 4GB VM)
+CONCURRENT_WORKERS_PREM = 24         # 24 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS_FREE = 24         # 24 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS = 24              # 24 concurrent MTProto worker coroutines
 
 # Activity timestamp to detect idle TCP sockets and trigger auto-reset (> 120s)
 _LAST_POOL_ACTIVITY: float = time.time()
@@ -380,7 +387,7 @@ async def fast_download(
                 thumb_size=thumb_size
             )
 
-        pool_size = 16
+        pool_size = DL_POOL_SIZE
         try:
             sessions = await asyncio.wait_for(MediaSessionPool.get_pool(client, dc_id, pool_size=pool_size), timeout=15.0)
         except Exception as sess_err:
@@ -411,7 +418,7 @@ async def fast_download(
                 fd = None
                 use_pwrite = False
 
-        write_queue = asyncio.Queue(maxsize=96) if not use_pwrite else None
+        write_queue = asyncio.Queue(maxsize=QUEUE_SIZE) if not use_pwrite else None
         downloaded_bytes = 0
         error_holder = []
         lock = asyncio.Lock()
@@ -527,7 +534,7 @@ async def fast_download(
         if not use_pwrite:
             writer_task = asyncio.create_task(writer())
 
-        worker_limit = 24
+        worker_limit = DL_WORKERS
         worker_count = min(worker_limit, total_parts)
         workers = [asyncio.create_task(worker(i)) for i in range(worker_count)]
 
@@ -606,14 +613,14 @@ async def fast_upload(
     file_name = os.path.basename(file_path)
     file_id = client.rnd_id() if hasattr(client, "rnd_id") else int.from_bytes(os.urandom(8), "little", signed=True)
 
-    pool_size = 16
-    worker_limit = 24
+    pool_size = UL_POOL_SIZE
+    worker_limit = UL_WORKERS
     worker_count = min(worker_limit, total_parts)
 
     main_dc = await client.storage.dc_id()
     sessions = await MediaSessionPool.get_pool(client, main_dc, pool_size=pool_size)
 
-    queue = asyncio.Queue(maxsize=96)
+    queue = asyncio.Queue(maxsize=QUEUE_SIZE)
     uploaded_bytes = 0
     error_holder = []
     lock = asyncio.Lock()
@@ -871,16 +878,16 @@ async def zero_disk_turbo_pipe(
             location_user = None
             staged_msg_user = None
 
-    # 3. Spin up 4 Media Sockets on app_4gb (Premium) + 2 on Bot (optimal for 0.1 vCPU Render Free)
+    # 3. Spin up 8 Media Sockets on app_4gb (Premium) + 4 on Bot (12 parallel TCP sockets total)
     user_sessions = []
     if location_user and user_client:
         try:
-            user_sessions = await _get_or_create_session_pool(user_client, dc_id, pool_size=4)
+            user_sessions = await _get_or_create_session_pool(user_client, dc_id, pool_size=DL_POOL_SIZE_PREM)
         except Exception as us_err:
             log.warning(f"app_4gb media session pool note ({us_err}). Falling back to Bot-only pool.")
             user_sessions = []
 
-    bot_pool_size = 2 if user_sessions else 6
+    bot_pool_size = DL_POOL_SIZE_BOT if user_sessions else DL_POOL_SIZE
     try:
         bot_sessions = await _get_or_create_session_pool(client, dc_id, pool_size=bot_pool_size)
     except Exception as bs_err:
@@ -897,10 +904,10 @@ async def zero_disk_turbo_pipe(
     if not down_streams:
         down_streams.append((await get_media_session(client, dc_id), client, location_bot, "bot"))
 
-    # Upload sessions: 6 independent upload Session sockets on uploader (optimal for 0.1 vCPU)
+    # Upload sessions: 10 independent upload Session sockets on uploader
     main_dc = await uploader.storage.dc_id()
     try:
-        up_sessions = await _get_or_create_session_pool(uploader, main_dc, pool_size=6)
+        up_sessions = await _get_or_create_session_pool(uploader, main_dc, pool_size=UL_POOL_SIZE)
     except Exception as up_pool_err:
         log.warning(f"MediaSessionPool for uploader failed ({up_pool_err}). Falling back to primary media session.")
         up_sessions = [await get_media_session(uploader, main_dc)]
@@ -908,8 +915,7 @@ async def zero_disk_turbo_pipe(
     if not up_sessions:
         up_sessions = [await get_media_session(uploader, main_dc)]
 
-    # 4. In-Memory Sliding RAM Queue (QUEUE_SIZE = 16 parts of 512KB = 8MB dedicated RAM ring buffer — strict cap for 512MB container)
-    QUEUE_SIZE = 16
+    # 4. In-Memory Sliding RAM Queue (QUEUE_SIZE = 96 parts of 512KB = 48MB dedicated RAM ring buffer for 2-vCPU / 4GB VM)
     pipe_queue = asyncio.Queue(maxsize=QUEUE_SIZE)
     part_indices = asyncio.Queue()
     for idx in range(total_parts):
@@ -932,8 +938,8 @@ async def zero_disk_turbo_pipe(
         except Exception:
             pass
 
-    # 12 concurrent download worker coroutines across pooled media sessions (2 per socket, optimal for 0.1 vCPU)
-    num_down_workers = min(12, total_parts)
+    # 24 concurrent download worker coroutines across pooled media sessions
+    num_down_workers = min(DL_WORKERS, total_parts)
     async def download_worker(wid: int):
         global _LAST_POOL_ACTIVITY
         while True:
@@ -1004,8 +1010,8 @@ async def zero_disk_turbo_pipe(
             await pipe_queue.put((part_idx, chunk_data))
             part_indices.task_done()
 
-    # 12 concurrent upload worker coroutines across upload media sessions
-    num_up_workers = min(12, total_parts)
+    # 24 concurrent upload worker coroutines across upload media sessions
+    num_up_workers = min(UL_WORKERS, total_parts)
     async def upload_worker(wid: int):
         nonlocal uploaded_bytes, last_progress_time
         global _LAST_POOL_ACTIVITY
@@ -1314,6 +1320,13 @@ __all__ = [
     "_LAST_POOL_ACTIVITY",
     "CHUNK_SIZE",
     "UPLOAD_PART_SIZE",
+    "DL_POOL_SIZE_PREM",
+    "DL_POOL_SIZE_BOT",
+    "DL_POOL_SIZE",
+    "UL_POOL_SIZE",
+    "DL_WORKERS",
+    "UL_WORKERS",
+    "QUEUE_SIZE",
     "CONCURRENT_WORKERS_PREM",
     "CONCURRENT_WORKERS_FREE",
     "CONCURRENT_WORKERS",

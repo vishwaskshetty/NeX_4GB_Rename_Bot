@@ -4,8 +4,9 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, ChatJoinRequest
 from pyrogram.errors import UserNotParticipant
 from pyrogram.enums import ChatMemberStatus
-from config import Config, parse_channel_id
+from config import Config, Txt, parse_channel_id
 from helper.database import db
+from helper.utils import get_private_mode_markup
 
 # NeX 4GB Rename Bot - Personal Bot Protection, Access Control & Dynamic Force Sub
 # Developed by @Nex_bots
@@ -114,6 +115,16 @@ async def join_req_listener(client: Client, request: ChatJoinRequest):
 async def force_sub_message_interceptor(client, message):
     user_id = message.from_user.id
 
+    # 0. Private Mode Guard (Owner-Only Instance)
+    if Config.PRIVATE_MODE:
+        await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
+        message.stop_propagation()
+        return
+
     # 1. Anti-Flood / Anti-Spam Rate Limiter (Max 4 msgs / second)
     now = time.time()
     times = [t for t in USER_FLOOD_TRACK.get(user_id, []) if now - t < 1.0]
@@ -221,6 +232,11 @@ async def force_sub_message_interceptor(client, message):
 # ---------------------------------------------------------------------------
 @Client.on_callback_query(~filters.user(Config.ADMIN), group=-1)
 async def force_sub_callback_interceptor(client, query: CallbackQuery):
+    if Config.PRIVATE_MODE:
+        await query.answer("🔒 Private Personal Bot: Reserved for personal use only.", show_alert=True)
+        query.stop_propagation()
+        return
+
     if query.data in ("check_sub", "check_fsub", "rfs_ch"):
         return
 
@@ -274,6 +290,9 @@ async def force_sub_callback_interceptor(client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^(check_sub|check_fsub|rfs_ch)$"))
 async def check_sub_callback_handler(client, query: CallbackQuery):
     user_id = query.from_user.id
+
+    if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
+        return await query.answer("🔒 Private Personal Bot: Reserved for personal use only.", show_alert=True)
 
     is_maint = await _safe(db.get_maintenance(), default=False)
     if is_maint:

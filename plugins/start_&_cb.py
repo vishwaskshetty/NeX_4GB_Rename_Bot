@@ -15,7 +15,7 @@ from pyrogram import Client, filters, enums, __version__
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from helper.database import db, TIER_NAMES
 from config import Config, Txt, parse_channel_id  
-from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content, is_duplicate_update
+from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content, is_duplicate_update, get_private_mode_markup
 
 logger = logging.getLogger(__name__)
 log = logger
@@ -193,6 +193,15 @@ async def start(client, message):
     user = message.from_user
     user_id = user.id
 
+    # If PRIVATE_MODE is active and user is not admin, reject immediately without touching MongoDB!
+    if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
+        await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
+        return
+
     # Check if user is brand-new BEFORE adding to DB
     is_new = not await _safe(db.is_user_exist(user_id), default=False)
 
@@ -273,12 +282,24 @@ async def start(client, message):
 
 @Client.on_message(filters.private & filters.command(["refer", "referral"]))
 async def refer_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     text, markup = await build_referral_panel(client, message.from_user.id)
     await message.reply_text(text, reply_markup=markup)
 
 
 @Client.on_message(filters.private & filters.command("leaderboard"))
 async def leaderboard_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     text, markup = await build_leaderboard_view(message.from_user.id)
     await message.reply_text(text, reply_markup=markup)
 
@@ -351,6 +372,12 @@ async def cb_handler(client, query: CallbackQuery):
 
 @Client.on_message(filters.private & filters.command("about"))
 async def about_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     await message.reply_text(
         text=Txt.ABOUT_TXT,
         reply_markup=InlineKeyboardMarkup([
@@ -367,6 +394,12 @@ async def about_cmd(client, message):
 
 @Client.on_message(filters.private & filters.command("help"))
 async def help_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     await message.reply_text(
         text=Txt.HELP_TXT,
         reply_markup=InlineKeyboardMarkup([

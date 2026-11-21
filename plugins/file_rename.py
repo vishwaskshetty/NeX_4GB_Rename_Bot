@@ -68,7 +68,8 @@ from helper.utils import (
     edit_message_content,
     sanitize_secrets,
     is_duplicate_update,
-    prepare_crisp_thumbnail
+    prepare_crisp_thumbnail,
+    get_private_mode_markup
 )
 from helper.ffmpeg_utils import (
     inject_metadata,
@@ -78,7 +79,7 @@ from helper.ffmpeg_utils import (
     apply_video_watermark
 )
 from helper.database import db, TIER_LIMITS
-from config import Config, parse_channel_id
+from config import Config, Txt, parse_channel_id
 from bot import app_4gb
 
 # Global concurrency queue lock - Max 10 heavy operations at once
@@ -184,6 +185,13 @@ async def rename_start(client, message):
     if not message.from_user or message.from_user.is_bot:
         return
     user_id = message.from_user.id
+    if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
+        await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
+        return
     if message.chat and await is_duplicate_update(f"media_{message.chat.id}_{message.id}"):
         return
     file = message.document or message.video or message.audio
@@ -723,6 +731,8 @@ async def watermark_action_cb(client, query: CallbackQuery):
 
 @Client.on_message(filters.private & filters.reply)
 async def refunc(client, message):
+    if Config.PRIVATE_MODE and message.from_user and message.from_user.id not in Config.ADMIN:
+        return
     if message.chat and await is_duplicate_update(f"reply_{message.chat.id}_{message.id}"):
         return
     reply_message = message.reply_to_message

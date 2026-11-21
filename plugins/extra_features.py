@@ -28,7 +28,8 @@ from helper.utils import (
     edit_message_content,
     progress_for_pyrogram,
     parse_media_tags,
-    apply_episode_template
+    apply_episode_template,
+    get_private_mode_markup
 )
 from helper.ffmpeg_utils import (
     get_media_streams,
@@ -38,7 +39,7 @@ from helper.ffmpeg_utils import (
     get_video_duration_and_dims
 )
 from helper.fast_transfer import fast_download
-from config import Config
+from config import Config, Txt
 
 # NeX 4GB Rename Bot - Extra Features & Settings Dashboard
 # Developed by @Nex_bots
@@ -158,6 +159,12 @@ async def build_settings_panel(user_id: int):
 @Client.on_message(filters.private & filters.command("settings"))
 async def settings_command(client, message):
     user_id = message.from_user.id
+    if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     text, markup = await build_settings_panel(user_id)
     await message.reply_text(text, reply_markup=markup)
 
@@ -1417,6 +1424,12 @@ async def streams_inspector_cmd(client, message):
 
 @Client.on_message(filters.private & filters.command(["remux", "convert_container"]))
 async def remux_command(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     reply_msg = message.reply_to_message
     if not reply_msg or not (reply_msg.video or reply_msg.document):
         return await message.reply_text(
@@ -1492,6 +1505,12 @@ async def remux_command(client, message):
 
 @Client.on_message(filters.private & filters.command(["sheet", "contact_sheet", "grid"]))
 async def screenshot_sheet_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     reply_msg = message.reply_to_message
     if not reply_msg or not (reply_msg.video or reply_msg.document):
         return await message.reply_text(
@@ -1546,6 +1565,12 @@ async def screenshot_sheet_cmd(client, message):
 
 @Client.on_message(filters.private & filters.command(["extract", "unzip", "unrar", "7z"]))
 async def archive_extract_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     reply_msg = message.reply_to_message
     if not reply_msg or not (reply_msg.document):
         return await message.reply_text(
@@ -1636,6 +1661,12 @@ async def archive_extract_cmd(client, message):
 
 @Client.on_message(filters.private & filters.command(["zip", "pack"]))
 async def archive_pack_cmd(client, message):
+    if Config.PRIVATE_MODE and message.from_user.id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     reply_msg = message.reply_to_message
     if not reply_msg or not (reply_msg.document or reply_msg.video or reply_msg.audio):
         return await message.reply_text(
@@ -1695,6 +1726,12 @@ async def archive_pack_cmd(client, message):
 @Client.on_message(filters.private & filters.command(["template", "epformat"]))
 async def episode_template_cmd(client, message):
     user_id = message.from_user.id
+    if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
+        return await message.reply_text(
+            Txt.PRIVATE_MODE_TXT,
+            reply_markup=get_private_mode_markup(),
+            quote=True
+        )
     cmd_parts = message.text.split(maxsplit=1)
 
     if len(cmd_parts) < 2:

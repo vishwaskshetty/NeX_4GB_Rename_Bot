@@ -67,8 +67,10 @@ class Config(object):
             _parsed_admins.append(fa)
     ADMIN      = _parsed_admins
     OWNER_ID   = ADMIN[0] if ADMIN else 6059191947
-    OWNER_ONLY = os.environ.get("OWNER_ONLY", "True").lower() == "true"
-    FORCE_SUB  = os.environ.get("FORCE_SUB", "Nex_bots").strip() or "Nex_bots" 
+    PRIVATE_MODE   = os.environ.get("PRIVATE_MODE", "True").lower() == "true"
+    PUBLIC_BOT_URL = os.environ.get("PUBLIC_BOT_URL", "https://t.me/Nex_bots").strip() or "https://t.me/Nex_bots"
+    OWNER_ONLY     = PRIVATE_MODE
+    FORCE_SUB      = os.environ.get("FORCE_SUB", "Nex_bots").strip() or "Nex_bots" 
 
     # Channels & Media (Permanently Hardcoded to -1003792044224)
     _raw_files           = os.environ.get("FILES_CHANNEL", os.environ.get("FILE_CHANNEL", "-1003792044224")).strip()
@@ -206,3 +208,9 @@ If you like our bots and services, feel free to support our development:
 
 📢 <b>Cʜᴀɴɴᴇʟ :</b> @Nex_bots
 💬 <b>Sᴜᴘᴘᴏʀᴛ :</b> @NexCRSupportbot"""
+
+    PRIVATE_MODE_TXT = (
+        "🔒 <b>Private Personal Bot</b>\n\n"
+        "This instance is reserved for personal use.\n"
+        "👉 Use our free public renamer bot below!"
+    )
