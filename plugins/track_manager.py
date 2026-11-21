@@ -580,11 +580,12 @@ async def _execute_track_mux_and_upload(client, message, ctx: dict, new_filename
             except Exception:
                 pass
 
-        # Setup 4GB routing & uploader
+        # Setup Premium 4GB routing & uploader
         from bot import app_4gb
         is_4gb = output_size > (1.95 * 1024 * 1024 * 1024)
         client_4gb = getattr(client, "app_4gb", None) or app_4gb
-        uploader = client_4gb if (is_4gb and client_4gb) else client
+        is_prem_active = bool(client_4gb and (getattr(client, "app_4gb_started", False) or getattr(client_4gb, "is_connected", False) or getattr(client_4gb, "storage", None)))
+        uploader = client_4gb if is_prem_active else client
 
         # Prepare crisp LANCZOS 4:4:4 thumbnail
         thumb_path = None
@@ -640,7 +641,7 @@ async def _execute_track_mux_and_upload(client, message, ctx: dict, new_filename
         )
 
         try:
-            if is_4gb and client_4gb and bridge_channel and bridge_channel != 0:
+            if (is_prem_active or (is_4gb and client_4gb)) and bridge_channel and bridge_channel != 0:
                 bridge_msg = None
                 if uploaded_file:
                     bridge_msg = await send_input_file_big(

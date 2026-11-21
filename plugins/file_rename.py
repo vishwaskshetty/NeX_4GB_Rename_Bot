@@ -85,7 +85,7 @@ from bot import app_4gb
 # Global concurrency queue lock - Max 10 heavy operations at once
 RENAME_SEMAPHORE = asyncio.Semaphore(10)
 
-# 3-Task Concurrency Semaphore for smooth simultaneous multitasking (imported from helper.fast_transfer)
+# 2-Task Concurrency Semaphore for heavy 4 GB multitasking (imported from helper.fast_transfer)
 _TRANSFER_WAITING_TASKS: list[str] = []
 
 # Per-user active task tracking & pre-rename extras cache
@@ -1207,13 +1207,15 @@ async def execute_rename_pipeline(
 
             cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("✖️ Cancel", callback_data=f"cancel_process_{task_id}")]])
 
-            # Determine 4GB Routing & Uploader Client
+            # Determine Premium 4GB Routing & Uploader Client
             user_dump = await db.get_dump_channel(user_id)
             bridge_channel = parse_channel_id(user_dump or vdisk_ch or Config.DUMP_CHANNEL or Config.FILES_CHANNEL or Config.LOG_CHANNEL)
             is_4gb = file_size > (1.95 * 1024 * 1024 * 1024)
             client_4gb = getattr(client, "app_4gb", None) or app_4gb
-            uploader = client_4gb if (is_4gb and client_4gb) else client
-            upload_mode_tag = "<b>◈ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ ᴜᴘʟᴏᴀᴅɪɴɢ... 🚀</b>" if (is_4gb and client_4gb) else "<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 🚀</b>"
+            is_prem_active = bool(client_4gb and (getattr(client, "app_4gb_started", False) or getattr(client_4gb, "is_connected", False) or getattr(client_4gb, "storage", None)))
+            # Route ALL files through Premium app_4gb client whenever active for unthrottled Telegram speed
+            uploader = client_4gb if is_prem_active else client
+            upload_mode_tag = "<b>◈ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ ᴜᴘʟᴏᴀᴅɪɴɢ... 🚀</b>" if is_prem_active else "<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 🚀</b>"
 
             async def _prepare_thumb():
                 c_thumb = await db.get_thumbnail(user_id)
@@ -1260,7 +1262,7 @@ async def execute_rename_pipeline(
 
             ph_path = await _prepare_thumb()
 
-            # 3-Task Concurrency Semaphore for smooth multitasking (up to 3 simultaneous transfers on 4GB VM)
+            # 2-Task Concurrency Semaphore for heavy 4 GB multitasking (2 concurrent files saturate full pipe)
             task_queue_key = f"{user_id}_{ms.id}"
             transfer_sem_held = False
             if _TRANSFER_SEMAPHORE.locked():
@@ -1269,7 +1271,7 @@ async def execute_rename_pipeline(
                     await ms.edit(
                         "⏳ <b>Qᴜᴇᴜᴇᴅ ꜰᴏʀ Tᴜʀʙᴏ Sᴛʀᴇᴀᴍɪɴɢ... ⚡</b>\n\n"
                         "▸ <i>Yᴏᴜʀ ꜰɪʟᴇ ᴡɪʟʟ ꜱᴛᴀʀᴛ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴀꜱ ꜱᴏᴏɴ ᴀꜱ ᴀɴ ᴀᴄᴛɪᴠᴇ ꜱʟᴏᴛ ꜰʀᴇᴇꜱ ᴜᴘ!</i>\n"
-                        "<i>(Running up to 3 high-speed tasks simultaneously on 4 GB RAM)</i>",
+                        "<i>(Running 2 high-speed tasks simultaneously to saturate full network pipe)</i>",
                         reply_markup=cancel_btn
                     )
                 except Exception:
@@ -1310,7 +1312,7 @@ async def execute_rename_pipeline(
                         new_filename=new_filename,
                         progress=progress_for_pyrogram,
                         progress_args=("⚡ ᴢᴇʀᴏ-ᴅɪꜱᴋ ᴛᴜʀʙᴏ ꜱᴛʀᴇᴀᴍɪɴɢ... 🚀", ms, upload_start, client, effective_tier),
-                        is_prem=is_prem or (effective_tier >= 1) or is_4gb
+                        is_prem=is_prem or (effective_tier >= 1) or is_4gb or is_prem_active
                     )
                     if uploaded_file:
                         use_zero_disk = True
@@ -1336,17 +1338,21 @@ async def execute_rename_pipeline(
 
                 start_time = time.time()
                 try:
+                    # Prefer Premium app_4gb client with staged virtual disk message for unthrottled download
+                    dl_client = client_4gb if (is_prem_active and staged_msg) else client
+                    dl_msg = staged_msg if (is_prem_active and staged_msg) else file_msg
+                    dl_tag = "<b>◈ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ... 📥</b>" if dl_client == client_4gb else "<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>"
                     path = await fast_download(
-                        client=client,
-                        message_or_file=file_msg,
+                        client=dl_client,
+                        message_or_file=dl_msg,
                         file_path=file_path,
                         progress=progress_for_pyrogram,
-                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                        progress_args=(dl_tag, ms, start_time, client, effective_tier)
                     )
                 except StopTransmission:
                     raise
                 except Exception as down_err:
-                    print(f"⚠️ fast_download error: {down_err}. Retrying fast_download with primary session...")
+                    print(f"⚠️ fast_download error: {down_err}. Retrying fast_download with fallback...")
                     traceback.print_exc()
                     path = await fast_download(
                         client=client,
@@ -1451,7 +1457,7 @@ async def execute_rename_pipeline(
                         file_path=file_path,
                         progress=progress_for_pyrogram,
                         progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier),
-                        is_prem=is_prem or (effective_tier >= 1) or is_4gb
+                        is_prem=is_prem or (effective_tier >= 1) or is_4gb or is_prem_active
                     )
                 except StopTransmission:
                     raise
@@ -1493,8 +1499,8 @@ async def execute_rename_pipeline(
             sent_msg = None
 
             try:
-                # 4GB Upload Flow (> 1.95GB)
-                if is_4gb and client_4gb:
+                # Premium Upload Flow (files of ANY size routed through app_4gb whenever active)
+                if (is_prem_active or (is_4gb and client_4gb)):
                     if bridge_channel and bridge_channel != 0:
                         try:
                             if uploaded_file:
@@ -1686,7 +1692,7 @@ async def execute_rename_pipeline(
                         progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, time.time(), client, effective_tier)
                     )
                     upload_start = time.time()
-                    if is_4gb and client_4gb:
+                    if (is_prem_active or (is_4gb and client_4gb)):
                         if upload_type == "video":
                             sent_msg = await uploader.send_video(chat_id=user_id, video=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, width=width, height=height, supports_streaming=True, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
                         elif upload_type == "audio":

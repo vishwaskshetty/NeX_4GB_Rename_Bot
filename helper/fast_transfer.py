@@ -42,23 +42,23 @@ Client.save_file = _fast_save_file
 # High-Speed MTProto Configuration: Multi-Socket chunk streaming with parallel worker coroutines
 CHUNK_SIZE = 512 * 1024              # 512KB (524288 bytes) per chunk for Telegram upload.GetFile & SaveBigFilePart
 UPLOAD_PART_SIZE = 512 * 1024        # 512KB (524288 bytes) per part for parallel upload (MTProto limit)
-DL_POOL_SIZE_PREM = 6                # 6 parallel TCP sockets on app_4gb (Azure 2-vCPU / 4 GB Multitasking)
-DL_POOL_SIZE_BOT = 4                 # 4 parallel TCP sockets on bot client (Azure 2-vCPU / 4 GB Multitasking)
-DL_POOL_SIZE = 10                    # 10 parallel TCP sockets total (6 app_4gb + 4 client)
-UL_POOL_SIZE = 8                     # 8 parallel TCP upload sockets
-DL_WORKERS = 16                      # 16 download workers per task (Smooth 3x Multitasking)
-UL_WORKERS = 16                      # 16 upload workers per task (Smooth 3x Multitasking)
-QUEUE_SIZE = 48                      # 48 * 512KB = 24MB RAM ring buffer per active task
-BUFFER_SIZE = 16 * 1024 * 1024       # 16MB RAM write/read buffer (48MB RAM per task across 3 tasks = ~150MB total)
-CONCURRENT_WORKERS_PREM = 16         # 16 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS_FREE = 16         # 16 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS = 16              # 16 concurrent MTProto worker coroutines
+DL_POOL_SIZE = 8                     # 8 parallel TCP download sockets (Telegram Premium)
+DL_POOL_SIZE_PREM = 8                # 8 parallel TCP sockets on app_4gb (Telegram Premium)
+DL_POOL_SIZE_BOT = 4                 # 4 parallel TCP sockets on bot client (fallback)
+UL_POOL_SIZE = 10                    # 10 parallel TCP upload sockets
+DL_WORKERS = 24                      # 24 download workers (Full Azure VM pipe saturation)
+UL_WORKERS = 24                      # 24 upload workers (Full Azure VM pipe saturation)
+QUEUE_SIZE = 64                      # 64 * 512KB = 32MB RAM ring buffer per active task (512KB / 1MB aligned)
+BUFFER_SIZE = 32 * 1024 * 1024       # 32MB RAM write/read buffer (64MB RAM across 2 concurrent tasks = ~130MB total)
+CONCURRENT_WORKERS_PREM = 24         # 24 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS_FREE = 24         # 24 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS = 24              # 24 concurrent MTProto worker coroutines
 
 # Activity timestamp to detect idle TCP sockets and trigger auto-reset (> 120s)
 _LAST_POOL_ACTIVITY: float = time.time()
 
-# 3-Task Concurrency Semaphore for smooth simultaneous multitasking on 4 GB RAM
-_TRANSFER_SEMAPHORE = asyncio.Semaphore(3)
+# 2-Task Concurrency Semaphore for heavy 4 GB multitasking (2 concurrent files saturate full pipe)
+_TRANSFER_SEMAPHORE = asyncio.Semaphore(2)
 
 
 def _cleanup_memory(client: Optional[Client] = None, app_4gb: Optional[Client] = None) -> None:
@@ -878,7 +878,7 @@ async def zero_disk_turbo_pipe(
             location_user = None
             staged_msg_user = None
 
-    # 3. Spin up 6 Media Sockets on app_4gb (Premium) + 4 on Bot (10 parallel TCP sockets total)
+    # 3. Spin up 8 Media Sockets on app_4gb (Premium) + 4 on Bot (12 parallel TCP sockets total)
     user_sessions = []
     if location_user and user_client:
         try:
@@ -904,7 +904,7 @@ async def zero_disk_turbo_pipe(
     if not down_streams:
         down_streams.append((await get_media_session(client, dc_id), client, location_bot, "bot"))
 
-    # Upload sessions: 8 independent upload Session sockets on uploader
+    # Upload sessions: 10 independent upload Session sockets on uploader
     main_dc = await uploader.storage.dc_id()
     try:
         up_sessions = await _get_or_create_session_pool(uploader, main_dc, pool_size=UL_POOL_SIZE)
@@ -915,7 +915,7 @@ async def zero_disk_turbo_pipe(
     if not up_sessions:
         up_sessions = [await get_media_session(uploader, main_dc)]
 
-    # 4. In-Memory Sliding RAM Queue (QUEUE_SIZE = 48 parts of 512KB = 24MB dedicated RAM ring buffer for 3x multitasking on 4GB VM)
+    # 4. In-Memory Sliding RAM Queue (QUEUE_SIZE = 64 parts of 512KB = 32MB dedicated RAM ring buffer for 2x multitasking on 4GB VM)
     pipe_queue = asyncio.Queue(maxsize=QUEUE_SIZE)
     part_indices = asyncio.Queue()
     for idx in range(total_parts):
