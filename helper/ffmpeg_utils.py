@@ -35,13 +35,23 @@ if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
         print(f"static_ffmpeg auto-init info: {e}")
 
 
+def _wrap_nice(cmd: List[str]) -> List[str]:
+    """
+    Wraps command with 'nice -n 10' on Linux/Unix systems so heavy FFmpeg tasks
+    never starve the event loop or freeze concurrent file downloads/uploads.
+    """
+    if sys.platform != "win32" and shutil.which("nice"):
+        return ["nice", "-n", "10"] + cmd
+    return cmd
+
+
 async def inject_metadata(input_path: str, output_path: str, meta_text: str) -> bool:
     """
     Losslessly injects custom metadata tags into container and audio/video/subtitle streams.
     """
     cmd = [
         "ffmpeg", "-y",
-        "-threads", "0",
+        "-threads", "2",
         "-i", input_path,
         "-map", "0",
         "-c", "copy",
@@ -56,7 +66,7 @@ async def inject_metadata(input_path: str, output_path: str, meta_text: str) -> 
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -105,6 +115,7 @@ async def generate_sample_video(input_path: str, output_path: str, total_duratio
 
     cmd = [
         "ffmpeg", "-y",
+        "-threads", "2",
         "-ss", str(start_sec),
         "-i", input_path,
         "-t", str(sample_sec),
@@ -113,7 +124,7 @@ async def generate_sample_video(input_path: str, output_path: str, total_duratio
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -163,7 +174,7 @@ async def apply_video_watermark(
             filter_complex = f"[1:v]format=rgba,colorchannelmixer=aa={op:.2f},scale={img_size}:-1[wm];[0:v][wm]{coords}"
             cmd = [
                 "ffmpeg", "-y",
-                "-threads", "4",
+                "-threads", "2",
                 "-i", input_path,
                 "-i", image_path,
                 "-filter_complex", filter_complex,
@@ -185,7 +196,7 @@ async def apply_video_watermark(
             )
             cmd = [
                 "ffmpeg", "-y",
-                "-threads", "4",
+                "-threads", "2",
                 "-i", input_path,
                 "-vf", vf_filter,
                 "-c:v", "libx264",
@@ -196,7 +207,7 @@ async def apply_video_watermark(
             ]
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -225,6 +236,7 @@ async def generate_screenshots(input_path: str, output_folder: str, total_durati
         img_out = os.path.join(output_folder, f"screenshot_{i}.jpg")
         cmd = [
             "ffmpeg", "-y",
+            "-threads", "2",
             "-ss", str(target_time),
             "-i", input_path,
             "-frames:v", "1",
@@ -233,7 +245,7 @@ async def generate_screenshots(input_path: str, output_folder: str, total_durati
         ]
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                *_wrap_nice(cmd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -263,7 +275,7 @@ async def get_video_duration_and_dims(file_path: str) -> Tuple[int, int, int]:
             file_path
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -321,7 +333,7 @@ async def get_media_streams(file_path: str) -> Dict[str, list]:
             file_path
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -360,7 +372,7 @@ async def remux_select_streams(
     """
     Losslessly strips unwanted tracks or selects specific audio/subtitle streams in under 5 seconds.
     """
-    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path, "-map", "0:v"]
+    cmd = ["ffmpeg", "-y", "-threads", "2", "-i", input_path, "-map", "0:v"]
 
     if a_indices:
         for idx in a_indices:
@@ -381,7 +393,7 @@ async def remux_select_streams(
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -396,14 +408,14 @@ async def remux_container(input_path: str, output_path: str) -> bool:
     """
     Fast lossless container remuxing between MKV and MP4 in 4-8 seconds without CPU re-encoding.
     """
-    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path, "-c", "copy"]
+    cmd = ["ffmpeg", "-y", "-threads", "2", "-i", input_path, "-c", "copy"]
     if output_path.lower().endswith(".mp4"):
         cmd.extend(["-movflags", "+faststart"])
     cmd.append(output_path)
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -427,6 +439,7 @@ async def generate_screenshot_grid(input_path: str, output_path: str, total_dura
     vf = f"select='not(mod(n\\,{interval}))',scale=480:-1,tile=3x3"
     cmd = [
         "ffmpeg", "-y",
+        "-threads", "2",
         "-i", input_path,
         "-vf", vf,
         "-frames:v", "1",
@@ -435,7 +448,7 @@ async def generate_screenshot_grid(input_path: str, output_path: str, total_dura
     ]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )

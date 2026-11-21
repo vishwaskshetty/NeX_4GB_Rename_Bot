@@ -85,7 +85,7 @@ from bot import app_4gb
 # Global concurrency queue lock - Max 10 heavy operations at once
 RENAME_SEMAPHORE = asyncio.Semaphore(10)
 
-# Strict 1-File-At-A-Time Full-Bandwidth Execution Semaphore (imported from helper.fast_transfer)
+# 3-Task Concurrency Semaphore for smooth simultaneous multitasking (imported from helper.fast_transfer)
 _TRANSFER_WAITING_TASKS: list[str] = []
 
 # Per-user active task tracking & pre-rename extras cache
@@ -1260,7 +1260,7 @@ async def execute_rename_pipeline(
 
             ph_path = await _prepare_thumb()
 
-            # 1-Task Concurrency Semaphore for full-bandwidth turbo transfers (100% bandwidth per file)
+            # 3-Task Concurrency Semaphore for smooth multitasking (up to 3 simultaneous transfers on 4GB VM)
             task_queue_key = f"{user_id}_{ms.id}"
             transfer_sem_held = False
             if _TRANSFER_SEMAPHORE.locked():
@@ -1268,8 +1268,8 @@ async def execute_rename_pipeline(
                 try:
                     await ms.edit(
                         "⏳ <b>Qᴜᴇᴜᴇᴅ ꜰᴏʀ Tᴜʀʙᴏ Sᴛʀᴇᴀᴍɪɴɢ... ⚡</b>\n\n"
-                        "▸ <i>Yᴏᴜʀ ꜰɪʟᴇ ᴡɪʟʟ ꜱᴛᴀʀᴛ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ɪɴ ᴀ ꜰᴇᴡ ꜱᴇᴄᴏɴᴅꜱ!</i>\n"
-                        "<i>(100% full gigabit bandwidth and 32 parallel workers focused on 1 task at a time)</i>",
+                        "▸ <i>Yᴏᴜʀ ꜰɪʟᴇ ᴡɪʟʟ ꜱᴛᴀʀᴛ ᴀᴜᴛᴏᴍᴀᴛɪᴄᴀʟʟʏ ᴀꜱ ꜱᴏᴏɴ ᴀꜱ ᴀɴ ᴀᴄᴛɪᴠᴇ ꜱʟᴏᴛ ꜰʀᴇᴇꜱ ᴜᴘ!</i>\n"
+                        "<i>(Running up to 3 high-speed tasks simultaneously on 4 GB RAM)</i>",
                         reply_markup=cancel_btn
                     )
                 except Exception:

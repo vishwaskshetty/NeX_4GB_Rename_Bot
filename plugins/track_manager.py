@@ -55,6 +55,7 @@ from helper.fast_transfer import (
     _TRANSFER_SEMAPHORE,
     _cleanup_memory
 )
+from helper.ffmpeg_utils import _wrap_nice
 from config import Config, parse_channel_id
 
 # In-memory track state per user:
@@ -114,7 +115,7 @@ async def inspect_media_streams(file_path: str) -> dict:
             file_path
         ]
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
+            *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -509,7 +510,7 @@ async def _execute_track_mux_and_upload(client, message, ctx: dict, new_filename
         output_path = os.path.join(work_dir, f"out_{new_filename}")
         cmd = [
             "ffmpeg", "-y",
-            "-threads", "0",
+            "-threads", "2",
             "-i", local_path,
             "-map", "0:v:0"  # keep primary video
         ]
@@ -546,7 +547,7 @@ async def _execute_track_mux_and_upload(client, message, ctx: dict, new_filename
         mux_ok = False
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                *_wrap_nice(cmd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )

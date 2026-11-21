@@ -42,23 +42,23 @@ Client.save_file = _fast_save_file
 # High-Speed MTProto Configuration: Multi-Socket chunk streaming with parallel worker coroutines
 CHUNK_SIZE = 512 * 1024              # 512KB (524288 bytes) per chunk for Telegram upload.GetFile & SaveBigFilePart
 UPLOAD_PART_SIZE = 512 * 1024        # 512KB (524288 bytes) per part for parallel upload (MTProto limit)
-DL_POOL_SIZE_PREM = 8                # 8 parallel TCP sockets on app_4gb (Azure 2-vCPU / 4 GB)
-DL_POOL_SIZE_BOT = 4                 # 4 parallel TCP sockets on bot client (Azure 2-vCPU / 4 GB)
-DL_POOL_SIZE = 12                    # 12 parallel TCP sockets total (8 app_4gb + 4 client)
-UL_POOL_SIZE = 10                    # 10 parallel TCP upload sockets
-DL_WORKERS = 24                      # 24 download workers (Azure 2-vCPU / 4 GB)
-UL_WORKERS = 24                      # 24 upload workers (Azure 2-vCPU / 4 GB)
-QUEUE_SIZE = 96                      # 96 * 512KB = 48MB RAM ring buffer
-BUFFER_SIZE = 32 * 1024 * 1024       # 32MB RAM write/read buffer (Azure 4GB VM)
-CONCURRENT_WORKERS_PREM = 24         # 24 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS_FREE = 24         # 24 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS = 24              # 24 concurrent MTProto worker coroutines
+DL_POOL_SIZE_PREM = 6                # 6 parallel TCP sockets on app_4gb (Azure 2-vCPU / 4 GB Multitasking)
+DL_POOL_SIZE_BOT = 4                 # 4 parallel TCP sockets on bot client (Azure 2-vCPU / 4 GB Multitasking)
+DL_POOL_SIZE = 10                    # 10 parallel TCP sockets total (6 app_4gb + 4 client)
+UL_POOL_SIZE = 8                     # 8 parallel TCP upload sockets
+DL_WORKERS = 16                      # 16 download workers per task (Smooth 3x Multitasking)
+UL_WORKERS = 16                      # 16 upload workers per task (Smooth 3x Multitasking)
+QUEUE_SIZE = 48                      # 48 * 512KB = 24MB RAM ring buffer per active task
+BUFFER_SIZE = 16 * 1024 * 1024       # 16MB RAM write/read buffer (48MB RAM per task across 3 tasks = ~150MB total)
+CONCURRENT_WORKERS_PREM = 16         # 16 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS_FREE = 16         # 16 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS = 16              # 16 concurrent MTProto worker coroutines
 
 # Activity timestamp to detect idle TCP sockets and trigger auto-reset (> 120s)
 _LAST_POOL_ACTIVITY: float = time.time()
 
-# Strict 1-File-At-A-Time Full-Bandwidth Execution Semaphore
-_TRANSFER_SEMAPHORE = asyncio.Semaphore(1)
+# 3-Task Concurrency Semaphore for smooth simultaneous multitasking on 4 GB RAM
+_TRANSFER_SEMAPHORE = asyncio.Semaphore(3)
 
 
 def _cleanup_memory(client: Optional[Client] = None, app_4gb: Optional[Client] = None) -> None:
@@ -878,7 +878,7 @@ async def zero_disk_turbo_pipe(
             location_user = None
             staged_msg_user = None
 
-    # 3. Spin up 8 Media Sockets on app_4gb (Premium) + 4 on Bot (12 parallel TCP sockets total)
+    # 3. Spin up 6 Media Sockets on app_4gb (Premium) + 4 on Bot (10 parallel TCP sockets total)
     user_sessions = []
     if location_user and user_client:
         try:
@@ -904,7 +904,7 @@ async def zero_disk_turbo_pipe(
     if not down_streams:
         down_streams.append((await get_media_session(client, dc_id), client, location_bot, "bot"))
 
-    # Upload sessions: 10 independent upload Session sockets on uploader
+    # Upload sessions: 8 independent upload Session sockets on uploader
     main_dc = await uploader.storage.dc_id()
     try:
         up_sessions = await _get_or_create_session_pool(uploader, main_dc, pool_size=UL_POOL_SIZE)
@@ -915,7 +915,7 @@ async def zero_disk_turbo_pipe(
     if not up_sessions:
         up_sessions = [await get_media_session(uploader, main_dc)]
 
-    # 4. In-Memory Sliding RAM Queue (QUEUE_SIZE = 96 parts of 512KB = 48MB dedicated RAM ring buffer for 2-vCPU / 4GB VM)
+    # 4. In-Memory Sliding RAM Queue (QUEUE_SIZE = 48 parts of 512KB = 24MB dedicated RAM ring buffer for 3x multitasking on 4GB VM)
     pipe_queue = asyncio.Queue(maxsize=QUEUE_SIZE)
     part_indices = asyncio.Queue()
     for idx in range(total_parts):
@@ -1082,7 +1082,7 @@ async def zero_disk_turbo_pipe(
                 current_up = uploaded_bytes
 
             now = time.time()
-            if now - last_progress_time >= 8.0 or current_up >= file_size:
+            if now - last_progress_time >= 3.5 or current_up >= file_size:
                 last_progress_time = now
                 asyncio.create_task(_safe_progress(min(current_up, file_size), file_size))
 
