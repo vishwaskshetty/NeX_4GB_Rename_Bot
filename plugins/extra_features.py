@@ -109,7 +109,8 @@ async def build_settings_panel(user_id: int):
             InlineKeyboardButton(f"📸 Sᴄʀᴇᴇɴꜱ: {settings['screenshots']}", callback_data="set_cycle_ss")
         ],
         [
-            InlineKeyboardButton("🖼️ Vɪᴇᴡ Tʜᴜᴍʙ", callback_data="set_view_thumb"),
+            InlineKeyboardButton("🖼️ Sᴇᴛ Tʜᴜᴍʙ", callback_data="cb_set_thumb"),
+            InlineKeyboardButton("👁️ Vɪᴇᴡ Tʜᴜᴍʙ", callback_data="set_view_thumb"),
             InlineKeyboardButton("🗑️ Dᴇʟᴇᴛᴇ Tʜᴜᴍʙ", callback_data="set_del_thumb")
         ],
         [
@@ -448,11 +449,11 @@ async def cb_wm_set_text(client, query: CallbackQuery):
     if not is_prem:
         return await query.answer("💎 Video Watermark is a Premium-Only Feature!", show_alert=True)
     USER_STATE[user_id] = "waiting_wm_text"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
     await query.message.reply_text(
-        "<b>◈ Sᴇᴛ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ 💧</b>\n"
-        "\n"
-        "<i>Please reply to this message with your desired watermark text (e.g. <code>@YourChannel</code>):</i>",
-        reply_markup=ForceReply(True)
+        "<b>◈ Sᴇᴛ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ 💧</b>\n\n"
+        "<i>Please send your desired watermark text (e.g. <code>@YourChannel</code>):</i>",
+        reply_markup=cancel_markup
     )
     await query.answer("Send your watermark text!")
 
@@ -465,11 +466,11 @@ async def cb_wm_set_logo(client, query: CallbackQuery):
     if not is_prem:
         return await query.answer("💎 Video Watermark is a Premium-Only Feature!", show_alert=True)
     USER_STATE[user_id] = "waiting_wm_logo"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
     await query.message.reply_text(
-        "<b>◈ Sᴇᴛ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ 🖼️</b>\n"
-        "\n"
-        "<i>Please send or forward a PNG/JPG logo photo as a reply to this message:</i>",
-        reply_markup=ForceReply(True)
+        "<b>◈ Sᴇᴛ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ 🖼️</b>\n\n"
+        "<i>Please send or forward a PNG/JPG logo photo:</i>",
+        reply_markup=cancel_markup
     )
     await query.answer("Send your logo photo!")
 
@@ -567,12 +568,32 @@ async def cb_caption_menu(client, query: CallbackQuery):
         "⚡ @Nex_bots"
     )
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑️ Cʟᴇᴀʀ Cᴀᴘᴛɪᴏɴ", callback_data="cb_clear_caption")],
+        [InlineKeyboardButton("✏️ Sᴇᴛ Cᴀᴘᴛɪᴏɴ", callback_data="cb_set_caption"),
+         InlineKeyboardButton("🗑️ Cʟᴇᴀʀ Cᴀᴘᴛɪᴏɴ", callback_data="cb_clear_caption")],
         [InlineKeyboardButton("⬅️ Bᴀᴄᴋ", callback_data="open_settings"),
          InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
     ])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_set_caption$"))
+async def cb_set_caption(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    USER_STATE[user_id] = "waiting_caption"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
+    await query.message.reply_text(
+        "<b>◈ Sᴇᴛ Cᴜꜱᴛᴏᴍ Cᴀᴘᴛɪᴏɴ 📑</b>\n\n"
+        "<i>Please send your desired caption template:</i>\n\n"
+        "<b>Available Tags:</b>\n"
+        "• <code>{filename}</code> - File name\n"
+        "• <code>{filesize}</code> - File size\n"
+        "• <code>{duration}</code> - Video duration\n\n"
+        "<b>Example:</b>\n"
+        "<code>📕 Name: {filename}\n🔗 Size: {filesize}\n\n⚡ @Nex_bots</code>",
+        reply_markup=cancel_markup
+    )
+    await query.answer("Send your custom caption!")
 
 
 @Client.on_callback_query(filters.regex(r"^cb_clear_caption$"))
@@ -617,12 +638,13 @@ async def cb_bottom_caption_menu(client, query: CallbackQuery):
 async def cb_set_bottom_caption(client, query: CallbackQuery):
     user_id = query.from_user.id
     USER_STATE[user_id] = "waiting_bottom_caption"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
     await query.message.reply_text(
         "📝 <b>◈ Sᴇᴛ Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ / Fᴏᴏᴛᴇʀ</b>\n\n"
-        "<i>Please reply to this message with your desired footer text:</i>\n\n"
+        "<i>Please send your desired footer text:</i>\n\n"
         "<b>Example:</b>\n"
         "<code>⚡ Powered by @Nex_bots\n📢 Join @Nex_Update</code>",
-        reply_markup=ForceReply(True)
+        reply_markup=cancel_markup
     )
     await query.answer("Send your bottom caption text!")
 
@@ -665,6 +687,8 @@ async def cb_prefix_suffix_menu(client, query: CallbackQuery):
         "⚡ @Nex_bots"
     )
     markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Sᴇᴛ Pʀᴇꜰɪx", callback_data="cb_set_prefix"),
+         InlineKeyboardButton("✏️ Sᴇᴛ Sᴜꜰꜰɪx", callback_data="cb_set_suffix")],
         [InlineKeyboardButton("🗑️ Cʟᴇᴀʀ Pʀᴇꜰɪx", callback_data="cb_clear_prefix"),
          InlineKeyboardButton("🗑️ Cʟᴇᴀʀ Sᴜꜰꜰɪx", callback_data="cb_clear_suffix")],
         [InlineKeyboardButton("⬅️ Bᴀᴄᴋ", callback_data="open_settings"),
@@ -672,6 +696,32 @@ async def cb_prefix_suffix_menu(client, query: CallbackQuery):
     ])
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
+
+
+@Client.on_callback_query(filters.regex(r"^cb_set_prefix$"))
+async def cb_set_prefix(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    USER_STATE[user_id] = "waiting_prefix"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
+    await query.message.reply_text(
+        "<b>◈ Sᴇᴛ Fɪʟᴇɴᴀᴍᴇ Pʀᴇꜰɪx 🔤</b>\n\n"
+        "<i>Please send the prefix tag you want to prepend to all filenames (e.g. <code>[Nex] </code>):</i>",
+        reply_markup=cancel_markup
+    )
+    await query.answer("Send your prefix!")
+
+
+@Client.on_callback_query(filters.regex(r"^cb_set_suffix$"))
+async def cb_set_suffix(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    USER_STATE[user_id] = "waiting_suffix"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
+    await query.message.reply_text(
+        "<b>◈ Sᴇᴛ Fɪʟᴇɴᴀᴍᴇ Sᴜꜰꜰɪx 🔡</b>\n\n"
+        "<i>Please send the suffix tag you want to append before the extension (e.g. <code> @Nex_bots</code>):</i>",
+        reply_markup=cancel_markup
+    )
+    await query.answer("Send your suffix!")
 
 
 @Client.on_callback_query(filters.regex(r"^cb_clear_prefix$"))
@@ -857,6 +907,19 @@ async def set_cycle_ss_cb(client, query: CallbackQuery):
     await query.answer(f"Screenshots: {next_val} frames 📸" if next_val > 0 else "Screenshots Disabled ❌")
 
 
+@Client.on_callback_query(filters.regex(r"^cb_set_thumb$"))
+async def cb_set_thumb(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    USER_STATE[user_id] = "waiting_thumb"
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
+    await query.message.reply_text(
+        "<b>◈ Sᴇᴛ Cᴜꜱᴛᴏᴍ Tʜᴜᴍʙɴᴀɪʟ 🖼️</b>\n\n"
+        "<i>Please send or forward any photo to save it as your custom thumbnail:</i>",
+        reply_markup=cancel_markup
+    )
+    await query.answer("Send your thumbnail photo!")
+
+
 @Client.on_callback_query(filters.regex(r"^set_view_thumb$"))
 async def set_view_thumb_cb(client, query: CallbackQuery):
     user_id = query.from_user.id
@@ -932,12 +995,14 @@ async def set_view_dump_cb(client, query: CallbackQuery):
     await edit_message_content(query.message, text, reply_markup=btn)
 
 
-# ==================== CANCEL TASK CALLBACK ====================
+# ==================== CANCEL TASK & INPUT CALLBACK ====================
 
-@Client.on_callback_query(filters.regex(r"^cancel_.*$"))
+@Client.on_callback_query(filters.regex(r"^(?:cancel_.*|cb_cancel_input)$"))
 async def cancel_task_cb(client, query: CallbackQuery):
+    user_id = query.from_user.id if query.from_user else 0
+    USER_STATE.pop(user_id, None)
     raw_data = query.data or ""
-    task_str = raw_data.replace("cancel_process_", "").replace("cancel_", "")
+    task_str = raw_data.replace("cancel_process_", "").replace("cancel_user_input", "").replace("cancel_input", "").replace("cancel_", "")
     if task_str:
         CANCEL_REQUESTS.add(task_str)
         try:
@@ -945,8 +1010,8 @@ async def cancel_task_cb(client, query: CallbackQuery):
                 CANCEL_REQUESTS.add(int(task_str))
         except Exception:
             pass
-    if query.from_user:
-        CANCEL_REQUESTS.add(query.from_user.id)
+    if user_id:
+        CANCEL_REQUESTS.add(user_id)
     if query.message:
         CANCEL_REQUESTS.add(query.message.id)
         if query.message.chat:
@@ -954,9 +1019,13 @@ async def cancel_task_cb(client, query: CallbackQuery):
             CANCEL_REQUESTS.add(f"{query.message.chat.id}_{query.message.id}")
             if task_str:
                 CANCEL_REQUESTS.add(f"{query.message.chat.id}_{task_str}")
-    await query.answer("Cancelling active task... ✖️", show_alert=True)
+    await query.answer("Cancelled! ✖️")
     try:
-        await query.message.edit_text("❌ <b>Operation Aborted by User!</b>\n\n⚡ @Nex_bots")
+        await query.message.edit_text(
+            "❌ <b>Action Cancelled!</b>\n\n"
+            "<i>Your pending input state has been cleared.</i>\n\n"
+            "⚡ @Nex_bots"
+        )
     except Exception:
         pass
 
@@ -965,11 +1034,12 @@ async def cancel_task_cb(client, query: CallbackQuery):
 async def cancel_command(client, message):
     user_id = message.from_user.id
     chat_id = message.chat.id
+    USER_STATE.pop(user_id, None)
     CANCEL_REQUESTS.add(user_id)
     CANCEL_REQUESTS.add(chat_id)
     await message.reply_text(
-        "🛑 <b>Cancellation Request Sent!</b>\n\n"
-        "Any active file download, rename, or upload running in this chat will be aborted.\n\n"
+        "✅ <b>Action cancelled.</b>\n\n"
+        "<i>All active operations and pending input states have been cleared.</i>\n\n"
         "⚡ @Nex_bots"
     )
 

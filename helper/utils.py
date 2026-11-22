@@ -138,10 +138,61 @@ def calc_plan_prices(months: int, base_inr: int = 139):
         usd = round(inr / 84.0, 2)
     return inr, stars, usd
 
+class ExpiringStateDict(dict):
+    """
+    Dictionary with automatic 5-minute (300.0s) TTL auto-expiry for interactive
+    user input states (watermark, caption, prefix, suffix, etc.).
+    Guarantees forgotten prompts never lock users out.
+    """
+    DEFAULT_TTL: float = 300.0  # 5 minutes auto-expiry
+
+    def __setitem__(self, key, value):
+        now = time.time()
+        if isinstance(value, tuple) and len(value) == 2 and isinstance(value[1], (int, float)):
+            state, set_time = value
+        else:
+            state, set_time = value, now
+        super().__setitem__(key, (state, set_time))
+
+    def __getitem__(self, key):
+        val = super().__getitem__(key)
+        state, set_time = val
+        if time.time() - set_time > self.DEFAULT_TTL:
+            super().pop(key, None)
+            raise KeyError(key)
+        return state
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        try:
+            _ = self[key]
+            return True
+        except KeyError:
+            return False
+
+    def pop(self, key, default=None):
+        try:
+            val = super().pop(key)
+            state, set_time = val
+            if time.time() - set_time > self.DEFAULT_TTL:
+                return default
+            return state
+        except KeyError:
+            return default
+
+    def clear(self):
+        super().clear()
+
+
 # Global set to track active operations marked for cancellation
 CANCEL_REQUESTS = set()
-# Global dictionary to track interactive user input states (e.g. watermark prompts)
-USER_STATE = {}
+# Global dictionary to track interactive user input states (e.g. watermark prompts) with 5-minute auto-expiry
+USER_STATE = ExpiringStateDict()
 # Global dicts to track progress edit timestamps and percentages for strictly 5.0s (min 2%) throttling
 PROGRESS_TIMESTAMPS = {}
 PROGRESS_PERCENTAGES = {}

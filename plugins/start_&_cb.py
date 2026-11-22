@@ -15,7 +15,7 @@ from pyrogram import Client, filters, enums, __version__
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery, BotCommandScopeChat
 from helper.database import db, TIER_NAMES
 from config import Config, Txt, parse_channel_id  
-from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content, is_duplicate_update, get_private_mode_markup
+from helper.utils import get_readable_file_size, get_readable_time, humanbytes, edit_message_content, is_duplicate_update, get_private_mode_markup, USER_STATE
 
 logger = logging.getLogger(__name__)
 log = logger
@@ -192,6 +192,7 @@ async def start(client, message):
         return
     user = message.from_user
     user_id = user.id
+    USER_STATE.pop(user_id, None)
 
     # If PRIVATE_MODE is active and user is not admin, reject immediately without touching MongoDB!
     if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
@@ -310,6 +311,7 @@ async def cb_handler(client, query: CallbackQuery):
         return
     data = query.data 
     if data == "start":
+        USER_STATE.pop(query.from_user.id, None)
         await query.answer()
         button = build_start_keyboard(query.from_user.id)
         await edit_message_content(

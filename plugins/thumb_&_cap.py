@@ -108,10 +108,16 @@ async def addthumbs(client, message):
         return
     user_id = message.from_user.id
     if user_id in USER_STATE and USER_STATE[user_id] == "waiting_wm_logo":
-        return await message.continue_propagation()
-    if message.reply_to_message and message.reply_to_message.reply_markup and isinstance(message.reply_to_message.reply_markup, ForceReply):
-        return await message.continue_propagation()
+        USER_STATE.pop(user_id, None)
+        await db.set_watermark(user_id, image_id=message.photo.file_id, type="image", enabled=True)
+        from plugins.extra_features import build_watermark_view
+        t, m = await build_watermark_view(user_id)
+        return await message.reply_text(
+            "✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tʏᴘᴇ :</b> Iᴍᴀɢᴇ Lᴏɢᴏ 🖼️\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
 
+    USER_STATE.pop(user_id, None)
     ms = await message.reply_text("⏳ <i>Processing and saving thumbnail...</i>")
     await db.set_thumbnail(message.from_user.id, file_id=message.photo.file_id)                
     await ms.edit("✅ <b>Custom Thumbnail Saved Successfully!</b>\n\n<i>Aspect ratio will be preserved automatically.</i>\n\n⚡ @Nex_bots")

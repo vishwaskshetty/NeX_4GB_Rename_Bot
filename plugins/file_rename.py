@@ -729,92 +729,216 @@ async def watermark_action_cb(client, query: CallbackQuery):
     await query.answer("Watermark Settings Opened! 💧")
 
 
-@Client.on_message(filters.private & filters.reply)
+@Client.on_message(filters.private & (filters.reply | filters.create(lambda _, __, m: bool(m.from_user and m.from_user.id in USER_STATE))), group=2)
 async def refunc(client, message):
     if Config.PRIVATE_MODE and message.from_user and message.from_user.id not in Config.ADMIN:
         return
     if message.chat and await is_duplicate_update(f"reply_{message.chat.id}_{message.id}"):
         return
+
+    # CRITICAL: Never trap commands (/start, /admin, /cancel, etc.)
+    text_val = (message.text or message.caption or "").strip()
+    if text_val.startswith("/"):
+        if message.from_user:
+            USER_STATE.pop(message.from_user.id, None)
+        return await message.continue_propagation()
+
+    user_id = message.from_user.id
+    user_state = USER_STATE.get(user_id)
     reply_message = message.reply_to_message
-    if reply_message and reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply):
-        user_id = message.from_user.id
-        user_state = USER_STATE.get(user_id)
-        reply_prompt = (reply_message.text or "") + (reply_message.caption or "")
 
-        # Check if user was replying to a Watermark Text prompt
-        if user_state == "waiting_wm_text" or "watermark text" in reply_prompt.lower():
-            USER_STATE.pop(user_id, None)
+    # 1. Check if user was setting Watermark Text
+    if user_state == "waiting_wm_text":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
             try:
                 await reply_message.delete()
             except Exception:
                 pass
-            if not message.text:
-                return await message.reply_text("❌ Please send text for your watermark tag.")
-            wm_text = message.text.strip()
-            await db.set_watermark(user_id, text=wm_text, type="text", enabled=True)
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            from plugins.extra_features import build_watermark_view
-            t, m = await build_watermark_view(user_id)
-            return await client.send_message(
-                chat_id=user_id,
-                text=f"✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tᴀɢ :</b> <code>{wm_text}</code>\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
-                reply_markup=m
+        if not message.text:
+            return await message.reply_text(
+                "❌ <b>Please send text for your watermark tag.</b>\n\n⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
             )
+        wm_text = message.text.strip()
+        await db.set_watermark(user_id, text=wm_text, type="text", enabled=True)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_watermark_view
+        t, m = await build_watermark_view(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text=f"✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tᴀɢ :</b> <code>{wm_text}</code>\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
 
-        # Check if user was replying to a Watermark Logo prompt
-        if user_state == "waiting_wm_logo" or "watermark logo" in reply_prompt.lower() or "logo photo" in reply_prompt.lower():
-            USER_STATE.pop(user_id, None)
+    # 2. Check if user was setting Watermark Logo
+    if user_state == "waiting_wm_logo":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
             try:
                 await reply_message.delete()
             except Exception:
                 pass
-            photo = message.photo or (message.document if message.document and message.document.mime_type and message.document.mime_type.startswith("image/") else None)
-            if not photo:
-                return await message.reply_text("❌ Please reply with a photo or image file for your watermark logo.")
-            file_id = photo.file_id
-            await db.set_watermark(user_id, image_id=file_id, type="image", enabled=True)
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            from plugins.extra_features import build_watermark_view
-            t, m = await build_watermark_view(user_id)
-            return await client.send_message(
-                chat_id=user_id,
-                text="✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tʏᴘᴇ :</b> Iᴍᴀɢᴇ Lᴏɢᴏ 🖼️\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
-                reply_markup=m
+        photo = message.photo or (message.document if message.document and message.document.mime_type and message.document.mime_type.startswith("image/") else None)
+        if not photo:
+            return await message.reply_text(
+                "❌ <b>Please send a photo or image file for your watermark logo.</b>\n\n"
+                "<i>Action cancelled. You can try again from Watermark Settings.</i>\n\n⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💧 Watermark Settings", callback_data="cb_watermark")]])
             )
+        file_id = photo.file_id
+        await db.set_watermark(user_id, image_id=file_id, type="image", enabled=True)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_watermark_view
+        t, m = await build_watermark_view(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text="✅ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Lᴏɢᴏ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Tʏᴘᴇ :</b> Iᴍᴀɢᴇ Lᴏɢᴏ 🖼️\n▸ <b>Sᴛᴀᴛᴜꜱ :</b> Eɴᴀʙʟᴇᴅ 🟢\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
 
-        # Check if user was replying to a Bottom Caption prompt
-        if user_state == "waiting_bottom_caption" or "bottom caption" in reply_prompt.lower():
-            USER_STATE.pop(user_id, None)
+    # 3. Check if user was setting Bottom Caption
+    if user_state == "waiting_bottom_caption":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
             try:
                 await reply_message.delete()
             except Exception:
                 pass
-            if not message.text:
-                return await message.reply_text("❌ Please send text for your bottom caption.")
-            b_caption = message.text.strip()
-            await db.set_bottom_caption(user_id, bottom_caption=b_caption)
+        if not message.text:
+            return await message.reply_text(
+                "❌ <b>Please send text for your bottom caption.</b>\n\n⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
+            )
+        b_caption = message.text.strip()
+        await db.set_bottom_caption(user_id, bottom_caption=b_caption)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_settings_panel
+        t, m = await build_settings_panel(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text=f"✅ <b>Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Fᴏᴏᴛᴇʀ :</b>\n<code>{b_caption}</code>\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
+
+    # 4. Check if user was setting Prefix
+    if user_state == "waiting_prefix":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
             try:
-                await message.delete()
+                await reply_message.delete()
             except Exception:
                 pass
-            from plugins.extra_features import build_settings_panel
-            t, m = await build_settings_panel(user_id)
-            return await client.send_message(
-                chat_id=user_id,
-                text=f"✅ <b>Bᴏᴛᴛᴏᴍ Cᴀᴘᴛɪᴏɴ Sᴀᴠᴇᴅ Sᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!</b>\n\n▸ <b>Fᴏᴏᴛᴇʀ :</b>\n<code>{b_caption}</code>\n\n⚡ @Nex_bots",
-                reply_markup=m
-            )
+        if not message.text:
+            return await message.reply_text("❌ Please send text for your prefix.")
+        prefix = message.text.strip()
+        await db.set_prefix(user_id, prefix)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_settings_panel
+        t, m = await build_settings_panel(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text=f"✅ <b>Prefix Saved Successfully!</b>\n\n🔤 <b>Prefix:</b> <code>{prefix}</code>\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
 
-        # Check if user was replying to Track Rename prompt
-        if user_state == "waiting_track_rename" or "track-edited file" in reply_prompt.lower():
-            from plugins.track_manager import handle_track_rename_reply
-            return await handle_track_rename_reply(client, message)
+    # 5. Check if user was setting Suffix
+    if user_state == "waiting_suffix":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+        if not message.text:
+            return await message.reply_text("❌ Please send text for your suffix.")
+        suffix = message.text.strip()
+        await db.set_suffix(user_id, suffix)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_settings_panel
+        t, m = await build_settings_panel(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text=f"✅ <b>Suffix Saved Successfully!</b>\n\n🔡 <b>Suffix:</b> <code>{suffix}</code>\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
+
+    # 6. Check if user was setting Custom Caption
+    if user_state == "waiting_caption":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+        if not message.text:
+            return await message.reply_text("❌ Please send text for your custom caption.")
+        caption = message.text.strip()
+        await db.set_caption(user_id, caption)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_settings_panel
+        t, m = await build_settings_panel(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text="✅ <b>Custom Caption Saved Successfully!</b>\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
+
+    # 7. Check if user was setting Thumbnail
+    if user_state == "waiting_thumb":
+        USER_STATE.pop(user_id, None)
+        if reply_message:
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+        photo = message.photo or (message.document if message.document and message.document.mime_type and message.document.mime_type.startswith("image/") else None)
+        if not photo:
+            return await message.reply_text(
+                "❌ <b>Please send a photo for your thumbnail.</b>\n\n⚡ @Nex_bots",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_user_input")]])
+            )
+        await db.set_thumbnail(user_id, file_id=photo.file_id)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from plugins.extra_features import build_settings_panel
+        t, m = await build_settings_panel(user_id)
+        return await client.send_message(
+            chat_id=user_id,
+            text="✅ <b>Custom Thumbnail Saved Successfully!</b>\n\n⚡ @Nex_bots",
+            reply_markup=m
+        )
+
+    # 8. Check if user was replying to Track Rename prompt
+    if user_state == "waiting_track_rename" or (reply_message and "track-edited file" in ((reply_message.text or "") + (reply_message.caption or "")).lower()):
+        from plugins.track_manager import handle_track_rename_reply
+        return await handle_track_rename_reply(client, message)
+
+    if not reply_message:
+        return
+
+    if not (reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply)):
+        return
 
         new_name = message.text.strip()
         try:
