@@ -139,83 +139,213 @@ async def apply_video_watermark(
     input_path: str,
     output_path: str,
     text: str = "",
-    wm_type: str = "text",
+    wm_type: str = "image",
     image_path: str = None,
-    position: str = "top_right",
+    position: str = "top_left",
     size: int = 28,
-    opacity: float = 0.85,
-    color: str = "white"
+    opacity: float = 0.78,
+    color: str = "white",
+    status_msg = None,
+    client = None,
+    total_duration: int = 0
 ) -> bool:
     """
-    Applies custom text or image logo watermark over video using FFmpeg ultrafast preset with 4 threads.
+    Applies clean OTT-style corner logo or text watermark over video using FFmpeg.
+    - Uses scale2ref to auto-scale logo to 11% of video width with aspect ratio preservation.
+    - Applies subtle OTT transparency (aa=0.78 by default).
+    - Uses -c:v libx264 -preset ultrafast -crf 23 -c:a copy -c:s copy -threads 2 for fast, lossless audio/subtitle remuxing.
+    - Shows live FFmpeg encoding progress (% + ETA + Speed) in Telegram status message.
+    - Always deletes temporary or failed files in a finally: block.
     """
-    pos_coords_text = {
-        "top_left": "x=25:y=25",
-        "top_right": "x=w-tw-25:y=25",
-        "center": "x=(w-tw)/2:y=(h-th)/2",
-        "bottom_left": "x=25:y=h-th-25",
-        "bottom_right": "x=w-tw-25:y=h-th-25"
-    }
+    from helper.utils import CANCEL_REQUESTS, edit_message_content
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    if total_duration <= 0:
+        try:
+            dur, _, _ = await get_video_duration_and_dims(input_path)
+            total_duration = int(dur or 0)
+        except Exception:
+            total_duration = 0
+
+    norm_pos = str(position).lower().strip() if position else "top_left"
     pos_coords_img = {
-        "top_left": "overlay=25:25",
-        "top_right": "overlay=main_w-overlay_w-25:25",
-        "center": "overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
-        "bottom_left": "overlay=25:main_h-overlay_h-25",
-        "bottom_right": "overlay=main_w-overlay_w-25:main_h-overlay_h-25"
+        "top_left": "overlay=W*0.03:H*0.04",
+        "top_right": "overlay=W-w-W*0.03:H*0.04",
+        "center": "overlay=(W-w)/2:(H-h)/2",
+        "bottom_left": "overlay=W*0.03:H-h-H*0.04",
+        "bottom_right": "overlay=W-w-W*0.03:H-h-H*0.04"
     }
+    coords_img = pos_coords_img.get(norm_pos, "overlay=W*0.03:H*0.04")
 
-    op = max(0.1, min(1.0, float(opacity if opacity is not None else 0.85)))
-    norm_pos = str(position).lower().strip() if position else "top_right"
+    op = max(0.1, min(1.0, float(opacity if opacity is not None else 0.78)))
+    is_img = bool(wm_type == "image" and image_path and os.path.exists(image_path) and os.path.getsize(image_path) > 0)
 
+    if is_img:
+        filter_complex = (
+            f"[1:v]format=rgba,colorchannelmixer=aa={op:.2f}[wm];"
+            f"[wm][0:v]scale2ref=w=trunc(main_w*0.11/2)*2:h=-2[wm_s][vid];"
+            f"[vid][wm_s]{coords_img}[outv]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-threads", "2",
+            "-i", input_path,
+            "-i", image_path,
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-map", "0:a?",
+            "-map", "0:s?",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            "-c:a", "copy",
+            "-c:s", "copy",
+            "-progress", "pipe:1",
+            "-nostats",
+            output_path
+        ]
+    else:
+        pos_coords_text = {
+            "top_left": "x=w*0.03:y=h*0.04",
+            "top_right": "x=w-tw-w*0.03:y=h*0.04",
+            "center": "x=(w-tw)/2:y=(h-th)/2",
+            "bottom_left": "x=w*0.03:y=h-th-h*0.04",
+            "bottom_right": "x=w-tw-w*0.03:y=h-th-h*0.04"
+        }
+        coords_txt = pos_coords_text.get(norm_pos, "x=w*0.03:y=h*0.04")
+        safe_text = str(text or "").replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace('%', '\\%')
+        font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
+        font_size = int(size) if int(size) > 0 else 28
+
+        vf_filter = (
+            f"drawtext=text='{safe_text}':{coords_txt}:fontsize={font_size}:fontcolor={font_color}@{op:.2f}:"
+            f"box=1:boxcolor=black@{op*0.55:.2f}:boxborderw=4"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-threads", "2",
+            "-i", input_path,
+            "-vf", vf_filter,
+            "-map", "0:v:0",
+            "-map", "0:a?",
+            "-map", "0:s?",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            "-c:a", "copy",
+            "-c:s", "copy",
+            "-progress", "pipe:1",
+            "-nostats",
+            output_path
+        ]
+
+    proc = None
     try:
-        if wm_type == "image" and image_path and os.path.exists(image_path) and os.path.getsize(image_path) > 0:
-            coords = pos_coords_img.get(norm_pos, "overlay=main_w-overlay_w-25:25")
-            img_size = int(size) if int(size) >= 40 else 160
-            filter_complex = f"[1:v]format=rgba,colorchannelmixer=aa={op:.2f},scale={img_size}:-1[wm];[0:v][wm]{coords}"
-            cmd = [
-                "ffmpeg", "-y",
-                "-threads", "2",
-                "-i", input_path,
-                "-i", image_path,
-                "-filter_complex", filter_complex,
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "26",
-                "-c:a", "copy",
-                output_path
-            ]
-        else:
-            coords = pos_coords_text.get(norm_pos, "x=w-tw-25:y=25")
-            safe_text = str(text or "").replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace('%', '\\%')
-            font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
-            font_size = int(size) if int(size) > 0 else 28
-
-            vf_filter = (
-                f"drawtext=text='{safe_text}':{coords}:fontsize={font_size}:fontcolor={font_color}@{op:.2f}:"
-                f"box=1:boxcolor=black@{op*0.55:.2f}:boxborderw=4"
-            )
-            cmd = [
-                "ffmpeg", "-y",
-                "-threads", "2",
-                "-i", input_path,
-                "-vf", vf_filter,
-                "-c:v", "libx264",
-                "-preset", "ultrafast",
-                "-crf", "26",
-                "-c:a", "copy",
-                output_path
-            ]
-
         proc = await asyncio.create_subprocess_exec(
             *_wrap_nice(cmd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await proc.communicate()
+
+        start_time = time.time()
+        last_edit_time = 0.0
+        current_sec = 0.0
+        speed_val = "1.0x"
+
+        msg_id = getattr(status_msg, 'id', None)
+        chat_id = getattr(status_msg.chat, 'id', None) if (status_msg and getattr(status_msg, 'chat', None)) else None
+
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            line_str = line.decode('utf-8', errors='ignore').strip()
+
+            if line_str.startswith("out_time_us="):
+                try:
+                    out_us = int(line_str.split("=")[1])
+                    current_sec = out_us / 1_000_000.0
+                except Exception:
+                    pass
+            elif line_str.startswith("speed="):
+                speed_val = line_str.split("=")[1].strip()
+            elif line_str.startswith("progress="):
+                prog = line_str.split("=")[1].strip()
+                now = time.time()
+
+                if msg_id and (
+                    msg_id in CANCEL_REQUESTS
+                    or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS))
+                ):
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    return False
+
+                if status_msg and total_duration > 0 and (now - last_edit_time >= 3.5 or prog == "end"):
+                    last_edit_time = now
+                    pct = min(99.0, max(0.0, (current_sec / total_duration) * 100.0))
+                    completed_blocks = min(20, max(0, math.floor(pct / 5.0)))
+                    progress_bar = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
+
+                    elapsed = max(now - start_time, 0.001)
+                    rem_sec = max(0.0, total_duration - current_sec)
+                    try:
+                        speed_mult = float(speed_val.replace('x', '').strip())
+                    except Exception:
+                        speed_mult = 1.0
+
+                    if speed_mult > 0.1:
+                        eta_sec = int(rem_sec / speed_mult)
+                    elif current_sec > 0:
+                        eta_sec = int((elapsed / current_sec) * rem_sec)
+                    else:
+                        eta_sec = 0
+
+                    eta_str = f"{eta_sec // 60}m {eta_sec % 60}s" if eta_sec >= 60 else f"{eta_sec}s"
+                    curr_fmt = f"{int(current_sec) // 60:02d}:{int(current_sec) % 60:02d}"
+                    tot_fmt = f"{int(total_duration) // 60:02d}:{int(total_duration) % 60:02d}"
+
+                    status_text = (
+                        "<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>\n\n"
+                        f"{progress_bar} <b>{pct:.1f}%</b>\n\n"
+                        f"▸ <b>Sᴘᴇᴇᴅ :</b> <code>{speed_val}</code>\n"
+                        f"▸ <b>Tɪᴍᴇ :</b> <code>{curr_fmt} / {tot_fmt}</code>\n"
+                        f"▸ <b>ETA :</b> <code>{eta_str}</code>\n\n"
+                        "⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> | @Nex_bots"
+                    )
+                    try:
+                        cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{msg_id}")]])
+                        await edit_message_content(status_msg, status_text, reply_markup=cancel_markup)
+                    except Exception:
+                        pass
+
+        stderr_data = await proc.stderr.read()
+        await proc.wait()
+        if proc.returncode != 0:
+            err_msg = stderr_data.decode('utf-8', errors='ignore') if stderr_data else ""
+            print(f"FFmpeg apply_video_watermark non-zero exit ({proc.returncode}): {err_msg[-300:]}")
+            return False
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
     except Exception as e:
         print(f"FFmpeg apply_video_watermark error: {e}")
         return False
+    finally:
+        if proc and proc.returncode is None:
+            try:
+                proc.terminate()
+                await asyncio.sleep(0.2)
+                if proc.returncode is None:
+                    proc.kill()
+            except Exception:
+                pass
+        if not (os.path.exists(output_path) and os.path.getsize(output_path) > 0):
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except Exception:
+                    pass
 
 
 async def generate_screenshots(input_path: str, output_folder: str, total_duration: int, count: int) -> List[str]:

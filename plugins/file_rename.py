@@ -1643,32 +1643,42 @@ async def execute_rename_pipeline(
                             can_apply = True
 
                         if can_apply:
-                            await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
-                            wm_file = os.path.join(work_dir, f"wm_{new_filename}")
-                            wm_ok = await apply_video_watermark(
-                                input_path=file_path,
-                                output_path=wm_file,
-                                text=wm_info.get("text", ""),
-                                wm_type=wm_type,
-                                image_path=wm_img_path,
-                                position=wm_info.get("position", "top_right"),
-                                size=wm_info.get("size", 28),
-                                opacity=wm_info.get("opacity", 0.85),
-                                color=wm_info.get("color", "white")
-                            )
-                            if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
-                                if os.path.exists(file_path) and file_path != wm_file:
+                            try:
+                                await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                                wm_file = os.path.join(work_dir, f"wm_{new_filename}")
+                                wm_ok = await apply_video_watermark(
+                                    input_path=file_path,
+                                    output_path=wm_file,
+                                    text=wm_info.get("text", ""),
+                                    wm_type=wm_type,
+                                    image_path=wm_img_path,
+                                    position=wm_info.get("position", "top_left"),
+                                    size=wm_info.get("size", 28),
+                                    opacity=wm_info.get("opacity", 0.78),
+                                    color=wm_info.get("color", "white"),
+                                    status_msg=ms,
+                                    client=client,
+                                    total_duration=duration
+                                )
+                                if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
+                                    if os.path.exists(file_path) and file_path != wm_file:
+                                        try:
+                                            os.remove(file_path)
+                                        except Exception:
+                                            pass
+                                    os.replace(wm_file, final_file_path)
+                                    file_path = final_file_path
+                                    actual_file_size = os.path.getsize(file_path)
                                     try:
-                                        os.remove(file_path)
+                                        await db.increment_stat(user_id, "total_watermarks_applied", 1)
                                     except Exception:
                                         pass
-                                os.replace(wm_file, final_file_path)
-                                file_path = final_file_path
-                                actual_file_size = os.path.getsize(file_path)
-                                try:
-                                    await db.increment_stat(user_id, "total_watermarks_applied", 1)
-                                except Exception:
-                                    pass
+                            finally:
+                                if wm_img_path and os.path.exists(wm_img_path):
+                                    try:
+                                        os.remove(wm_img_path)
+                                    except Exception:
+                                        pass
 
                     if file_path != final_file_path and os.path.exists(file_path):
                         os.replace(file_path, final_file_path)

@@ -945,22 +945,22 @@ class Database:
         if not user:
             return {
                 "enabled": False,
-                "type": "text",
+                "type": "image",
                 "text": "",
                 "image_id": None,
-                "position": "top_right",
+                "position": "top_left",
                 "size": 28,
-                "opacity": 0.85,
+                "opacity": 0.78,
                 "color": "white"
             }
         return {
             "enabled": bool(user.get("wm_enabled", False)),
-            "type": str(user.get("wm_type", "text")),
+            "type": str(user.get("wm_type", "image")),
             "text": str(user.get("wm_text", "")),
             "image_id": user.get("wm_image_id", None),
-            "position": str(user.get("wm_position", "top_right")),
+            "position": str(user.get("wm_position", "top_left")),
             "size": int(user.get("wm_size", 28)),
-            "opacity": float(user.get("wm_opacity", 0.85)),
+            "opacity": float(user.get("wm_opacity", 0.78)),
             "color": str(user.get("wm_color", "white"))
         }
 
@@ -992,12 +992,12 @@ class Database:
             {'_id': int(user_id)},
             {'$set': {
                 "wm_enabled": False,
-                "wm_type": "text",
+                "wm_type": "image",
                 "wm_text": "",
                 "wm_image_id": None,
-                "wm_position": "top_right",
+                "wm_position": "top_left",
                 "wm_size": 28,
-                "wm_opacity": 0.85,
+                "wm_opacity": 0.78,
                 "wm_color": "white"
             }},
             upsert=True

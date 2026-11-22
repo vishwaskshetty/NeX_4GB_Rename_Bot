@@ -263,17 +263,19 @@ async def build_watermark_view(user_id: int):
 
     wm = await db.get_watermark(user_id)
     status_str = "ENABLED 🟢" if wm["enabled"] else "DISABLED 🔴"
-    wm_type = wm.get("type", "text")
-    type_display = "Text 🔤" if wm_type == "text" else "Image Logo 🖼️"
+    wm_type = wm.get("type", "image")
+    type_display = "Image Logo 🖼️" if wm_type == "image" else "Text 🔤"
     
     if wm_type == "text":
         content_str = wm.get("text") or "Not Set (tap Set Text)"
         size_display = f"{wm.get('size', 28)}px"
     else:
         content_str = "Logo Configured ✅" if wm.get("image_id") else "No Logo (tap Set Logo)"
-        size_display = f"{wm.get('size', 160)}px scale"
+        size_display = "Auto-Scaled (11% OTT bug)"
 
-    opacity_pct = int(wm.get("opacity", 0.85) * 100)
+    opacity_pct = int(float(wm.get("opacity", 0.78)) * 100)
+    pos = wm.get("position", "top_left")
+    op = float(wm.get("opacity", 0.78))
 
     text = (
         "<b>◈ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Sᴇᴛᴛɪɴɢꜱ 💧</b>\n"
@@ -281,7 +283,7 @@ async def build_watermark_view(user_id: int):
         f"▸ <b>Sᴛᴀᴛᴜꜱ :</b> <b>{status_str}</b>\n"
         f"▸ <b>Tʏᴘᴇ :</b> <b>{type_display}</b>\n"
         f"▸ <b>Cᴏɴᴛᴇɴᴛ :</b> <code>{content_str}</code>\n"
-        f"▸ <b>Pᴏꜱɪᴛɪᴏɴ :</b> <code>{wm['position']}</code>\n"
+        f"▸ <b>Pᴏꜱɪᴛɪᴏɴ :</b> <code>{pos}</code>\n"
         f"▸ <b>Sɪᴢᴇ :</b> <code>{size_display}</code> | <b>Oᴘᴀᴄɪᴛʏ :</b> <code>{opacity_pct}%</code>\n"
     )
     if wm_type == "text":
@@ -290,17 +292,12 @@ async def build_watermark_view(user_id: int):
         text += "\n"
     text += (
         "<b>Iɴꜱᴛʀᴜᴄᴛɪᴏɴꜱ :</b>\n"
-        "• <b>Tᴇxᴛ :</b> Tap <b>Set Text</b> or <code>/set_watermark @YourChannel</code>\n"
         "• <b>Lᴏɢᴏ :</b> Tap <b>Set Logo</b> or reply to photo with <code>/set_wm_logo</code>\n"
+        "• <b>Tᴇxᴛ :</b> Tap <b>Set Text</b> or <code>/set_watermark @YourChannel</code>\n"
         "• <b>Rᴇꜱᴇᴛ :</b> Tap <b>Reset</b> or <code>/del_watermark</code>\n\n"
+        "<i>💡 Logos are auto-scaled to 11% video width with OTT TV bug transparency.</i>\n\n"
         "⚡ @Nex_bots | 💬 Sᴜᴘᴘᴏʀᴛ: @NexCRSupportbot"
     )
-
-    size_buttons = [
-        InlineKeyboardButton("🔉 Sᴍᴀʟʟ", callback_data="cb_wm_size_small"),
-        InlineKeyboardButton("🔊 Mᴇᴅɪᴜᴍ", callback_data="cb_wm_size_med"),
-        InlineKeyboardButton("📢 Lᴀʀɢᴇ", callback_data="cb_wm_size_large")
-    ]
 
     markup_buttons = [
         [
@@ -308,26 +305,33 @@ async def build_watermark_view(user_id: int):
             InlineKeyboardButton(f"Tʏᴘᴇ: {type_display}", callback_data="cb_wm_type_toggle")
         ],
         [
-            InlineKeyboardButton("🔤 Sᴇᴛ Tᴇxᴛ", callback_data="cb_wm_set_text"),
-            InlineKeyboardButton("🖼️ Sᴇᴛ Lᴏɢᴏ", callback_data="cb_wm_set_logo")
+            InlineKeyboardButton("🖼️ Sᴇᴛ Lᴏɢᴏ", callback_data="cb_wm_set_logo"),
+            InlineKeyboardButton("🔤 Sᴇᴛ Tᴇxᴛ", callback_data="cb_wm_set_text")
         ],
         [
-            InlineKeyboardButton("↖️ Tᴏᴘ-Lᴇꜰᴛ", callback_data="cb_wm_pos_top_left"),
-            InlineKeyboardButton("🎯 Cᴇɴᴛᴇʀ", callback_data="cb_wm_pos_center"),
-            InlineKeyboardButton("↗️ Tᴏᴘ-Rɪɢʜᴛ", callback_data="cb_wm_pos_top_right")
+            InlineKeyboardButton(f"{'🔘 ' if pos == 'top_left' else ''}↖️ Tᴏᴘ-Lᴇꜰᴛ", callback_data="cb_wm_pos_top_left"),
+            InlineKeyboardButton(f"{'🔘 ' if pos == 'center' else ''}🎯 Cᴇɴᴛᴇʀ", callback_data="cb_wm_pos_center"),
+            InlineKeyboardButton(f"{'🔘 ' if pos == 'top_right' else ''}↗️ Tᴏᴘ-Rɪɢʜᴛ", callback_data="cb_wm_pos_top_right")
         ],
         [
-            InlineKeyboardButton("↙️ Bᴏᴛ-Lᴇꜰᴛ", callback_data="cb_wm_pos_bottom_left"),
-            InlineKeyboardButton("↘️ Bᴏᴛ-Rɪɢʜᴛ", callback_data="cb_wm_pos_bottom_right")
-        ],
-        size_buttons,
-        [
-            InlineKeyboardButton("💧 50%", callback_data="cb_wm_op_50"),
-            InlineKeyboardButton("💧 75%", callback_data="cb_wm_op_75"),
-            InlineKeyboardButton("💧 85%", callback_data="cb_wm_op_85"),
-            InlineKeyboardButton("💧 100%", callback_data="cb_wm_op_100")
+            InlineKeyboardButton(f"{'🔘 ' if pos == 'bottom_left' else ''}↙️ Bᴏᴛ-Lᴇꜰᴛ", callback_data="cb_wm_pos_bottom_left"),
+            InlineKeyboardButton(f"{'🔘 ' if pos == 'bottom_right' else ''}↘️ Bᴏᴛ-Rɪɢʜᴛ", callback_data="cb_wm_pos_bottom_right")
         ]
     ]
+
+    if wm_type == "text":
+        markup_buttons.append([
+            InlineKeyboardButton("🔉 Sᴍᴀʟʟ", callback_data="cb_wm_size_small"),
+            InlineKeyboardButton("🔊 Mᴇᴅɪᴜᴍ", callback_data="cb_wm_size_med"),
+            InlineKeyboardButton("📢 Lᴀʀɢᴇ", callback_data="cb_wm_size_large")
+        ])
+
+    markup_buttons.append([
+        InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.50) < 0.03 else ''}💧 50%", callback_data="cb_wm_op_50"),
+        InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.78) < 0.03 else ''}💧 78% (OTT)", callback_data="cb_wm_op_78"),
+        InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.85) < 0.03 else ''}💧 85%", callback_data="cb_wm_op_85"),
+        InlineKeyboardButton(f"{'🔘 ' if abs(op - 1.00) < 0.03 else ''}💧 100%", callback_data="cb_wm_op_100")
+    ])
 
     if wm_type == "text":
         markup_buttons.append([
@@ -503,7 +507,7 @@ async def cb_wm_size(client, query: CallbackQuery):
     await query.answer(f"Size set to {size}px! 🔤")
 
 
-@Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_op_(50|75|85|100)$"))
+@Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_op_(50|75|78|85|100)$"))
 async def cb_wm_op(client, query: CallbackQuery):
     val = int(query.matches[0].group(1))
     op = val / 100.0
