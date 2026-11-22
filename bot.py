@@ -168,7 +168,7 @@ if Config.STRING_SESSION:
         api_hash=Config.API_HASH,
         session_string=Config.STRING_SESSION,
         workers=32,
-        max_concurrent_transmissions=20,
+        max_concurrent_transmissions=16,
         sleep_threshold=60,
         no_updates=True
     )
@@ -183,7 +183,7 @@ class Bot(Client):
             api_hash=Config.API_HASH,
             bot_token=Config.BOT_TOKEN,
             workers=32,
-            max_concurrent_transmissions=20,
+            max_concurrent_transmissions=16,
             plugins={"root": "plugins"},
             sleep_threshold=60,
         )

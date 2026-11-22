@@ -255,7 +255,11 @@ async def rename_start(client, message):
         "chat_id": message.chat.id,
         "filename": filename,
         "file_size": file_size,
-        "file_id": file_id
+        "file_id": file_id,
+        "is_video": is_video,
+        "file_extension": file_extension,
+        "mime_type": mime_type,
+        "dcid": dcid
     }
 
     # 2GB+ File Cap for Free Users
@@ -321,73 +325,115 @@ async def rename_start(client, message):
         )
         return
 
-    is_video = bool(
-        message.video
-        or (message.document and message.document.mime_type and message.document.mime_type.startswith("video/"))
-        or (filename.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v')))
+    media_info_text, markup = await build_media_info_view(client, user_id, message, message.id)
+    reply_kwargs = safe_reply_params(message.id)
+    await message.reply_text(
+        text=media_info_text,
+        reply_markup=markup,
+        **reply_kwargs
     )
 
+
+async def build_media_info_view(client, user_id: int, file_msg=None, file_msg_id: int = None):
+    ctx = USER_FILE_CONTEXT.get(user_id, {})
+    if not file_msg_id:
+        file_msg_id = getattr(file_msg, "id", None) or ctx.get("file_msg_id")
+
+    filename = None
+    file_size = 0
+    file_id = None
+    if file_msg:
+        file = file_msg.document or file_msg.video or file_msg.audio
+        if file:
+            filename = file.file_name or "Unknown_File"
+            file_id = file.file_id
+            file_size = file.file_size or 0
+    if not filename:
+        filename = ctx.get("filename", "Unknown_File")
+        file_size = ctx.get("file_size", 0)
+        file_id = ctx.get("file_id")
+
+    filesize = humanize.naturalsize(file_size)
+    try:
+        dcid = FileId.decode(file_id).dc_id if file_id else ctx.get("dcid", "Unknown")
+    except Exception:
+        dcid = ctx.get("dcid", "Unknown")
+
+    _, ext = os.path.splitext(filename)
+    file_extension = ext.replace(".", "") if ext else "unknown"
+    mime_type = get_full_mime_type(filename)
+
+    is_video = bool(
+        (file_msg and file_msg.video)
+        or (file_msg and file_msg.document and file_msg.document.mime_type and file_msg.document.mime_type.startswith("video/"))
+        or (filename.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm', '.m4v')))
+        or ctx.get("is_video", False)
+    )
+
+    upload_mode = await db.get_upload_mode(user_id)
+    if upload_mode not in ("Document", "Video"):
+        upload_mode = "Document"
+    upload_type = "document" if upload_mode == "Document" else "video"
+    upload_btn_label = "📄 Upload As: Document" if upload_type == "document" else "🎬 Upload As: Video"
+
     media_info_text = (
-        "<b>◈ NᴇX Mᴇᴅɪᴀ Iɴꜰᴏ 🗂️</b>\n"
-        "\n"
-        f"▸ <b>Fɪʟᴇɴᴀᴍᴇ :</b> <code>{filename}</code>\n"
+        "<b>◈ NᴇX Mᴇᴅɪᴀ Iɴꜰᴏ 🗂️</b>\n\n"
+        f"▸ <b>Fɪʟᴇɴᴀᴍᴇ :</b> <code>{html.escape(filename)}</code>\n"
         f"▸ <b>Sɪᴢᴇ :</b> <code>{filesize}</code>\n"
         f"▸ <b>Tʏᴘᴇ :</b> <code>.{file_extension}</code> ({mime_type})\n"
         f"▸ <b>DC ID :</b> <code>{dcid}</code>\n"
-        "\n"
+        f"▸ <b>Uᴘʟᴏᴀᴅ Mᴏᴅᴇ :</b> <b>{'📄 Document' if upload_type == 'document' else '🎬 Video'}</b>\n\n"
         "<i>Select an action below:</i>"
     )
 
+    f_id = file_msg_id or 0
     if is_video:
-        wm_info_start = await db.get_watermark(user_id)
-        smart_int_min = int(wm_info_start.get("interval", 600)) // 60
         buttons = [
             [
-                InlineKeyboardButton(f"⚡ Smart Permanent Watermark (Every {smart_int_min}m)", callback_data=f"media_smart_wm_{message.id}")
+                InlineKeyboardButton("✏️ Rename Only (Fast)", callback_data=f"media_rename_fast_{f_id}"),
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{f_id}")
             ],
             [
-                InlineKeyboardButton("✏️ Rename Only (Fast)", callback_data=f"media_rename_fast_{message.id}"),
-                InlineKeyboardButton("✏️ Rename + 💧 Watermark", callback_data=f"media_rename_wm_{message.id}")
+                InlineKeyboardButton("✏️ Rename + ⚡ Smart Watermark", callback_data=f"media_rename_smart_wm_{f_id}"),
+                InlineKeyboardButton("⚡ Smart Watermark Only", callback_data=f"media_smart_wm_{f_id}")
             ],
             [
-                InlineKeyboardButton("💧 Full Watermark Only", callback_data=f"media_wm_only_{message.id}"),
-                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
+                InlineKeyboardButton("💧 Full Watermark Only", callback_data=f"media_wm_only_{f_id}"),
+                InlineKeyboardButton(upload_btn_label, callback_data=f"toggle_media_upload_mode_{f_id}")
             ],
             [
-                InlineKeyboardButton("🎧 Edit Tracks", callback_data=f"inspect_tracks_{message.id}"),
-                InlineKeyboardButton("🎬 Sample Video", callback_data=f"extract_sample_only_{message.id}")
+                InlineKeyboardButton("🎧 Edit Tracks", callback_data=f"inspect_tracks_{f_id}"),
+                InlineKeyboardButton("🎬 Sample Video", callback_data=f"extract_sample_only_{f_id}"),
+                InlineKeyboardButton("📸 Screenshots", callback_data=f"extract_ss_only_{f_id}")
             ],
             [
-                InlineKeyboardButton("📸 Screenshots", callback_data=f"extract_ss_only_{message.id}"),
-                InlineKeyboardButton("💧 Watermark Settings", callback_data=f"watermark_action_{message.id}")
+                InlineKeyboardButton("💧 Watermark Settings", callback_data=f"file_wm_settings:{f_id}"),
+                InlineKeyboardButton("⚙️ Settings", callback_data=f"file_settings:{f_id}")
             ],
             [
-                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
                 InlineKeyboardButton("❌ Cancel", callback_data="close")
             ]
         ]
     else:
         buttons = [
             [
-                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{message.id}"),
-                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
+                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{f_id}"),
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{f_id}")
             ],
             [
-                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
+                InlineKeyboardButton(upload_btn_label, callback_data=f"toggle_media_upload_mode_{f_id}")
+            ],
+            [
+                InlineKeyboardButton("⚙️ Settings", callback_data=f"file_settings:{f_id}"),
                 InlineKeyboardButton("❌ Cancel", callback_data="close")
             ]
         ]
 
-    reply_kwargs = safe_reply_params(message.id)
-    await message.reply_text(
-        text=media_info_text,
-        reply_markup=InlineKeyboardMarkup(buttons),
-        **reply_kwargs
-    )
+    return media_info_text, InlineKeyboardMarkup(buttons)
 
 
-def build_rename_choice_menu(file_msg_id: int, final_name: str, upload_type: str = "video", wm_status: str = "OFF 🔴"):
-    format_btn_label = "📁 As Document" if upload_type == "video" else "🎥 As Video"
+def build_rename_choice_menu(file_msg_id: int, final_name: str, upload_type: str = "document", wm_status: str = "OFF 🔴"):
+    format_btn_label = "🎬 As Video" if upload_type == "document" else "📄 As Document"
     buttons = [
         [
             InlineKeyboardButton("⚡ Only Rename (Fast)", callback_data=f"rchoice_fast_{file_msg_id}"),
@@ -406,7 +452,7 @@ def build_rename_choice_menu(file_msg_id: int, final_name: str, upload_type: str
         "<b>◈ Sᴇʟᴇᴄᴛ Rᴇɴᴀᴍᴇ Mᴏᴅᴇ ⚡</b>\n\n"
         f"▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(str(final_name))}</code>\n"
         f"▸ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Sᴛᴀᴛᴜꜱ :</b> <b>{wm_status}</b>\n"
-        f"▸ <b>Oᴜᴛᴘᴜᴛ Tʏᴘᴇ :</b> <b>{'📁 Document' if upload_type == 'document' else '🎥 Video'}</b>\n\n"
+        f"▸ <b>Oᴜᴛᴘᴜᴛ Tʏᴘᴇ :</b> <b>{'📄 Document' if upload_type == 'document' else '🎬 Video'}</b>\n\n"
         "<i>⚡ <b>Only Rename (Fast):</b> Instant stream-copy / zero-disk mode.\n"
         "⚡ <b>Smart Watermark:</b> Burns logo/text every 10m for 10s (2-3 min total speed).\n"
         "💧 <b>Full Watermark:</b> Burns logo/text continuously into all frames.</i>\n\n"
@@ -531,6 +577,60 @@ async def media_rename_wm_cb(client, update: CallbackQuery):
     if not is_prem:
         return await update.answer("💎 Video Watermark is a Premium Feature!\n\nUpgrade via /plan to unlock.", show_alert=True)
     await rename_handler(client, update, force_wm=True)
+
+
+@Client.on_callback_query(filters.regex(r'^media_rename_smart_wm(?:_(\d+))?$'))
+async def media_rename_smart_wm_cb(client, update: CallbackQuery):
+    user_id = update.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await update.answer("💎 Smart Watermark is a Premium Feature!\n\nUpgrade via /plan to unlock.", show_alert=True)
+
+    wm_info = await db.get_watermark(user_id)
+    if wm_info.get("type", "image") == "image" and not wm_info.get("image_id"):
+        return await update.answer("⚠️ No PNG watermark logo configured! Please tap 'Watermark Settings' to set your logo.", show_alert=True)
+
+    await rename_handler(client, update, force_wm="smart")
+
+
+@Client.on_callback_query(filters.regex(r"^toggle_media_upload_mode_(\d+)$"))
+async def toggle_media_upload_mode_cb(client, query: CallbackQuery):
+    file_msg_id = int(query.matches[0].group(1))
+    user_id = query.from_user.id
+    current_mode = await db.get_upload_mode(user_id)
+    new_mode = "Document" if current_mode == "Video" else "Video"
+    await db.set_upload_mode(user_id, new_mode)
+
+    file_msg = None
+    try:
+        file_msg = await client.get_messages(query.message.chat.id, file_msg_id)
+    except Exception:
+        pass
+    if not file_msg:
+        file_msg = query.message.reply_to_message
+
+    text, markup = await build_media_info_view(client, user_id, file_msg, file_msg_id=file_msg_id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer(f"Upload Mode: {'📄 Document' if new_mode == 'Document' else '🎬 Video'}")
+
+
+@Client.on_callback_query(filters.regex(r"^back_to_file:(\d+)$"))
+async def back_to_file_cb(client, query: CallbackQuery):
+    file_msg_id = int(query.matches[0].group(1))
+    user_id = query.from_user.id
+
+    file_msg = None
+    try:
+        file_msg = await client.get_messages(query.message.chat.id, file_msg_id)
+    except Exception:
+        pass
+    if not file_msg:
+        file_msg = query.message.reply_to_message
+
+    text, markup = await build_media_info_view(client, user_id, file_msg, file_msg_id=file_msg_id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer("Returned to File Menu 🗂️")
 
 
 @Client.on_callback_query(filters.regex(r'^media_wm_only(?:_(\d+))?$'))
@@ -872,7 +972,7 @@ async def remux_action_cb(client, query: CallbackQuery):
     )
 
 
-@Client.on_callback_query(filters.regex(r"^watermark_action(?:_(\d+))?$"))
+@Client.on_callback_query(filters.regex(r"^(?:file_wm_settings(?::(\d+))?|watermark_action(?:_(\d+))?)$"))
 async def watermark_action_cb(client, query: CallbackQuery):
     user_id = query.from_user.id
     prem_info = await db.get_premium_info(user_id)
@@ -884,8 +984,15 @@ async def watermark_action_cb(client, query: CallbackQuery):
             show_alert=True
         )
 
+    m1 = query.matches[0].group(1) if query.matches and query.matches[0].groups() else None
+    m2 = query.matches[0].group(2) if query.matches and len(query.matches[0].groups()) > 1 else None
+    f_id = m1 or m2 or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    file_msg_id = int(f_id) if f_id else None
+    if file_msg_id:
+        USER_FILE_CONTEXT.setdefault(user_id, {})["file_msg_id"] = file_msg_id
+
     from plugins.extra_features import build_watermark_view
-    text, markup = await build_watermark_view(user_id)
+    text, markup = await build_watermark_view(user_id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer("Watermark Settings Opened! 💧")
 
@@ -1213,13 +1320,19 @@ async def refunc(client, message):
 
         if is_video:
             if cached_force_wm is not None:
+                if cached_force_wm == "smart":
+                    extras_dict = {"watermark": True, "smart_watermark": True}
+                elif cached_force_wm is True or cached_force_wm == "full":
+                    extras_dict = {"watermark": True, "smart_watermark": False}
+                else:
+                    extras_dict = {"watermark": False}
                 return await route_to_extras_or_execute(
                     client=client,
                     update=message,
                     new_filename=final_name,
                     upload_type=current_upload_type,
                     file_msg=file_msg,
-                    extras={"watermark": cached_force_wm}
+                    extras=extras_dict
                 )
 
             wm_info = await db.get_watermark(user_id)
@@ -2035,7 +2148,6 @@ async def execute_rename_pipeline(
                         if not can_apply:
                             print("⚠️ Watermark logo could not be loaded. Continuing rename without watermark...", flush=True)
                             await ms.edit("⚠️ <b>Watermark logo could not be loaded. Continuing rename...</b>")
-                            await asyncio.sleep(1.2)
 
                         if can_apply:
                             try:

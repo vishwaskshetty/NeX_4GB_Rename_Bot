@@ -45,7 +45,7 @@ from config import Config, Txt
 # Developed by @Nex_bots
 
 
-async def build_settings_panel(user_id: int):
+async def build_settings_panel(user_id: int, file_msg_id: int = None):
     settings = await db.get_user_settings(user_id)
     wm = await db.get_watermark(user_id)
     sample_set = await db.get_sample_settings(user_id)
@@ -69,7 +69,7 @@ async def build_settings_panel(user_id: int):
     ss_status = f"{settings['screenshots']} frames" if settings["screenshots"] > 0 else "OFF"
     cleaner_status = "Active" if (settings["clean_words"] or settings["replace_words"]) else "None"
     dump_status = "Set" if settings["dump_channel"] else "None"
-    upload_mode = settings.get("upload_mode", "Ask")
+    upload_mode = settings.get("upload_mode", "Document")
 
     text = (
         "<b>◈ Uꜱᴇʀ Sᴇᴛᴛɪɴɢꜱ ⚙️</b>\n"
@@ -90,14 +90,14 @@ async def build_settings_panel(user_id: int):
 
     if is_prem:
         meta_btn = InlineKeyboardButton(f"🏷️ Mᴇᴛᴀᴅᴀᴛᴀ: {meta_status}", callback_data="cb_metadata")
-        wm_btn = InlineKeyboardButton(f"💧 Wᴀᴛᴇʀᴍᴀʀᴋ: {wm_status}", callback_data="cb_watermark")
+        wm_btn = InlineKeyboardButton(f"💧 Wᴀᴛᴇʀᴍᴀʀᴋ: {wm_status}", callback_data=f"file_wm_settings:{file_msg_id}" if file_msg_id else "cb_watermark")
         batch_btn = InlineKeyboardButton("📦 Bᴀᴛᴄʜ Mᴏᴅᴇ", callback_data="cb_batch_info")
         stream_btn = InlineKeyboardButton("🔇 Sᴛʀᴇᴀᴍ Sᴛʀɪᴘᴘᴇʀ", callback_data="cb_stream_info")
         remux_btn = InlineKeyboardButton("🔀 Fᴀꜱᴛ Rᴇᴍᴜxᴇʀ", callback_data="cb_remux_info")
         extract_btn = InlineKeyboardButton("🗜️ Aʀᴄʜɪᴠᴇ Exᴛʀᴀᴄᴛ", callback_data="cb_extract_info")
     else:
         meta_btn = InlineKeyboardButton("🏷️ Mᴇᴛᴀᴅᴀᴛᴀ [💎 Prem]", callback_data="cb_prem_locked_meta")
-        wm_btn = InlineKeyboardButton("💧 Wᴀᴛᴇʀᴍᴀʀᴋ [💎 Prem]", callback_data="cb_watermark")
+        wm_btn = InlineKeyboardButton("💧 Wᴀᴛᴇʀᴍᴀʀᴋ [💎 Prem]", callback_data=f"file_wm_settings:{file_msg_id}" if file_msg_id else "cb_watermark")
         batch_btn = InlineKeyboardButton("📦 Bᴀᴛᴄʜ [💎 Prem]", callback_data="cb_prem_locked_batch")
         stream_btn = InlineKeyboardButton("🔇 Sᴛʀᴇᴀᴍꜱ [💎 Prem]", callback_data="cb_prem_locked_streams")
         remux_btn = InlineKeyboardButton("🔀 Rᴇᴍᴜx [💎 Prem]", callback_data="cb_prem_locked_remux")
@@ -142,8 +142,8 @@ async def build_settings_panel(user_id: int):
             InlineKeyboardButton("👤 Mʏ Pʀᴏꜰɪʟᴇ", callback_data="cb_user_profile")
         ],
         [
-            InlineKeyboardButton("🔄 Rᴇꜰʀᴇꜱʜ", callback_data="open_settings"),
-            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data="start")
+            InlineKeyboardButton("🔄 Rᴇꜰʀᴇꜱʜ", callback_data=f"file_settings:{file_msg_id}" if file_msg_id else "open_settings"),
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Fɪʟᴇ" if file_msg_id else "⬅️ Bᴀᴄᴋ ᴛᴏ Sᴛᴀʀᴛ", callback_data=f"back_to_file:{file_msg_id}" if file_msg_id else "start")
         ],
         [
             InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
@@ -170,10 +170,15 @@ async def settings_command(client, message):
     await message.reply_text(text, reply_markup=markup)
 
 
-@Client.on_callback_query(filters.regex(r"^open_settings$"))
+@Client.on_callback_query(filters.regex(r"^(?:file_settings(?::(\d+))?|open_settings)$"))
 async def open_settings_cb(client, query: CallbackQuery):
     user_id = query.from_user.id
-    text, markup = await build_settings_panel(user_id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    f_id = query.matches[0].group(1) if query.matches and query.matches[0].groups() else None
+    file_msg_id = int(f_id) if f_id else USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    if file_msg_id:
+        USER_FILE_CONTEXT.setdefault(user_id, {})["file_msg_id"] = file_msg_id
+    text, markup = await build_settings_panel(user_id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
 
@@ -242,7 +247,7 @@ async def set_toggle_meta_cb(client, query: CallbackQuery):
 
 # ==================== VIDEO WATERMARK SUBMENU ====================
 
-async def build_watermark_view(user_id: int):
+async def build_watermark_view(user_id: int, file_msg_id: int = None):
     prem_info = await db.get_premium_info(user_id)
     is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
     
@@ -256,7 +261,7 @@ async def build_watermark_view(user_id: int):
         )
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("💎 Uᴘɢʀᴀᴅᴇ ᴛᴏ Pʀᴇᴍɪᴜᴍ", callback_data="open_plans")],
-            [InlineKeyboardButton("⬅️ Bᴀᴄᴋ", callback_data="open_settings"),
+            [InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Fɪʟᴇ" if file_msg_id else "⬅️ Bᴀᴄᴋ", callback_data=f"back_to_file:{file_msg_id}" if file_msg_id else "open_settings"),
              InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")]
         ])
         return text, markup
@@ -354,7 +359,7 @@ async def build_watermark_view(user_id: int):
         ],
         [
             InlineKeyboardButton("🔄 Rᴇꜱᴇᴛ ᴛᴏ Dᴇꜰᴀᴜʟᴛ", callback_data="cb_wm_reset"),
-            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings")
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Fɪʟᴇ" if file_msg_id else "⬅️ Bᴀᴄᴋ ᴛᴏ Sᴇᴛᴛɪɴɢꜱ", callback_data=f"back_to_file:{file_msg_id}" if file_msg_id else "open_settings")
         ],
         [
             InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
@@ -429,9 +434,21 @@ async def del_watermark_cmd(client, message):
     await message.reply_text("✅ <b>Watermark settings have been reset to default!</b>\n\n⚡ @Nex_bots")
 
 
-@Client.on_callback_query(filters.regex(r"^(?:cb_)?(?:watermark|wm)$"))
+@Client.on_callback_query(filters.regex(r"^(?:file_wm_settings(?::(\d+))?|cb_watermark|watermark_action(?:_(\d+))?|(?:cb_)?(?:watermark|wm))$"))
 async def cb_watermark_menu(client, query: CallbackQuery):
-    text, markup = await build_watermark_view(query.from_user.id)
+    user_id = query.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await query.answer("💎 Video Watermark is a Premium Feature!\n\nUpgrade via /plan to unlock.", show_alert=True)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    m1 = query.matches[0].group(1) if query.matches and query.matches[0].groups() else None
+    m2 = query.matches[0].group(2) if query.matches and len(query.matches[0].groups()) > 1 else None
+    f_id = m1 or m2 or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    file_msg_id = int(f_id) if f_id else None
+    if file_msg_id:
+        USER_FILE_CONTEXT.setdefault(user_id, {})["file_msg_id"] = file_msg_id
+    text, markup = await build_watermark_view(user_id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer()
 
@@ -442,7 +459,9 @@ async def cb_wm_toggle(client, query: CallbackQuery):
     wm = await db.get_watermark(user_id)
     new_state = not wm["enabled"]
     await db.set_watermark(user_id, enabled=new_state)
-    text, markup = await build_watermark_view(user_id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(user_id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Watermark {'Enabled ✅' if new_state else 'Disabled ❌'}")
 
@@ -459,7 +478,9 @@ async def cb_wm_type_toggle(client, query: CallbackQuery):
         wm = await db.get_watermark(user_id)
         new_type = "image" if wm.get("type", "text") == "text" else "text"
     await db.set_watermark(user_id, type=new_type)
-    text, markup = await build_watermark_view(user_id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(user_id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Mode switched to {'🖼️ PNG Logo' if new_type == 'image' else '🔤 Burned-in Text'}!")
 
@@ -502,7 +523,9 @@ async def cb_wm_set_logo(client, query: CallbackQuery):
 async def cb_wm_pos(client, query: CallbackQuery):
     pos = query.matches[0].group(1)
     await db.set_watermark(query.from_user.id, position=pos)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Position set to {pos}! 🎯")
 
@@ -521,7 +544,9 @@ async def cb_wm_size(client, query: CallbackQuery):
     else:
         size = int(val)
     await db.set_watermark(query.from_user.id, size=size)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Size set to {size}px! 🔤")
 
@@ -531,7 +556,9 @@ async def cb_wm_op(client, query: CallbackQuery):
     val = int(query.matches[0].group(1))
     op = val / 100.0
     await db.set_watermark(query.from_user.id, opacity=op)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Opacity set to {val}%! 💧")
 
@@ -540,7 +567,9 @@ async def cb_wm_op(client, query: CallbackQuery):
 async def cb_wm_col(client, query: CallbackQuery):
     col = query.matches[0].group(1)
     await db.set_watermark(query.from_user.id, color=col)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Color set to {col}! 🎨")
 
@@ -549,7 +578,9 @@ async def cb_wm_col(client, query: CallbackQuery):
 async def cb_wm_interval(client, query: CallbackQuery):
     val = int(query.matches[0].group(1))
     await db.set_watermark(query.from_user.id, interval=val)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Smart interval set to every {val // 60}m! ⏱️")
 
@@ -558,7 +589,9 @@ async def cb_wm_interval(client, query: CallbackQuery):
 async def cb_wm_duration(client, query: CallbackQuery):
     val = int(query.matches[0].group(1))
     await db.set_watermark(query.from_user.id, clip_duration=val)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Watermark clip appearance set to {val}s! ⏳")
 
@@ -566,7 +599,9 @@ async def cb_wm_duration(client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_(?:reset|clear)$"))
 async def cb_wm_reset(client, query: CallbackQuery):
     await db.reset_watermark(query.from_user.id)
-    text, markup = await build_watermark_view(query.from_user.id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(query.from_user.id, {}).get("file_msg_id")
+    text, markup = await build_watermark_view(query.from_user.id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer("Watermark reset to default! 🔄")
 
@@ -785,10 +820,12 @@ async def cb_clear_suffix(client, query: CallbackQuery):
 async def cb_upload_mode_cycle(client, query: CallbackQuery):
     user_id = query.from_user.id
     current_mode = await db.get_upload_mode(user_id)
-    cycle = {"Ask": "Document", "Document": "Video", "Video": "Audio", "Audio": "Ask"}
-    next_mode = cycle.get(current_mode, "Ask")
+    cycle = {"Document": "Video", "Video": "Audio", "Audio": "Document", "Ask": "Document"}
+    next_mode = cycle.get(current_mode, "Document")
     await db.set_upload_mode(user_id, next_mode)
-    text, markup = await build_settings_panel(user_id)
+    from plugins.file_rename import USER_FILE_CONTEXT
+    file_msg_id = USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    text, markup = await build_settings_panel(user_id, file_msg_id=file_msg_id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Upload Mode: {next_mode} 📤")
 

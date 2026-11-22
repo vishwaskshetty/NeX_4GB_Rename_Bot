@@ -192,7 +192,7 @@ class Database:
             sample_duration=0,
             sample_start_mode="auto",
             screenshots=0,
-            upload_mode="Ask",
+            upload_mode="Document",
             wm_enabled=False,
             wm_text="",
             wm_position="top_right",
@@ -397,7 +397,10 @@ class Database:
 
     async def get_upload_mode(self, id):
         user = await self.col.find_one({'_id': int(id)})
-        return user.get('upload_mode', "Ask") if user else "Ask"
+        mode = user.get('upload_mode', "Document") if user else "Document"
+        if mode in ("Ask", None, ""):
+            mode = "Document"
+        return mode
 
     # Full User Settings Aggregator
     async def get_user_settings(self, id):
@@ -420,7 +423,7 @@ class Database:
                 "sample_duration": 0,
                 "screenshots": 0,
                 "dump_channel": None,
-                "upload_mode": "Ask",
+                "upload_mode": "Document",
                 "timezone": "Asia/Kolkata"
             }
             _cache_set(ck, res)
@@ -438,7 +441,7 @@ class Database:
             "sample_duration": int(user.get('sample_duration', 0)),
             "screenshots": int(user.get('screenshots', 0)),
             "dump_channel": user.get('dump_channel') or user.get('user_dump'),
-            "upload_mode": user.get('upload_mode', "Ask"),
+            "upload_mode": user.get('upload_mode', "Document") if user.get('upload_mode') not in (None, "Ask", "") else "Document",
             "timezone": user.get('timezone', "Asia/Kolkata")
         }
         _cache_set(ck, res)

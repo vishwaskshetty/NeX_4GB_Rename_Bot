@@ -338,8 +338,8 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
     percentage = (current * 100 / total) if (total and total > 0) else 0
     pct_diff = abs(percentage - last_pct)
 
-    # Strictly throttle UI progress edits to once every 3.5 seconds (or min 1% change) or upon completion
-    if ((now - last_update >= 3.5 and pct_diff >= 1.0) or (now - last_update >= 4.0) or (current == total)):
+    # Strictly throttle UI progress edits to once every 5.0 seconds or upon completion
+    if ((now - last_update >= 5.0) or (current == total)):
         PROGRESS_TIMESTAMPS[key] = now
         PROGRESS_PERCENTAGES[key] = percentage
 
@@ -392,8 +392,8 @@ async def progress_for_pyrogram(current, total, ud_type, message, start, client=
             async def _bg_edit():
                 try:
                     await message.edit(text=status_text, reply_markup=reply_markup)
-                except FloodWait as f_err:
-                    await asyncio.sleep(f_err.value + 1)
+                except (FloodWait, MessageNotModified):
+                    pass
                 except Exception:
                     pass
 

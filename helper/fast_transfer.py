@@ -33,6 +33,17 @@ _original_save_file = getattr(Client, "save_file", None)
 async def _fast_save_file(self, path, *args, **kwargs):
     if isinstance(path, (raw.base.InputFile, raw.types.InputFile, raw.types.InputFileBig)):
         return path
+    if isinstance(path, str) and os.path.exists(path) and os.path.isfile(path):
+        progress = kwargs.get("progress")
+        progress_args = kwargs.get("progress_args", ())
+        if not progress and len(args) >= 1:
+            progress = args[0]
+        if not progress_args and len(args) >= 2:
+            progress_args = args[1]
+        try:
+            return await fast_upload(self, path, progress=progress, progress_args=progress_args)
+        except Exception as e:
+            log.warning(f"_fast_save_file fast_upload fallback: {e}")
     if _original_save_file:
         return await _original_save_file(self, path, *args, **kwargs)
     raise ValueError("Invalid file. Expected a file path as string or InputFile")
@@ -46,13 +57,13 @@ DL_POOL_SIZE = 8                     # 8 parallel TCP download sockets (Telegram
 DL_POOL_SIZE_PREM = 8                # 8 parallel TCP sockets on app_4gb (Telegram Premium)
 DL_POOL_SIZE_BOT = 4                 # 4 parallel TCP sockets on bot client (fallback)
 UL_POOL_SIZE = 10                    # 10 parallel TCP upload sockets
-DL_WORKERS = 24                      # 24 download workers (Full Azure VM pipe saturation)
-UL_WORKERS = 24                      # 24 upload workers (Full Azure VM pipe saturation)
-QUEUE_SIZE = 64                      # 64 * 512KB = 32MB RAM ring buffer per active task (512KB / 1MB aligned)
-BUFFER_SIZE = 32 * 1024 * 1024       # 32MB RAM write/read buffer (64MB RAM across 2 concurrent tasks = ~130MB total)
-CONCURRENT_WORKERS_PREM = 24         # 24 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS_FREE = 24         # 24 concurrent MTProto worker coroutines
-CONCURRENT_WORKERS = 24              # 24 concurrent MTProto worker coroutines
+DL_WORKERS = 16                      # 16 download workers
+UL_WORKERS = 10                      # 10 concurrent upload workers (8-12 workers optimal for MTProto)
+QUEUE_SIZE = 48                      # 48 * 512KB = 24MB RAM ring buffer per active task (512KB / 1MB aligned)
+BUFFER_SIZE = 24 * 1024 * 1024       # 24MB RAM write/read buffer (48MB RAM across 2 concurrent tasks = ~96MB total)
+CONCURRENT_WORKERS_PREM = 16         # 16 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS_FREE = 16         # 16 concurrent MTProto worker coroutines
+CONCURRENT_WORKERS = 16              # 16 concurrent MTProto worker coroutines
 
 # Activity timestamp to detect idle TCP sockets and trigger auto-reset (> 120s)
 _LAST_POOL_ACTIVITY: float = time.time()
@@ -625,6 +636,7 @@ async def fast_upload(
     error_holder = []
     lock = asyncio.Lock()
     md5_hash = hashlib.md5() if not is_big else None
+    last_progress_time = 0.0
 
     async def producer():
         try:
@@ -714,7 +726,9 @@ async def fast_upload(
                 uploaded_bytes += len(chunk)
                 current_up = uploaded_bytes
 
-            if progress:
+            now = time.time()
+            if progress and (now - last_progress_time >= 5.0 or current_up >= file_size):
+                last_progress_time = now
                 try:
                     if inspect.iscoroutinefunction(progress):
                         await progress(min(current_up, file_size), file_size, *progress_args)
@@ -1090,7 +1104,7 @@ async def zero_disk_turbo_pipe(
                 current_up = uploaded_bytes
 
             now = time.time()
-            if now - last_progress_time >= 3.5 or current_up >= file_size:
+            if now - last_progress_time >= 5.0 or current_up >= file_size:
                 last_progress_time = now
                 asyncio.create_task(_safe_progress(min(current_up, file_size), file_size))
 
