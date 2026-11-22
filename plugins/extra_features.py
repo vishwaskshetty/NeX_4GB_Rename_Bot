@@ -1001,6 +1001,11 @@ async def set_view_dump_cb(client, query: CallbackQuery):
 async def cancel_task_cb(client, query: CallbackQuery):
     user_id = query.from_user.id if query.from_user else 0
     USER_STATE.pop(user_id, None)
+    try:
+        from plugins.file_rename import USER_RENAME_CACHE
+        USER_RENAME_CACHE.pop(user_id, None)
+    except Exception:
+        pass
     raw_data = query.data or ""
     task_str = raw_data.replace("cancel_process_", "").replace("cancel_user_input", "").replace("cancel_input", "").replace("cancel_", "")
     if task_str:
@@ -1035,6 +1040,11 @@ async def cancel_command(client, message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     USER_STATE.pop(user_id, None)
+    try:
+        from plugins.file_rename import USER_RENAME_CACHE
+        USER_RENAME_CACHE.pop(user_id, None)
+    except Exception:
+        pass
     CANCEL_REQUESTS.add(user_id)
     CANCEL_REQUESTS.add(chat_id)
     await message.reply_text(

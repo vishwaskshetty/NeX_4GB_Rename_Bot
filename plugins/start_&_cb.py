@@ -193,6 +193,11 @@ async def start(client, message):
     user = message.from_user
     user_id = user.id
     USER_STATE.pop(user_id, None)
+    try:
+        from plugins.file_rename import USER_RENAME_CACHE
+        USER_RENAME_CACHE.pop(user_id, None)
+    except Exception:
+        pass
 
     # If PRIVATE_MODE is active and user is not admin, reject immediately without touching MongoDB!
     if Config.PRIVATE_MODE and user_id not in Config.ADMIN:
@@ -312,6 +317,11 @@ async def cb_handler(client, query: CallbackQuery):
     data = query.data 
     if data == "start":
         USER_STATE.pop(query.from_user.id, None)
+        try:
+            from plugins.file_rename import USER_RENAME_CACHE
+            USER_RENAME_CACHE.pop(query.from_user.id, None)
+        except Exception:
+            pass
         await query.answer()
         button = build_start_keyboard(query.from_user.id)
         await edit_message_content(

@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore", message=".*reply_to_message_id.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="pyrogram")
 
 from pyrogram import Client, filters
-from pyrogram.enums import MessageMediaType
+from pyrogram.enums import MessageMediaType, MessageEntityType
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -63,6 +63,7 @@ from helper.utils import (
     humanbytes,
     CANCEL_REQUESTS,
     USER_STATE,
+    ExpiringStateDict,
     to_small_caps,
     safe_reply_params,
     edit_message_content,
@@ -94,7 +95,7 @@ USER_QUEUE = {}
 PENDING_MEDIA_EXTRAS = {}
 ACTIVE_WORK_DIRS = set()
 USER_FILE_CONTEXT = {}
-USER_RENAME_CACHE = {}
+USER_RENAME_CACHE = ExpiringStateDict(DEFAULT_TTL=600.0)
 
 
 def get_optimal_work_dir(user_id: int, file_size: int = 0, is_remux_needed: bool = False) -> str:
@@ -449,15 +450,22 @@ async def rename_handler(client, update: CallbackQuery):
         pass
 
     reply_kwargs = safe_reply_params(file_msg_id)
-    await client.send_message(
+    prompt_msg = await client.send_message(
         chat_id=chat_id,
         text=(
-            "<b>◈ ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ɴᴇᴡ ꜰɪʟᴇ ɴᴀᴍᴇ...</b>\n\n"
-            "<i>(You can omit the extension; the original extension will be preserved automatically.)</i>"
+            "◈ <b>Please enter new file name...</b>\n\n"
+            "<i>(You can omit the extension; the original extension will be preserved automatically.)\n"
+            "Send /cancel to abort.</i>"
         ),
         reply_markup=ForceReply(True),
         **reply_kwargs
     )
+    USER_STATE[user_id] = "waiting_new_filename"
+    USER_RENAME_CACHE[user_id] = {
+        "file_msg_id": file_msg_id,
+        "chat_id": chat_id,
+        "prompt_msg_id": prompt_msg.id
+    }
 
 
 # ==================== STANDALONE SAMPLE & SCREENSHOTS ONLY ====================
@@ -729,7 +737,7 @@ async def watermark_action_cb(client, query: CallbackQuery):
     await query.answer("Watermark Settings Opened! 💧")
 
 
-@Client.on_message(filters.private & (filters.reply | filters.create(lambda _, __, m: bool(m.from_user and m.from_user.id in USER_STATE))), group=2)
+@Client.on_message(filters.private & (filters.reply | filters.create(lambda _, __, m: bool(m.from_user and (m.from_user.id in USER_STATE or m.from_user.id in USER_RENAME_CACHE)))), group=1)
 async def refunc(client, message):
     if Config.PRIVATE_MODE and message.from_user and message.from_user.id not in Config.ADMIN:
         return
@@ -741,6 +749,7 @@ async def refunc(client, message):
     if text_val.startswith("/"):
         if message.from_user:
             USER_STATE.pop(message.from_user.id, None)
+            USER_RENAME_CACHE.pop(message.from_user.id, None)
         return await message.continue_propagation()
 
     user_id = message.from_user.id
@@ -934,13 +943,35 @@ async def refunc(client, message):
         from plugins.track_manager import handle_track_rename_reply
         return await handle_track_rename_reply(client, message)
 
-    if not reply_message:
-        return
+    # 9. Check if user is responding to the Rename prompt
+    is_rename_reply = False
+    if user_state == "waiting_new_filename" or (isinstance(user_state, str) and user_state.startswith("waiting_rename")):
+        is_rename_reply = True
+    elif reply_message:
+        rep_text = ((reply_message.text or "") + " " + (reply_message.caption or "")).lower()
+        orig_text = (reply_message.text or "") + " " + (reply_message.caption or "")
+        cached_prompt_id = USER_RENAME_CACHE.get(user_id, {}).get("prompt_msg_id")
+        if (
+            "please enter new file name" in rep_text
+            or "enter new file name" in rep_text
+            or "omit the extension" in rep_text
+            or "original extension will be preserved" in rep_text
+            or "ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ɴᴇᴡ ꜰɪʟᴇ ɴᴀᴍᴇ" in orig_text
+            or (cached_prompt_id and reply_message.id == cached_prompt_id)
+            or (reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply) and user_id in USER_RENAME_CACHE)
+        ):
+            is_rename_reply = True
 
-    if not (reply_message.reply_markup and isinstance(reply_message.reply_markup, ForceReply)):
-        return
+    if not is_rename_reply:
+        return await message.continue_propagation()
 
-        new_name = message.text.strip()
+    try:
+        USER_STATE.pop(user_id, None)
+
+        new_name = (message.text or message.caption or "").strip()
+        if not new_name:
+            return await message.reply_text("❌ <b>Please send a valid file name text.</b>\n\n⚡ @Nex_bots")
+
         try:
             await message.delete()
         except Exception:
@@ -948,20 +979,20 @@ async def refunc(client, message):
 
         file_msg = None
         file_msg_id = (
-            getattr(reply_message, "reply_to_message_id", None)
-            or getattr(reply_message.reply_to_message, "id", None)
-            or USER_RENAME_CACHE.get(user_id, {}).get("file_msg_id")
+            USER_RENAME_CACHE.get(user_id, {}).get("file_msg_id")
+            or getattr(reply_message, "reply_to_message_id", None)
+            or getattr(getattr(reply_message, "reply_to_message", None), "id", None)
             or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
         )
 
         if file_msg_id:
             try:
-                file_msg = await client.get_messages(message.chat.id, file_msg_id)
+                file_msg = await client.get_messages(message.chat.id, int(file_msg_id))
             except Exception:
                 pass
 
         if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
-            if reply_message.reply_to_message and (
+            if reply_message and reply_message.reply_to_message and (
                 reply_message.reply_to_message.document
                 or reply_message.reply_to_message.video
                 or reply_message.reply_to_message.audio
@@ -969,30 +1000,45 @@ async def refunc(client, message):
                 file_msg = reply_message.reply_to_message
 
         if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
-            return await message.reply_text("❌ Original media not found! Please send your file again.")
+            return await message.reply_text("❌ <b>Original media not found!</b> Please send your file again.")
 
         file = file_msg.document or file_msg.video or file_msg.audio
-        orig_name = file.file_name or "file.mkv"
+        orig_name = getattr(file, "file_name", None) or "file.mkv"
         _, orig_ext = os.path.splitext(orig_name)
 
         if "." not in new_name:
             new_name = new_name + (orig_ext if orig_ext else ".mkv")
 
-        # Apply prefix & suffix
+        # Apply prefix & suffix (mentions like @KNR_MOVIEES are preserved)
         prefix = await db.get_prefix(user_id)
         suffix = await db.get_suffix(user_id)
         final_name = apply_prefix_suffix(new_name, prefix, suffix)
 
-        try:
-            await reply_message.delete()
-        except Exception:
-            pass
+        # Cache in USER_RENAME_CACHE for upload_callback_router
+        if user_id not in USER_RENAME_CACHE:
+            USER_RENAME_CACHE[user_id] = {}
+        USER_RENAME_CACHE[user_id]["final_name"] = final_name
+        USER_RENAME_CACHE[user_id]["file_msg_id"] = file_msg.id
+        USER_RENAME_CACHE[user_id]["chat_id"] = message.chat.id
+
+        # Delete prompt message cleanly
+        if reply_message:
+            try:
+                await reply_message.delete()
+            except Exception:
+                pass
+        prompt_id = USER_RENAME_CACHE[user_id].get("prompt_msg_id")
+        if prompt_id and (not reply_message or prompt_id != reply_message.id):
+            try:
+                await client.delete_messages(message.chat.id, prompt_id)
+            except Exception:
+                pass
 
         upload_mode = await db.get_upload_mode(user_id)
         if upload_mode in ["Document", "Video", "Audio"]:
             prompt_msg = await client.send_message(
                 chat_id=message.chat.id,
-                text=f"<b>◈ Pʀᴏᴄᴇꜱꜱɪɴɢ Dᴇꜰᴀᴜʟᴛ Mᴏᴅᴇ ({upload_mode}) ⚡</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
+                text=f"<b>◈ Pʀᴏᴄᴇꜱꜱɪɴɢ Dᴇꜰᴀᴜʟᴛ Mᴏᴅᴇ ({upload_mode}) ⚡</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(final_name)}</code>",
                 **safe_reply_params(file_msg.id)
             )
             class MockCallback:
@@ -1012,10 +1058,17 @@ async def refunc(client, message):
 
         await client.send_message(
             chat_id=message.chat.id,
-            text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{final_name}</code>",
+            text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(final_name)}</code>",
             reply_markup=InlineKeyboardMarkup(buttons),
             **safe_reply_params(file_msg.id)
         )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        try:
+            await message.reply_text(f"❌ <b>Rename Error:</b> <code>{html.escape(str(e))}</code>\n\n⚡ @Nex_bots")
+        except Exception:
+            pass
 
 
 @Client.on_callback_query(filters.regex(r"^upload_(document|video|audio)(?:_(\d+))?$"))
@@ -1024,42 +1077,63 @@ async def upload_callback_router(client, update: CallbackQuery):
     encoded_msg_id = update.matches[0].group(2)
     user_id = update.from_user.id
 
-    # Extract filename from message text
-    match = re.search(r'`([^`]+)`', update.message.text or "")
-    if match:
-        new_filename = match.group(1).strip()
-    elif ":-" in (update.message.text or ""):
-        new_filename = update.message.text.split(":-", 1)[1].strip()
-    else:
-        new_filename = "NeX_Renamed_File"
+    try:
+        # Extract filename from USER_RENAME_CACHE first, then message text / entities
+        new_filename = USER_RENAME_CACHE.get(user_id, {}).get("final_name")
+        if not new_filename:
+            msg_text = update.message.text or ""
+            if update.message.entities:
+                for ent in update.message.entities:
+                    if getattr(ent, "type", None) in (MessageEntityType.CODE, MessageEntityType.PRE):
+                        new_filename = msg_text[ent.offset : ent.offset + ent.length].strip()
+                        break
+            if not new_filename:
+                match = re.search(r'`([^`]+)`', msg_text)
+                if match:
+                    new_filename = match.group(1).strip()
+                elif "Fɪʟᴇ Nᴀᴍᴇ :" in msg_text:
+                    new_filename = msg_text.split("Fɪʟᴇ Nᴀᴍᴇ :", 1)[1].strip()
+                elif "File Name :" in msg_text:
+                    new_filename = msg_text.split("File Name :", 1)[1].strip()
+                elif ":-" in msg_text:
+                    new_filename = msg_text.split(":-", 1)[1].strip()
+                else:
+                    new_filename = "NeX_Renamed_File"
 
-    file_msg = None
-    target_id = (
-        (int(encoded_msg_id) if encoded_msg_id else None)
-        or update.message.reply_to_message_id
-        or getattr(update.message.reply_to_message, "id", None)
-        or USER_RENAME_CACHE.get(user_id, {}).get("file_msg_id")
-        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
-    )
+        file_msg = None
+        target_id = (
+            (int(encoded_msg_id) if encoded_msg_id else None)
+            or update.message.reply_to_message_id
+            or getattr(update.message.reply_to_message, "id", None)
+            or USER_RENAME_CACHE.get(user_id, {}).get("file_msg_id")
+            or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+        )
 
-    if target_id:
+        if target_id:
+            try:
+                file_msg = await client.get_messages(update.message.chat.id, int(target_id))
+            except Exception:
+                pass
+
+        if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+            if update.message.reply_to_message and (
+                update.message.reply_to_message.document
+                or update.message.reply_to_message.video
+                or update.message.reply_to_message.audio
+            ):
+                file_msg = update.message.reply_to_message
+
+        if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+            return await update.message.edit("❌ Original media message could not be retrieved! Please send your file again.")
+
+        await route_to_extras_or_execute(client, update, new_filename, upload_type, file_msg)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         try:
-            file_msg = await client.get_messages(update.message.chat.id, target_id)
+            await update.message.edit(f"❌ <b>Rename Error:</b> <code>{html.escape(str(e))}</code>\n\n⚡ @Nex_bots")
         except Exception:
             pass
-
-    if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
-        if update.message.reply_to_message and (
-            update.message.reply_to_message.document
-            or update.message.reply_to_message.video
-            or update.message.reply_to_message.audio
-        ):
-            file_msg = update.message.reply_to_message
-
-    if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
-        return await update.message.edit("❌ Original media message could not be retrieved! Please send your file again.")
-
-    await route_to_extras_or_execute(client, update, new_filename, upload_type, file_msg)
 
 
 async def route_to_extras_or_execute(client, update, new_filename: str, upload_type: str, file_msg):

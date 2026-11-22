@@ -20,7 +20,7 @@ from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, Peer
 
 from config import Config, parse_channel_id
 from helper.database import db, TIER_NAMES, format_user_time
-from helper.utils import get_readable_file_size, humanbytes, edit_message_content, sanitize_secrets, calc_plan_prices
+from helper.utils import get_readable_file_size, humanbytes, edit_message_content, sanitize_secrets, calc_plan_prices, ExpiringStateDict, USER_STATE
 
 # NeX 4GB Rename Bot - 100% Button-Driven Owner Control Panel, Wizards & Broadcast Engine
 # Developed by @Nex_bots
@@ -40,8 +40,8 @@ async def _safe(coro, default=None):
 # Broadcast message cache: admin_id -> replied Message
 BROADCAST_CACHE = {}
 
-# Owner interactive wizard state: admin_id -> state dict
-OWNER_STATE = {}
+# Owner interactive wizard state: admin_id -> state dict (5-min auto-expiry)
+OWNER_STATE = ExpiringStateDict(DEFAULT_TTL=300.0)
 
 
 async def send_security_alert(client: Client, user, action_desc: str):
@@ -1346,9 +1346,22 @@ async def owner_state_input_handler(client: Client, message: Message):
     if admin_id not in OWNER_STATE:
         return await message.continue_propagation()
 
+    input_text = message.text.strip() if message.text else ""
+    if input_text.startswith("/"):
+        OWNER_STATE.pop(admin_id, None)
+        return await message.continue_propagation()
+
+    # Never intercept rename responses or user setting inputs
+    if admin_id in USER_STATE:
+        return await message.continue_propagation()
+    if message.reply_to_message:
+        rep = ((message.reply_to_message.text or "") + (message.reply_to_message.caption or "")).lower()
+        orig = (message.reply_to_message.text or "") + (message.reply_to_message.caption or "")
+        if "enter new file name" in rep or "omit the extension" in rep or "original extension will be preserved" in rep or "ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ɴᴇᴡ ꜰɪʟᴇ ɴᴀᴍᴇ" in orig:
+            return await message.continue_propagation()
+
     state = OWNER_STATE.get(admin_id, {})
     action = state.get("action")
-    input_text = message.text.strip() if message.text else ""
 
     if not input_text:
         return await message.reply_text("⚠️ Please send valid text or ID.")
