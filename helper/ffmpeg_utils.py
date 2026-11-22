@@ -200,6 +200,7 @@ async def apply_video_watermark(
             "-crf", "23",
             "-c:a", "copy",
             "-c:s", "copy",
+            "-movflags", "+faststart",
             "-progress", "pipe:1",
             "-nostats",
             output_path
@@ -234,6 +235,7 @@ async def apply_video_watermark(
             "-crf", "23",
             "-c:a", "copy",
             "-c:s", "copy",
+            "-movflags", "+faststart",
             "-progress", "pipe:1",
             "-nostats",
             output_path
@@ -325,7 +327,15 @@ async def apply_video_watermark(
         await proc.wait()
         if proc.returncode != 0:
             err_msg = stderr_data.decode('utf-8', errors='ignore') if stderr_data else ""
-            print(f"FFmpeg apply_video_watermark non-zero exit ({proc.returncode}): {err_msg[-300:]}")
+            print(f"FFmpeg apply_video_watermark non-zero exit ({proc.returncode}): {err_msg[-1000:]}", flush=True)
+            if status_msg:
+                try:
+                    await edit_message_content(
+                        status_msg,
+                        f"❌ <b>Watermark Encoding Failed!</b>\n\n<code>{html.escape(err_msg[-200:].strip())}</code>\n\n⚡ @Nex_bots"
+                    )
+                except Exception:
+                    pass
             return False
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
     except Exception as e:

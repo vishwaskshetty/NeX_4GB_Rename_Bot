@@ -267,12 +267,14 @@ class Bot(Client):
         except Exception as e:
             print(f"Failed to register Bot Commands Menu: {e}")
 
-        # Warm up channel on Main Bot Client
-        try:
-            ch_main = await self.get_chat(PERM_CHANNEL)
-            print(f"✅ Main Bot resolved permanent channel {PERM_CHANNEL}: {getattr(ch_main, 'title', 'Channel')}")
-        except Exception as ch_err:
-            print(f"⚠️ Main Bot could not resolve channel {PERM_CHANNEL}: {ch_err}")
+        # Warm up channels on Main Bot Client
+        channels_to_warm = list(dict.fromkeys(filter(None, [PERM_CHANNEL, Config.LOG_CHANNEL, Config.FILES_CHANNEL])))
+        for ch in channels_to_warm:
+            try:
+                ch_main = await self.get_chat(ch)
+                print(f"✅ Main Bot resolved channel {ch}: {getattr(ch_main, 'title', 'Channel')}")
+            except Exception as ch_err:
+                print(f"⚠️ Main Bot could not resolve channel {ch}: {ch_err}")
 
         user_me = None
         if self.app_4gb:
@@ -291,31 +293,32 @@ class Bot(Client):
                 except Exception:
                     pass
 
-                # Warm up channel on app_4gb and guarantee membership & admin privileges
-                try:
-                    ch_4gb = await self.app_4gb.get_chat(PERM_CHANNEL)
-                    print(f"✅ app_4gb resolved permanent channel {PERM_CHANNEL}: {getattr(ch_4gb, 'title', 'Channel')}")
-                except Exception as e_4gb:
-                    print(f"ℹ️ app_4gb not in channel {PERM_CHANNEL} yet ({e_4gb}). Joining via invite...")
+                # Warm up channels on app_4gb and guarantee membership & admin privileges
+                for ch in channels_to_warm:
                     try:
-                        invite = await self.export_chat_invite_link(PERM_CHANNEL)
-                        await self.app_4gb.join_chat(invite)
-                        print(f"✅ app_4gb joined {PERM_CHANNEL} successfully!")
-                        if user_me:
-                            await self.promote_chat_member(
-                                PERM_CHANNEL,
-                                user_me.id,
-                                privileges=ChatPrivileges(
-                                    can_post_messages=True,
-                                    can_edit_messages=True,
-                                    can_delete_messages=True,
-                                    can_invite_users=True,
-                                    can_pin_messages=True
+                        ch_4gb = await self.app_4gb.get_chat(ch)
+                        print(f"✅ app_4gb resolved channel {ch}: {getattr(ch_4gb, 'title', 'Channel')}")
+                    except Exception as e_4gb:
+                        print(f"ℹ️ app_4gb not in channel {ch} yet ({e_4gb}). Joining via invite...")
+                        try:
+                            invite = await self.export_chat_invite_link(ch)
+                            await self.app_4gb.join_chat(invite)
+                            print(f"✅ app_4gb joined {ch} successfully!")
+                            if user_me:
+                                await self.promote_chat_member(
+                                    ch,
+                                    user_me.id,
+                                    privileges=ChatPrivileges(
+                                        can_post_messages=True,
+                                        can_edit_messages=True,
+                                        can_delete_messages=True,
+                                        can_invite_users=True,
+                                        can_pin_messages=True
+                                    )
                                 )
-                            )
-                            print(f"✅ app_4gb promoted to Admin in {PERM_CHANNEL}!")
-                    except Exception as join_err:
-                        print(f"⚠️ Auto-join/promote app_4gb note: {join_err}")
+                                print(f"✅ app_4gb promoted to Admin in {ch}!")
+                        except Exception as join_err:
+                            print(f"⚠️ Auto-join/promote app_4gb note for {ch}: {join_err}")
             except Exception as e:
                 print(f"Error starting 4GB Premium Client: {e}")
 

@@ -382,6 +382,33 @@ async def rename_start(client, message):
     )
 
 
+def build_rename_choice_menu(file_msg_id: int, final_name: str, upload_type: str = "video", wm_status: str = "OFF 🔴"):
+    format_btn_label = "📁 As Document" if upload_type == "video" else "🎥 As Video"
+    buttons = [
+        [
+            InlineKeyboardButton("⚡ Only Rename (Fast)", callback_data=f"rchoice_fast_{file_msg_id}"),
+            InlineKeyboardButton("💧 Rename + Watermark", callback_data=f"rchoice_wm_{file_msg_id}")
+        ],
+        [
+            InlineKeyboardButton(f"🔄 Watermark: {wm_status}", callback_data=f"rchoice_toggle_{file_msg_id}"),
+            InlineKeyboardButton(format_btn_label, callback_data=f"rchoice_fmt_{file_msg_id}")
+        ],
+        [
+            InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{file_msg_id}")
+        ]
+    ]
+    menu_text = (
+        "<b>◈ Sᴇʟᴇᴄᴛ Rᴇɴᴀᴍᴇ Mᴏᴅᴇ ⚡</b>\n\n"
+        f"▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(str(final_name))}</code>\n"
+        f"▸ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Sᴛᴀᴛᴜꜱ :</b> <b>{wm_status}</b>\n"
+        f"▸ <b>Oᴜᴛᴘᴜᴛ Tʏᴘᴇ :</b> <b>{'📁 Document' if upload_type == 'document' else '🎥 Video'}</b>\n\n"
+        "<i>⚡ <b>Only Rename (Fast):</b> Instant stream-copy / zero-disk mode.\n"
+        "💧 <b>Rename + Watermark:</b> Burns your OTT corner logo into video.</i>\n\n"
+        "⚡ @Nex_bots"
+    )
+    return menu_text, InlineKeyboardMarkup(buttons)
+
+
 @Client.on_callback_query(filters.regex(r'^auto_rename(?:_(\d+))?$'))
 async def auto_rename_handler(client, update: CallbackQuery):
     user_id = update.from_user.id
@@ -414,15 +441,35 @@ async def auto_rename_handler(client, update: CallbackQuery):
     final_name = apply_prefix_suffix(cleaned_name, prefix, suffix)
 
     upload_mode = await db.get_upload_mode(user_id)
-    if upload_mode in ["Document", "Video", "Audio"]:
-        await route_to_extras_or_execute(client, update, final_name, upload_mode.lower(), reply_msg)
+    current_upload_type = "document" if upload_mode == "Document" else "video"
+    if reply_msg.audio or final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg')):
+        current_upload_type = "audio"
+
+    USER_RENAME_CACHE[user_id] = {
+        "final_name": final_name,
+        "file_msg_id": reply_msg.id,
+        "chat_id": update.message.chat.id,
+        "upload_type": current_upload_type
+    }
+
+    is_video = bool(
+        reply_msg.video
+        or (reply_msg.document and reply_msg.document.mime_type and reply_msg.document.mime_type.startswith("video/"))
+        or final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.wmv', '.m4v'))
+    )
+
+    if is_video:
+        wm_info = await db.get_watermark(user_id)
+        wm_is_enabled = wm_info.get("enabled", False)
+        wm_status = "ON 🟢" if wm_is_enabled else "OFF 🔴"
+        menu_text, markup = build_rename_choice_menu(reply_msg.id, final_name, current_upload_type, wm_status)
+        await update.message.edit_text(text=menu_text, reply_markup=markup)
         return
 
     buttons = [[InlineKeyboardButton("📁 Document", callback_data=f"upload_document_{reply_msg.id}")]]
-    if reply_msg.video or (reply_msg.document and final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))):
-        buttons.append([InlineKeyboardButton("🎥 Video", callback_data=f"upload_video_{reply_msg.id}")])
-    elif reply_msg.audio or (reply_msg.document and final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))):
-        buttons.append([InlineKeyboardButton("🎵 Audio", callback_data=f"upload_audio_{reply_msg.id}")])
+    if reply_msg.audio or final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg')):
+        buttons[0].append(InlineKeyboardButton("🎵 Audio", callback_data=f"upload_audio_{reply_msg.id}"))
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{reply_msg.id}")])
 
     await update.message.edit_text(
         text=f"⚡ <b>Auto Cleaned & Formatted Name:</b>\n`{final_name}`\n\n<b>Select Output Format:</b>",
@@ -791,7 +838,12 @@ async def refunc(client, message):
                 await reply_message.delete()
             except Exception:
                 pass
-        photo = message.photo or (message.document if message.document and message.document.mime_type and message.document.mime_type.startswith("image/") else None)
+        photo = message.photo or (
+            message.document if message.document and (
+                (message.document.mime_type and message.document.mime_type.startswith("image/"))
+                or (message.document.file_name and message.document.file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')))
+            ) else None
+        )
         if not photo:
             return await message.reply_text(
                 "❌ <b>Please send a photo or image file for your watermark logo.</b>\n\n"
@@ -919,7 +971,12 @@ async def refunc(client, message):
                 await reply_message.delete()
             except Exception:
                 pass
-        photo = message.photo or (message.document if message.document and message.document.mime_type and message.document.mime_type.startswith("image/") else None)
+        photo = message.photo or (
+            message.document if message.document and (
+                (message.document.mime_type and message.document.mime_type.startswith("image/"))
+                or (message.document.file_name and message.document.file_name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')))
+            ) else None
+        )
         if not photo:
             return await message.reply_text(
                 "❌ <b>Please send a photo for your thumbnail.</b>\n\n⚡ @Nex_bots",
@@ -1035,33 +1092,60 @@ async def refunc(client, message):
                 pass
 
         upload_mode = await db.get_upload_mode(user_id)
-        if upload_mode in ["Document", "Video", "Audio"]:
-            prompt_msg = await client.send_message(
+        current_upload_type = "document" if upload_mode == "Document" else "video"
+        if file_msg.audio or final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg')):
+            current_upload_type = "audio"
+        USER_RENAME_CACHE[user_id]["upload_type"] = current_upload_type
+
+        is_video = bool(
+            file_msg.video
+            or (file_msg.document and file_msg.document.mime_type and file_msg.document.mime_type.startswith("video/"))
+            or final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv', '.wmv', '.m4v'))
+        )
+
+        if is_video:
+            wm_info = await db.get_watermark(user_id)
+            wm_is_enabled = wm_info.get("enabled", False)
+            wm_status = "ON 🟢" if wm_is_enabled else "OFF 🔴"
+            menu_text, markup = build_rename_choice_menu(file_msg.id, final_name, current_upload_type, wm_status)
+            await client.send_message(
                 chat_id=message.chat.id,
-                text=f"<b>◈ Pʀᴏᴄᴇꜱꜱɪɴɢ Dᴇꜰᴀᴜʟᴛ Mᴏᴅᴇ ({upload_mode}) ⚡</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(final_name)}</code>",
+                text=menu_text,
+                reply_markup=markup,
                 **safe_reply_params(file_msg.id)
             )
-            class MockCallback:
-                def __init__(self, msg, user):
-                    self.message = msg
-                    self.from_user = user
-                    self.data = f"upload_{upload_mode.lower()}_{file_msg.id}"
-            mock_cb = MockCallback(prompt_msg, message.from_user)
-            await route_to_extras_or_execute(client, mock_cb, final_name, upload_mode.lower(), file_msg)
             return
 
-        buttons = [[InlineKeyboardButton("📁 Dᴏᴄᴜᴍᴇɴᴛ", callback_data=f"upload_document_{file_msg.id}")]]
-        if file_msg.video or (file_msg.document and final_name.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))):
-            buttons[0].append(InlineKeyboardButton("🎥 Vɪᴅᴇᴏ", callback_data=f"upload_video_{file_msg.id}"))
-        elif file_msg.audio or (file_msg.document and final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg'))):
-            buttons[0].append(InlineKeyboardButton("🎵 Aᴜᴅɪᴏ", callback_data=f"upload_audio_{file_msg.id}"))
+        elif file_msg.audio or final_name.lower().endswith(('.mp3', '.m4a', '.flac', '.wav', '.ogg')):
+            buttons = [
+                [
+                    InlineKeyboardButton("🎵 Audio", callback_data=f"upload_audio_{file_msg.id}"),
+                    InlineKeyboardButton("📁 Document", callback_data=f"upload_document_{file_msg.id}")
+                ],
+                [
+                    InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{file_msg.id}")
+                ]
+            ]
+            await client.send_message(
+                chat_id=message.chat.id,
+                text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(final_name)}</code>",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                **safe_reply_params(file_msg.id)
+            )
+            return
 
-        await client.send_message(
-            chat_id=message.chat.id,
-            text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(final_name)}</code>",
-            reply_markup=InlineKeyboardMarkup(buttons),
-            **safe_reply_params(file_msg.id)
-        )
+        else:
+            buttons = [
+                [InlineKeyboardButton("📁 Document", callback_data=f"upload_document_{file_msg.id}")],
+                [InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{file_msg.id}")]
+            ]
+            await client.send_message(
+                chat_id=message.chat.id,
+                text=f"<b>◈ Sᴇʟᴇᴄᴛ Oᴜᴛᴘᴜᴛ Tʏᴘᴇ</b>\n\n▸ <b>Fɪʟᴇ Nᴀᴍᴇ :</b> <code>{html.escape(final_name)}</code>",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                **safe_reply_params(file_msg.id)
+            )
+            return
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1069,6 +1153,117 @@ async def refunc(client, message):
             await message.reply_text(f"❌ <b>Rename Error:</b> <code>{html.escape(str(e))}</code>\n\n⚡ @Nex_bots")
         except Exception:
             pass
+
+
+@Client.on_callback_query(filters.regex(r"^rchoice_(fast|wm|toggle|fmt|cancel|back)(?:_(\d+))?$"))
+async def rename_choice_callback(client, query: CallbackQuery):
+    choice = query.matches[0].group(1)
+    file_msg_id_str = query.matches[0].group(2)
+    user_id = query.from_user.id
+
+    if choice == "cancel":
+        USER_STATE.pop(user_id, None)
+        USER_RENAME_CACHE.pop(user_id, None)
+        try:
+            await query.message.delete()
+        except Exception:
+            try:
+                await query.message.edit("❌ <b>Rename cancelled.</b>\n\n⚡ @Nex_bots")
+            except Exception:
+                pass
+        return await query.answer("Operation cancelled.")
+
+    cache = USER_RENAME_CACHE.get(user_id, {})
+    final_name = cache.get("final_name")
+    upload_type = cache.get("upload_type", "video")
+    target_id = (int(file_msg_id_str) if file_msg_id_str else None) or cache.get("file_msg_id") or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+
+    if not final_name:
+        msg_text = query.message.text or ""
+        if "Fɪʟᴇ Nᴀᴍᴇ :" in msg_text:
+            final_name = msg_text.split("Fɪʟᴇ Nᴀᴍᴇ :", 1)[1].split("\n", 1)[0].strip()
+        elif "Aᴜᴛᴏ Nᴀᴍᴇ :" in msg_text:
+            final_name = msg_text.split("Aᴜᴛᴏ Nᴀᴍᴇ :", 1)[1].split("\n", 1)[0].strip()
+        else:
+            final_name = "renamed_file.mkv"
+        if user_id not in USER_RENAME_CACHE:
+            USER_RENAME_CACHE[user_id] = {}
+        USER_RENAME_CACHE[user_id]["final_name"] = final_name
+        USER_RENAME_CACHE[user_id]["upload_type"] = upload_type
+        USER_RENAME_CACHE[user_id]["file_msg_id"] = target_id
+
+    file_msg = None
+    if target_id:
+        try:
+            file_msg = await client.get_messages(query.message.chat.id, int(target_id))
+        except Exception:
+            pass
+    if not file_msg or not (file_msg.document or file_msg.video or file_msg.audio):
+        if query.message.reply_to_message and (query.message.reply_to_message.document or query.message.reply_to_message.video or query.message.reply_to_message.audio):
+            file_msg = query.message.reply_to_message
+
+    if choice == "toggle":
+        wm_info = await db.get_watermark(user_id)
+        new_state = not wm_info.get("enabled", False)
+        await db.set_watermark(user_id, enabled=new_state)
+        wm_status = "ON 🟢" if new_state else "OFF 🔴"
+        menu_text, markup = build_rename_choice_menu(target_id or 0, final_name, upload_type, wm_status)
+        await edit_message_content(query.message, menu_text, reply_markup=markup)
+        return await query.answer(f"Watermark {'Enabled 🟢' if new_state else 'Disabled 🔴'}")
+
+    elif choice == "fmt":
+        new_type = "document" if upload_type == "video" else "video"
+        USER_RENAME_CACHE[user_id]["upload_type"] = new_type
+        wm_info = await db.get_watermark(user_id)
+        wm_status = "ON 🟢" if wm_info.get("enabled", False) else "OFF 🔴"
+        menu_text, markup = build_rename_choice_menu(target_id or 0, final_name, new_type, wm_status)
+        await edit_message_content(query.message, menu_text, reply_markup=markup)
+        return await query.answer(f"Format: {'📁 Document' if new_type == 'document' else '🎥 Video'}")
+
+    elif choice == "back":
+        wm_info = await db.get_watermark(user_id)
+        wm_status = "ON 🟢" if wm_info.get("enabled", False) else "OFF 🔴"
+        menu_text, markup = build_rename_choice_menu(target_id or 0, final_name, upload_type, wm_status)
+        await edit_message_content(query.message, menu_text, reply_markup=markup)
+        return await query.answer("Back to Rename Mode!")
+
+    elif choice == "fast":
+        if not file_msg:
+            return await query.answer("❌ Original media not found! Please resend your file.", show_alert=True)
+        await query.answer("⚡ Starting Fast Rename (Zero-Disk)...")
+        return await route_to_extras_or_execute(client, query, final_name, upload_type, file_msg, extras={"watermark": False})
+
+    elif choice == "wm":
+        if not file_msg:
+            return await query.answer("❌ Original media not found! Please resend your file.", show_alert=True)
+        wm_info = await db.get_watermark(user_id)
+        has_logo = bool(wm_info.get("image_id"))
+        has_text = bool(wm_info.get("text"))
+        has_configured = (has_logo if wm_info.get("type") == "image" else has_text) or has_logo or has_text
+        if not has_configured:
+            await query.answer("⚠️ No watermark logo or text configured!", show_alert=True)
+            no_wm_buttons = [
+                [
+                    InlineKeyboardButton("🖼️ Set Watermark Logo", callback_data="cb_wm_set_logo"),
+                    InlineKeyboardButton("🔤 Set Watermark Text", callback_data="cb_wm_set_text")
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Back to Rename", callback_data=f"rchoice_back_{target_id}"),
+                    InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{target_id}")
+                ]
+            ]
+            no_wm_text = (
+                "⚠️ <b>No Watermark Configured!</b>\n\n"
+                "You haven't uploaded an OTT logo or set watermark text yet.\n"
+                "Tap <b>Set Watermark Logo</b> to upload your PNG channel bug, or <b>Set Watermark Text</b>.\n\n"
+                "⚡ @Nex_bots"
+            )
+            return await edit_message_content(query.message, no_wm_text, reply_markup=InlineKeyboardMarkup(no_wm_buttons))
+
+        if not wm_info.get("enabled"):
+            await db.set_watermark(user_id, enabled=True)
+        await query.answer("💧 Starting Rename with OTT Watermark...")
+        return await route_to_extras_or_execute(client, query, final_name, upload_type, file_msg, extras={"watermark": True})
 
 
 @Client.on_callback_query(filters.regex(r"^upload_(document|video|audio)(?:_(\d+))?$"))
@@ -1136,8 +1331,9 @@ async def upload_callback_router(client, update: CallbackQuery):
             pass
 
 
-async def route_to_extras_or_execute(client, update, new_filename: str, upload_type: str, file_msg):
+async def route_to_extras_or_execute(client, update, new_filename: str, upload_type: str, file_msg, extras: dict = None):
     user_id = update.from_user.id
+    extras = dict(extras or {})
     is_video = (upload_type == "video") or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
 
     if is_video:
@@ -1147,7 +1343,8 @@ async def route_to_extras_or_execute(client, update, new_filename: str, upload_t
 
         # If BOTH are disabled (0), do NOT prompt! Immediately start pipeline
         if sample_dur == 0 and ss_count == 0:
-            return await execute_rename_pipeline(client, update, new_filename, upload_type, file_msg, extras={"sample": False, "ss": False})
+            extras.update({"sample": False, "ss": False})
+            return await execute_rename_pipeline(client, update, new_filename, upload_type, file_msg, extras=extras)
 
         # Cache pending media extras request
         task_key = f"{user_id}_{file_msg.id}"
@@ -1156,7 +1353,8 @@ async def route_to_extras_or_execute(client, update, new_filename: str, upload_t
             "upload_type": upload_type,
             "file_msg": file_msg,
             "sample_dur": sample_dur,
-            "ss_count": ss_count
+            "ss_count": ss_count,
+            "extras": extras
         }
 
         buttons = []
@@ -1199,7 +1397,8 @@ async def route_to_extras_or_execute(client, update, new_filename: str, upload_t
         return
 
     # Non-video files proceed directly
-    await execute_rename_pipeline(client, update, new_filename, upload_type, file_msg, extras={"sample": False, "ss": False})
+    extras.update({"sample": False, "ss": False})
+    await execute_rename_pipeline(client, update, new_filename, upload_type, file_msg, extras=extras)
 
 
 @Client.on_callback_query(filters.regex(r"^ext_(both|sample|ss|skip|disable)_(\d+)$"))
@@ -1216,24 +1415,25 @@ async def extras_decision_callback(client, query: CallbackQuery):
     new_filename = data["filename"]
     upload_type = data["upload_type"]
     file_msg = data["file_msg"]
+    extras = dict(data.get("extras", {}))
 
     if choice == "disable":
         await db.set_sample_duration(user_id, 0)
         await db.set_screenshots(user_id, 0)
         await query.answer("🔕 Sample and Screenshots permanently disabled in your settings!", show_alert=True)
-        extras = {"sample": False, "ss": False}
+        extras.update({"sample": False, "ss": False})
     elif choice == "both":
         await query.answer("🎬 Sample + Screenshots will be generated!")
-        extras = {"sample": True, "ss": True}
+        extras.update({"sample": True, "ss": True})
     elif choice == "sample":
         await query.answer("🎬 Sample video will be generated!")
-        extras = {"sample": True, "ss": False}
+        extras.update({"sample": True, "ss": False})
     elif choice == "ss":
         await query.answer("📸 Screenshots will be generated!")
-        extras = {"sample": False, "ss": True}
+        extras.update({"sample": False, "ss": True})
     else:  # skip
         await query.answer("⏩ Skipping extras. Rename starting...")
-        extras = {"sample": False, "ss": False}
+        extras.update({"sample": False, "ss": False})
 
     await execute_rename_pipeline(client, query, new_filename, upload_type, file_msg, extras=extras)
 
@@ -1349,7 +1549,11 @@ async def execute_rename_pipeline(
             is_video = (upload_type == "video") or new_filename.lower().endswith(('.mp4', '.mkv', '.webm', '.avi', '.mov', '.flv'))
             is_prem = (user_tier >= 1) or (user_id in Config.ADMIN)
             wm_info = await db.get_watermark(user_id)
-            wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
+            if isinstance(extras, dict) and "watermark" in extras:
+                wm_choice = extras["watermark"]
+                wm_enabled = bool(is_video and is_prem and wm_choice and (wm_info.get("image_id") or wm_info.get("text")))
+            else:
+                wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
 
             # Zero-Disk Turbo Pipe is MANDATORY DEFAULT for all renames unless explicitly requested remux
             # Custom thumbnails, custom captions, and bottom captions attach natively in MTProto without disk remuxing!
@@ -1567,6 +1771,7 @@ async def execute_rename_pipeline(
                     pass
 
                 start_time = time.time()
+                dl_ok = False
                 try:
                     # Prefer Premium app_4gb client with staged virtual disk message for unthrottled download
                     dl_client = client_4gb if (is_prem_active and staged_msg) else client
@@ -1579,21 +1784,53 @@ async def execute_rename_pipeline(
                         progress=progress_for_pyrogram,
                         progress_args=(dl_tag, ms, start_time, client, effective_tier)
                     )
+                    dl_ok = bool(path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
                 except StopTransmission:
                     raise
                 except Exception as down_err:
-                    print(f"⚠️ fast_download error: {down_err}. Retrying fast_download with fallback...")
-                    traceback.print_exc()
-                    path = await fast_download(
-                        client=client,
-                        message_or_file=file_msg,
-                        file_path=file_path,
-                        progress=progress_for_pyrogram,
-                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
-                    )
+                    print(f"⚠️ fast_download error: {down_err}")
+                    dl_ok = False
+
+                # Fallback 1: Try fast_download with main bot client on original file_msg
+                if not dl_ok or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                    try:
+                        print("⚠️ Retrying fast_download with main bot client on original file_msg...", flush=True)
+                        path = await fast_download(
+                            client=client,
+                            message_or_file=file_msg,
+                            file_path=file_path,
+                            progress=progress_for_pyrogram,
+                            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                        )
+                        dl_ok = bool(path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
+                    except StopTransmission:
+                        raise
+                    except Exception as down_err2:
+                        print(f"⚠️ fast_download main client retry error: {down_err2}", flush=True)
+                        dl_ok = False
+
+                # Fallback 2: Automatic bulletproof Pyrogram download_media fallback!
+                if not dl_ok or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                    try:
+                        print("⚠️ fast_download failed or produced empty file. Falling back to native download_media...", flush=True)
+                        native_dl_client = client_4gb if (is_prem_active and file_size > (1.95 * 1024 * 1024 * 1024)) else client
+                        await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ (ɴᴀᴛɪᴠᴇ ᴍᴏᴅᴇ)... 📥</b>", reply_markup=cancel_btn)
+                        dl_res = await native_dl_client.download_media(
+                            message=file_msg,
+                            file_name=file_path,
+                            progress=progress_for_pyrogram,
+                            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, start_time, client, effective_tier)
+                        )
+                        if dl_res and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                            dl_ok = True
+                    except StopTransmission:
+                        raise
+                    except Exception as native_err:
+                        print(f"⚠️ Native download_media fallback failed: {native_err}", flush=True)
+                        traceback.print_exc()
 
                 if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                    return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>")
+                    return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>\n\n⚡ @Nex_bots")
 
                 if ms.id in CANCEL_REQUESTS or f"{ms.chat.id}_{ms.id}" in CANCEL_REQUESTS or (ms.chat and ms.chat.id in CANCEL_REQUESTS) or user_id in CANCEL_REQUESTS:
                     return await ms.edit("❌ <b>Operation Aborted!</b>\n\n⚡ @Nex_bots")
@@ -1625,7 +1862,7 @@ async def execute_rename_pipeline(
                                 pass
 
                     if wm_enabled:
-                        wm_type = wm_info.get("type", "text")
+                        wm_type = wm_info.get("type", "image")
                         wm_img_path = None
                         can_apply = False
 
@@ -1634,13 +1871,21 @@ async def execute_rename_pipeline(
                                 await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ᴡᴀᴛᴇʀᴍᴀʀᴋ ʟᴏɢᴏ... 🖼️</b>")
                                 logo_target = os.path.join(work_dir, "wm_logo.png")
                                 dl_logo = await client.download_media(wm_info.get("image_id"), file_name=logo_target)
-                                if dl_logo and os.path.exists(dl_logo):
-                                    wm_img_path = dl_logo
+                                if not dl_logo or not os.path.exists(logo_target) or os.path.getsize(logo_target) == 0:
+                                    if is_prem_active and client_4gb:
+                                        dl_logo = await client_4gb.download_media(wm_info.get("image_id"), file_name=logo_target)
+                                if dl_logo and os.path.exists(logo_target) and os.path.getsize(logo_target) > 0:
+                                    wm_img_path = logo_target
                                     can_apply = True
                             except Exception as err:
-                                print(f"Failed to download watermark logo: {err}")
+                                print(f"Failed to download watermark logo: {err}", flush=True)
                         elif wm_info.get("text"):
                             can_apply = True
+
+                        if not can_apply:
+                            print("⚠️ Watermark logo could not be loaded. Continuing rename without watermark...", flush=True)
+                            await ms.edit("⚠️ <b>Watermark logo could not be loaded. Continuing rename...</b>")
+                            await asyncio.sleep(1.2)
 
                         if can_apply:
                             try:
@@ -1924,13 +2169,35 @@ async def execute_rename_pipeline(
                         await ms.edit("<b>◈ Zero-disk skipped. Switching to high-speed disk pipeline... 📥</b>", reply_markup=cancel_btn)
                     except Exception:
                         pass
-                    file_path = await fast_download(
-                        client=client,
-                        message_or_file=file_msg,
-                        file_path=file_path,
-                        progress=progress_for_pyrogram,
-                        progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, time.time(), client, effective_tier)
-                    )
+                    dl_ok = False
+                    try:
+                        path = await fast_download(
+                            client=client,
+                            message_or_file=file_msg,
+                            file_path=file_path,
+                            progress=progress_for_pyrogram,
+                            progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, time.time(), client, effective_tier)
+                        )
+                        dl_ok = bool(path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
+                    except Exception as down_err:
+                        print(f"⚠️ Fallback fast_download error: {down_err}")
+                        dl_ok = False
+
+                    if not dl_ok or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                        try:
+                            print("⚠️ Fallback fast_download failed. Falling back to native download_media...", flush=True)
+                            native_dl_client = client_4gb if (is_prem_active and file_size > (1.95 * 1024 * 1024 * 1024)) else client
+                            dl_res = await native_dl_client.download_media(
+                                message=file_msg,
+                                file_name=file_path,
+                                progress=progress_for_pyrogram,
+                                progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, time.time(), client, effective_tier)
+                            )
+                            if dl_res and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                                dl_ok = True
+                        except Exception as native_err:
+                            print(f"⚠️ Native download_media fallback failed: {native_err}", flush=True)
+
                     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
                         return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>\n\n⚡ @Nex_bots")
 
