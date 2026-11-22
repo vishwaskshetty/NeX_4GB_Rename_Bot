@@ -774,10 +774,14 @@ async def zero_disk_turbo_pipe(
     staged_chat_id = staged_msg.chat.id if hasattr(staged_msg, "chat") and staged_msg.chat else -1003792044224
     staged_msg_id = getattr(staged_msg, "id", None)
 
-    # 1. Refresh Bot staged message if needed
+    # 1. Refresh Bot staged message if needed (with get_chat cache warming)
     if staged_chat_id and staged_msg_id:
         try:
-            refreshed = await client.get_messages(staged_chat_id, staged_msg_id)
+            try:
+                refreshed = await client.get_messages(staged_chat_id, staged_msg_id)
+            except Exception:
+                await client.get_chat(staged_chat_id)
+                refreshed = await client.get_messages(staged_chat_id, staged_msg_id)
             if refreshed and not getattr(refreshed, "empty", False):
                 staged_msg = refreshed
         except Exception:
@@ -849,7 +853,11 @@ async def zero_disk_turbo_pipe(
     location_user = None
     if is_user_ready and staged_chat_id and staged_msg_id:
         try:
-            staged_msg_user = await user_client.get_messages(staged_chat_id, staged_msg_id)
+            try:
+                staged_msg_user = await user_client.get_messages(staged_chat_id, staged_msg_id)
+            except Exception:
+                await user_client.get_chat(staged_chat_id)
+                staged_msg_user = await user_client.get_messages(staged_chat_id, staged_msg_id)
             if staged_msg_user and not getattr(staged_msg_user, "empty", False):
                 user_file_obj = (
                     getattr(staged_msg_user, "document", None) or
@@ -1162,8 +1170,15 @@ async def send_input_file_big(
     Bypasses Pyrogram's high-level send_document/send_video file path validation checks,
     natively attaching thumbnails, attributes, and parsed HTML captions.
     """
-    # 1. Resolve Target Chat Peer
-    peer = await uploader_client.resolve_peer(target_chat_id)
+    # 1. Resolve Target Chat Peer (with get_chat cache warming if resolve_peer fails)
+    try:
+        peer = await uploader_client.resolve_peer(target_chat_id)
+    except Exception as pe:
+        try:
+            await uploader_client.get_chat(target_chat_id)
+            peer = await uploader_client.resolve_peer(target_chat_id)
+        except Exception:
+            raise pe
 
     # 2. Upload thumbnail if provided and exists on disk
     thumb_input = None

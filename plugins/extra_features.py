@@ -934,26 +934,27 @@ async def set_view_dump_cb(client, query: CallbackQuery):
 
 # ==================== CANCEL TASK CALLBACK ====================
 
-@Client.on_callback_query(filters.regex(r"^cancel_(\d+)$"))
+@Client.on_callback_query(filters.regex(r"^cancel_.*$"))
 async def cancel_task_cb(client, query: CallbackQuery):
-    task_id = int(query.matches[0].group(1))
-    CANCEL_REQUESTS.add(task_id)
-    if query.message and query.message.chat:
-        CANCEL_REQUESTS.add(f"{query.message.chat.id}_{task_id}")
-    await query.answer("Cancelling active task... ✖️", show_alert=True)
-    try:
-        await query.message.edit_text("❌ <b>Operation Aborted by User!</b>\n\n⚡ @Nex_bots")
-    except Exception:
-        pass
-
-
-@Client.on_callback_query(filters.regex(r"^cancel_action$"))
-async def cancel_action_cb(client, query: CallbackQuery):
+    raw_data = query.data or ""
+    task_str = raw_data.replace("cancel_process_", "").replace("cancel_", "")
+    if task_str:
+        CANCEL_REQUESTS.add(task_str)
+        try:
+            if task_str.isdigit():
+                CANCEL_REQUESTS.add(int(task_str))
+        except Exception:
+            pass
+    if query.from_user:
+        CANCEL_REQUESTS.add(query.from_user.id)
     if query.message:
         CANCEL_REQUESTS.add(query.message.id)
         if query.message.chat:
+            CANCEL_REQUESTS.add(query.message.chat.id)
             CANCEL_REQUESTS.add(f"{query.message.chat.id}_{query.message.id}")
-    await query.answer("Cancelling operation... ✖️", show_alert=True)
+            if task_str:
+                CANCEL_REQUESTS.add(f"{query.message.chat.id}_{task_str}")
+    await query.answer("Cancelling active task... ✖️", show_alert=True)
     try:
         await query.message.edit_text("❌ <b>Operation Aborted by User!</b>\n\n⚡ @Nex_bots")
     except Exception:

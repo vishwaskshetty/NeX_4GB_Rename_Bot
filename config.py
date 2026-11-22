@@ -24,8 +24,9 @@ id_pattern = re.compile(r'^.\d+$')
 
 def parse_channel_id(val):
     """
-    Cleanly converts numeric channel IDs (like "-1001234567890" or -1001234567890)
+    Cleanly converts numeric channel IDs (like "-1001234567890", "--1001234567890", or -1001234567890)
     to int(-1001234567890) while preserving "@ChannelUsername" as a str.
+    Safely strips accidental double minus signs (--100... -> -100...).
     Returns 0 if val is empty, 0, None, "none", "off", or "disable".
     """
     if val is None:
@@ -35,6 +36,9 @@ def parse_channel_id(val):
     s = str(val).strip()
     if not s or s.lower() in ("0", "none", "off", "disable", "null", "false"):
         return 0
+    # Sanitize accidental double or multiple minus signs (--100... -> -100...)
+    while s.startswith("--"):
+        s = s[1:]
     if s.startswith("-100") and s[4:].isdigit():
         return int(s)
     if s.lstrip("-").isdigit():

@@ -1055,6 +1055,7 @@ async def execute_rename_pipeline(
 ):
     status_target = status_msg or sts_msg or ms or update or kwargs.get("status")
     ms = getattr(status_target, "message", status_target)
+    is_pipeline_success = False
 
     # Resolve user_id cleanly
     if not user_id:
@@ -1217,6 +1218,30 @@ async def execute_rename_pipeline(
             uploader = client_4gb if is_prem_active else client
             upload_mode_tag = "<b>◈ 4ɢʙ ᴘʀᴇᴍɪᴜᴍ ᴜᴘʟᴏᴀᴅɪɴɢ... 🚀</b>" if is_prem_active else "<b>◈ ᴜᴘʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 🚀</b>"
 
+            # Ensure critical peers are resolved and cached in Pyrogram to avoid PeerIdInvalid
+            if is_prem_active and client_4gb:
+                if bridge_channel and bridge_channel != 0:
+                    try:
+                        await client_4gb.get_chat(bridge_channel)
+                    except Exception as pe_err:
+                        log.warning(f"app_4gb get_chat bridge_channel note: {pe_err}")
+                if user_id:
+                    try:
+                        await client_4gb.get_chat(user_id)
+                    except Exception:
+                        pass
+
+            if bridge_channel and bridge_channel != 0:
+                try:
+                    await client.get_chat(bridge_channel)
+                except Exception:
+                    pass
+            if user_id:
+                try:
+                    await client.get_chat(user_id)
+                except Exception:
+                    pass
+
             async def _prepare_thumb():
                 c_thumb = await db.get_thumbnail(user_id)
                 media = file_msg.document or file_msg.video or file_msg.audio
@@ -1325,6 +1350,13 @@ async def execute_rename_pipeline(
                     log.error(f"zero_disk_turbo_pipe failed ({type(pipe_err).__name__}: {pipe_err}): {err_trace}")
                     use_zero_disk = False
                     uploaded_file = None
+                    try:
+                        await ms.edit(
+                            "<b>◈ Zero-disk skipped. Switching to high-speed disk pipeline... 📥</b>",
+                            reply_markup=cancel_btn
+                        )
+                    except Exception:
+                        pass
 
             # Fallback to high-speed disk pipeline if remuxing needed or zero-disk pipe skipped/failed
             if not use_zero_disk:
@@ -1679,9 +1711,9 @@ async def execute_rename_pipeline(
 
                 # Automatic Zero-Crash Fallback: if zero-disk delivery didn't deliver a message, fallback to disk pipeline
                 if (not sent_msg or not hasattr(sent_msg, "id")) and uploaded_file and not os.path.exists(file_path):
-                    print("⚠️ Zero-disk delivery produced no message. Initiating automatic zero-crash fallback to multi-session disk transfer...")
+                    print("⚠️ Zero-disk delivery produced no message. Initiating automatic zero-crash fallback to multi-session disk transfer...", flush=True)
                     try:
-                        await ms.edit("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ (ᴀᴜᴛᴏ-ʀᴇᴛʀʏ)... 📥</b>")
+                        await ms.edit("<b>◈ Zero-disk skipped. Switching to high-speed disk pipeline... 📥</b>", reply_markup=cancel_btn)
                     except Exception:
                         pass
                     file_path = await fast_download(
@@ -1691,25 +1723,55 @@ async def execute_rename_pipeline(
                         progress=progress_for_pyrogram,
                         progress_args=("<b>◈ ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ ꜰɪʟᴇ... 📥</b>", ms, time.time(), client, effective_tier)
                     )
+                    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                        return await ms.edit("❌ <b>Download Failed: Empty or missing file received.</b>\n\n⚡ @Nex_bots")
+
+                    actual_file_size = os.path.getsize(file_path)
                     upload_start = time.time()
-                    if (is_prem_active or (is_4gb and client_4gb)):
+                    try:
+                        await ms.edit(f"{upload_mode_tag}\n\n<i>Uploading file to Telegram servers...</i>", reply_markup=cancel_btn)
+                    except Exception:
+                        pass
+
+                    if actual_file_size > (1.95 * 1024 * 1024 * 1024):
+                        bridge_target = bridge_channel if (bridge_channel and bridge_channel != 0) else parse_channel_id(Config.FILES_CHANNEL or -1003792044224)
+                        b_msg = None
                         if upload_type == "video":
-                            sent_msg = await uploader.send_video(chat_id=user_id, video=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, width=width, height=height, supports_streaming=True, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            b_msg = await uploader.send_video(chat_id=bridge_target, video=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, width=width, height=height, supports_streaming=True, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
                         elif upload_type == "audio":
-                            sent_msg = await uploader.send_audio(chat_id=user_id, audio=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            b_msg = await uploader.send_audio(chat_id=bridge_target, audio=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
                         else:
-                            sent_msg = await uploader.send_document(chat_id=user_id, document=file_path, file_name=new_filename, thumb=ph_path, caption=caption, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            b_msg = await uploader.send_document(chat_id=bridge_target, document=file_path, file_name=new_filename, thumb=ph_path, caption=caption, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                        if b_msg and hasattr(b_msg, "id"):
+                            sent_msg = await client.copy_message(chat_id=user_id, from_chat_id=bridge_target, message_id=b_msg.id, caption=caption, protect_content=protect_content)
                     else:
-                        if upload_type == "video":
-                            sent_msg = await client.send_video(chat_id=user_id, video=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, width=width, height=height, supports_streaming=True, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
-                        elif upload_type == "audio":
-                            sent_msg = await client.send_audio(chat_id=user_id, audio=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
-                        else:
-                            sent_msg = await client.send_document(chat_id=user_id, document=file_path, file_name=new_filename, thumb=ph_path, caption=caption, protect_content=protect_content, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                        target_uploader = uploader if (is_prem_active and bridge_channel) else client
+                        target_chat = bridge_channel if (is_prem_active and bridge_channel) else user_id
+                        try:
+                            if upload_type == "video":
+                                d_msg = await target_uploader.send_video(chat_id=target_chat, video=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, width=width, height=height, supports_streaming=True, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            elif upload_type == "audio":
+                                d_msg = await target_uploader.send_audio(chat_id=target_chat, audio=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            else:
+                                d_msg = await target_uploader.send_document(chat_id=target_chat, document=file_path, file_name=new_filename, thumb=ph_path, caption=caption, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            if target_chat == user_id:
+                                sent_msg = d_msg
+                            elif d_msg and hasattr(d_msg, "id"):
+                                sent_msg = await client.copy_message(chat_id=user_id, from_chat_id=target_chat, message_id=d_msg.id, caption=caption, protect_content=protect_content)
+                        except Exception as fallback_err:
+                            print(f"Fallback uploader send failed ({fallback_err}). Retrying with main bot client...", flush=True)
+                            if upload_type == "video":
+                                sent_msg = await client.send_video(chat_id=user_id, video=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, width=width, height=height, supports_streaming=True, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            elif upload_type == "audio":
+                                sent_msg = await client.send_audio(chat_id=user_id, audio=file_path, file_name=new_filename, caption=caption, thumb=ph_path, duration=duration, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
+                            else:
+                                sent_msg = await client.send_document(chat_id=user_id, document=file_path, file_name=new_filename, thumb=ph_path, caption=caption, progress=progress_for_pyrogram, progress_args=(upload_mode_tag, ms, upload_start, client, effective_tier))
 
                 # Strict Verification: sent_msg MUST be a valid message delivered to the user
                 if not sent_msg or not hasattr(sent_msg, "id"):
-                    return await ms.edit("❌ <b>Delivery Failed: Renamed file could not be delivered to your chat. Please contact support.</b>")
+                    return await ms.edit("❌ <b>Delivery Failed: Renamed file could not be delivered to your chat. Please contact support.</b>\n\n⚡ @Nex_bots")
+
+                is_pipeline_success = True
 
                 # Release the turbo transfer semaphore as early as possible so queued tasks can start!
                 if transfer_sem_held:
@@ -1759,7 +1821,9 @@ async def execute_rename_pipeline(
             except StopTransmission:
                 return await ms.edit("❌ <b>Upload Cancelled by User!</b>\n\n⚡ @Nex_bots")
             except Exception as e:
-                return await ms.edit(f"❌ <b>Upload Failed:</b> <code>{e}</code>")
+                err_trace = traceback.format_exc()
+                print(f"❌ [UPLOAD ERROR] {type(e).__name__}: {e}\n{err_trace}", flush=True)
+                return await ms.edit(f"❌ <b>Upload Failed:</b> <code>{type(e).__name__}: {str(e)[:250]}</code>\n\n⚡ @Nex_bots")
 
             # Record usage for 4GB uploads if not tracked inside standard block
             if is_4gb:
@@ -1897,7 +1961,7 @@ async def execute_rename_pipeline(
 
     except Exception as e:
         err_trace = traceback.format_exc()
-        print(f"❌ [PIPELINE ERROR] {type(e).__name__}: {e}\n{err_trace}")
+        print(f"❌ [PIPELINE ERROR] {type(e).__name__}: {e}\n{err_trace}", flush=True)
         log_ch = parse_channel_id(Config.LOG_CHANNEL or -1003792044224)
         if log_ch and log_ch != 0:
             try:
@@ -1905,13 +1969,13 @@ async def execute_rename_pipeline(
                     f"⚠️ <b>Pipeline Error Alert</b>\n\n"
                     f"👤 <b>User:</b> <code>{user_id}</code>\n"
                     f"📁 <b>File:</b> <code>{new_filename}</code>\n"
-                    f"❌ <b>Error:</b> <code>{type(e).__name__}: {str(e)[:200]}</code>\n\n"
+                    f"❌ <b>Error:</b> <code>{type(e).__name__}: {str(e)[:250]}</code>\n\n"
                     f"⚡ @Nex_bots"
                 )
                 await client.send_message(log_ch, alert_text)
             except Exception:
                 pass
-        return await ms.edit(f"❌ <b>Error occurred:</b> <code>{type(e).__name__}: {str(e)[:200]}</code>")
+        return await ms.edit(f"❌ <b>Rename Failed:</b> <code>{type(e).__name__}: {str(e)[:250]}</code>\n\n⚡ @Nex_bots")
 
     finally:
         ACTIVE_USER_TASKS[user_id] = max(0, ACTIVE_USER_TASKS.get(user_id, 1) - 1)
@@ -1947,16 +2011,19 @@ async def execute_rename_pipeline(
         if ms.chat:
             CANCEL_REQUESTS.discard(ms.chat.id)
             CANCEL_REQUESTS.discard(f"{ms.chat.id}_{ms.id}")
-        try:
-            await ms.delete()
-        except Exception:
-            pass
-        # Auto-delete original incoming/forwarded file message to prevent chat clutter
-        try:
-            if 'file_msg' in locals() and file_msg:
-                await file_msg.delete()
-        except Exception:
-            pass
+        if is_pipeline_success:
+            try:
+                await ms.delete()
+            except Exception:
+                pass
+            # Auto-delete original incoming/forwarded file message to prevent chat clutter ONLY on success
+            try:
+                if 'file_msg' in locals() and file_msg and getattr(file_msg, "id", None) not in user_sent_msgs:
+                    await file_msg.delete()
+            except Exception:
+                pass
+        else:
+            print(f"⚠️ [TASK FAILED/INCOMPLETE] Preserved status message {ms.id} and media for user {user_id}", flush=True)
         if 'work_dir' in locals() and os.path.exists(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
         _cleanup_memory(client, getattr(client, "app_4gb", None) or app_4gb)
