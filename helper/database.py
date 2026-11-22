@@ -946,7 +946,7 @@ class Database:
             return {
                 "enabled": False,
                 "type": "image",
-                "text": "",
+                "text": "KNR MOVIEES",
                 "image_id": None,
                 "position": "top_left",
                 "size": 28,
@@ -956,7 +956,7 @@ class Database:
         return {
             "enabled": bool(user.get("wm_enabled", False)),
             "type": str(user.get("wm_type", "image")),
-            "text": str(user.get("wm_text", "")),
+            "text": str(user.get("wm_text", "") or "KNR MOVIEES"),
             "image_id": user.get("wm_image_id", None),
             "position": str(user.get("wm_position", "top_left")),
             "size": int(user.get("wm_size", 28)),
@@ -993,7 +993,7 @@ class Database:
             {'$set': {
                 "wm_enabled": False,
                 "wm_type": "image",
-                "wm_text": "",
+                "wm_text": "KNR MOVIEES",
                 "wm_image_id": None,
                 "wm_position": "top_left",
                 "wm_size": 28,

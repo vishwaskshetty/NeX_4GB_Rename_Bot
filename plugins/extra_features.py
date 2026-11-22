@@ -264,88 +264,85 @@ async def build_watermark_view(user_id: int):
     wm = await db.get_watermark(user_id)
     status_str = "ENABLED 🟢" if wm["enabled"] else "DISABLED 🔴"
     wm_type = wm.get("type", "image")
-    type_display = "Image Logo 🖼️" if wm_type == "image" else "Text 🔤"
+    type_display = "🖼️ PNG Logo" if wm_type == "image" else "🔤 Burned-in Text"
     
     if wm_type == "text":
-        content_str = wm.get("text") or "Not Set (tap Set Text)"
-        size_display = f"{wm.get('size', 28)}px"
+        content_str = wm.get("text") or "KNR MOVIEES"
+        size_display = "Auto-Scaled (4% video height)"
     else:
         content_str = "Logo Configured ✅" if wm.get("image_id") else "No Logo (tap Set Logo)"
-        size_display = "Auto-Scaled (11% OTT bug)"
+        size_display = "Auto-Scaled (11% video width)"
 
     opacity_pct = int(float(wm.get("opacity", 0.78)) * 100)
     pos = wm.get("position", "top_left")
     op = float(wm.get("opacity", 0.78))
 
+    pos_display_map = {
+        "top_left": "Top-Left (Default)",
+        "top_right": "Top-Right",
+        "bottom_left": "Bottom-Left",
+        "bottom_right": "Bottom-Right",
+        "center": "Center"
+    }
+    pos_display = pos_display_map.get(pos, pos)
+
     text = (
         "<b>◈ Vɪᴅᴇᴏ Wᴀᴛᴇʀᴍᴀʀᴋ Sᴇᴛᴛɪɴɢꜱ 💧</b>\n"
         "\n"
         f"▸ <b>Sᴛᴀᴛᴜꜱ :</b> <b>{status_str}</b>\n"
-        f"▸ <b>Tʏᴘᴇ :</b> <b>{type_display}</b>\n"
+        f"▸ <b>Mᴏᴅᴇ :</b> <b>{type_display}</b>\n"
         f"▸ <b>Cᴏɴᴛᴇɴᴛ :</b> <code>{content_str}</code>\n"
-        f"▸ <b>Pᴏꜱɪᴛɪᴏɴ :</b> <code>{pos}</code>\n"
-        f"▸ <b>Sɪᴢᴇ :</b> <code>{size_display}</code> | <b>Oᴘᴀᴄɪᴛʏ :</b> <code>{opacity_pct}%</code>\n"
-    )
-    if wm_type == "text":
-        text += f"▸ <b>Cᴏʟᴏʀ :</b> <code>{wm['color']}</code>\n\n"
-    else:
-        text += "\n"
-    text += (
+        f"▸ <b>Pᴏꜱɪᴛɪᴏɴ :</b> <code>{pos_display}</code>\n"
+        f"▸ <b>Sɪᴢᴇ :</b> <code>{size_display}</code> | <b>Oᴘᴀᴄɪᴛʏ :</b> <code>{opacity_pct}%</code>\n\n"
         "<b>Iɴꜱᴛʀᴜᴄᴛɪᴏɴꜱ :</b>\n"
-        "• <b>Lᴏɢᴏ :</b> Tap <b>Set Logo</b> or reply to photo with <code>/set_wm_logo</code>\n"
-        "• <b>Tᴇxᴛ :</b> Tap <b>Set Text</b> or <code>/set_watermark @YourChannel</code>\n"
-        "• <b>Rᴇꜱᴇᴛ :</b> Tap <b>Reset</b> or <code>/del_watermark</code>\n\n"
-        "<i>💡 Logos are auto-scaled to 11% video width with OTT TV bug transparency.</i>\n\n"
+        "• <b>🖼️ PNG Lᴏɢᴏ :</b> Tap <b>Set Logo</b> or reply to PNG/Photo with <code>/set_wm_logo</code>\n"
+        "• <b>🔤 Tᴇxᴛ :</b> Tap <b>Edit Text</b> (Default: <code>KNR MOVIEES</code>) or <code>/set_watermark Text</code>\n"
+        "• <b>🔄 Rᴇꜱᴇᴛ :</b> Tap <b>Reset</b> or <code>/del_watermark</code>\n\n"
+        "<i>💡 NVIDIA NVENC GPU hardware acceleration is auto-detected with fast CPU fallback!</i>\n\n"
         "⚡ @Nex_bots | 💬 Sᴜᴘᴘᴏʀᴛ: @NexCRSupportbot"
     )
 
     markup_buttons = [
         [
-            InlineKeyboardButton(f"Sᴛᴀᴛᴜꜱ: {'Dɪꜱᴀʙʟᴇ ❌' if wm['enabled'] else 'Eɴᴀʙʟᴇ ✅'}", callback_data="cb_wm_toggle"),
-            InlineKeyboardButton(f"Tʏᴘᴇ: {type_display}", callback_data="cb_wm_type_toggle")
+            InlineKeyboardButton(f"Sᴛᴀᴛᴜꜱ: {'Dɪꜱᴀʙʟᴇ ❌' if wm['enabled'] else 'Eɴᴀʙʟᴇ ✅'}", callback_data="cb_wm_toggle")
         ],
         [
-            InlineKeyboardButton("🖼️ Sᴇᴛ Lᴏɢᴏ", callback_data="cb_wm_set_logo"),
-            InlineKeyboardButton("🔤 Sᴇᴛ Tᴇxᴛ", callback_data="cb_wm_set_text")
-        ],
+            InlineKeyboardButton(f"{'🔘 ' if wm_type == 'image' else ''}🖼️ PNG Logo", callback_data="cb_wm_mode_image"),
+            InlineKeyboardButton(f"{'🔘 ' if wm_type == 'text' else ''}🔤 Burned-in Text", callback_data="cb_wm_mode_text")
+        ]
+    ]
+
+    if wm_type == "image":
+        markup_buttons.append([
+            InlineKeyboardButton("🖼️ Sᴇᴛ / Cʜᴀɴɢᴇ PNG Lᴏɢᴏ", callback_data="cb_wm_set_logo")
+        ])
+    else:
+        markup_buttons.append([
+            InlineKeyboardButton("🔤 Eᴅɪᴛ Wᴀᴛᴇʀᴍᴀʀᴋ Tᴇxᴛ", callback_data="cb_wm_set_text")
+        ])
+
+    markup_buttons.extend([
         [
             InlineKeyboardButton(f"{'🔘 ' if pos == 'top_left' else ''}↖️ Tᴏᴘ-Lᴇꜰᴛ", callback_data="cb_wm_pos_top_left"),
-            InlineKeyboardButton(f"{'🔘 ' if pos == 'center' else ''}🎯 Cᴇɴᴛᴇʀ", callback_data="cb_wm_pos_center"),
             InlineKeyboardButton(f"{'🔘 ' if pos == 'top_right' else ''}↗️ Tᴏᴘ-Rɪɢʜᴛ", callback_data="cb_wm_pos_top_right")
         ],
         [
             InlineKeyboardButton(f"{'🔘 ' if pos == 'bottom_left' else ''}↙️ Bᴏᴛ-Lᴇꜰᴛ", callback_data="cb_wm_pos_bottom_left"),
             InlineKeyboardButton(f"{'🔘 ' if pos == 'bottom_right' else ''}↘️ Bᴏᴛ-Rɪɢʜᴛ", callback_data="cb_wm_pos_bottom_right")
+        ],
+        [
+            InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.50) < 0.03 else ''}💧 50%", callback_data="cb_wm_op_50"),
+            InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.78) < 0.03 else ''}💧 78% (OTT)", callback_data="cb_wm_op_78"),
+            InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.85) < 0.03 else ''}💧 85%", callback_data="cb_wm_op_85"),
+            InlineKeyboardButton(f"{'🔘 ' if abs(op - 1.00) < 0.03 else ''}💧 100%", callback_data="cb_wm_op_100")
+        ],
+        [
+            InlineKeyboardButton("🔄 Rᴇꜱᴇᴛ ᴛᴏ Dᴇꜰᴀᴜʟᴛ", callback_data="cb_wm_reset"),
+            InlineKeyboardButton("⬅️ Bᴀᴄᴋ ᴛᴏ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings")
+        ],
+        [
+            InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
         ]
-    ]
-
-    if wm_type == "text":
-        markup_buttons.append([
-            InlineKeyboardButton("🔉 Sᴍᴀʟʟ", callback_data="cb_wm_size_small"),
-            InlineKeyboardButton("🔊 Mᴇᴅɪᴜᴍ", callback_data="cb_wm_size_med"),
-            InlineKeyboardButton("📢 Lᴀʀɢᴇ", callback_data="cb_wm_size_large")
-        ])
-
-    markup_buttons.append([
-        InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.50) < 0.03 else ''}💧 50%", callback_data="cb_wm_op_50"),
-        InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.78) < 0.03 else ''}💧 78% (OTT)", callback_data="cb_wm_op_78"),
-        InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.85) < 0.03 else ''}💧 85%", callback_data="cb_wm_op_85"),
-        InlineKeyboardButton(f"{'🔘 ' if abs(op - 1.00) < 0.03 else ''}💧 100%", callback_data="cb_wm_op_100")
-    ])
-
-    if wm_type == "text":
-        markup_buttons.append([
-            InlineKeyboardButton("⚪ Wʜɪᴛᴇ", callback_data="cb_wm_col_white"),
-            InlineKeyboardButton("🟡 Yᴇʟʟᴏᴡ", callback_data="cb_wm_col_yellow"),
-            InlineKeyboardButton("🔵 Cʏᴀɴ", callback_data="cb_wm_col_cyan")
-        ])
-
-    markup_buttons.append([
-        InlineKeyboardButton("🔄 Rᴇꜱᴇᴛ", callback_data="cb_wm_reset"),
-        InlineKeyboardButton("⬅️ Bᴀᴄᴋ", callback_data="open_settings")
-    ])
-    markup_buttons.append([
-        InlineKeyboardButton("❌ Cʟᴏꜱᴇ", callback_data="close")
     ])
 
     return text, InlineKeyboardMarkup(markup_buttons)
@@ -434,15 +431,21 @@ async def cb_wm_toggle(client, query: CallbackQuery):
     await query.answer(f"Watermark {'Enabled ✅' if new_state else 'Disabled ❌'}")
 
 
-@Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_type_toggle$"))
+@Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_(?:type_toggle|mode_image|mode_text)$"))
 async def cb_wm_type_toggle(client, query: CallbackQuery):
     user_id = query.from_user.id
-    wm = await db.get_watermark(user_id)
-    new_type = "image" if wm.get("type", "text") == "text" else "text"
+    data = query.data
+    if "mode_image" in data:
+        new_type = "image"
+    elif "mode_text" in data:
+        new_type = "text"
+    else:
+        wm = await db.get_watermark(user_id)
+        new_type = "image" if wm.get("type", "text") == "text" else "text"
     await db.set_watermark(user_id, type=new_type)
     text, markup = await build_watermark_view(user_id)
     await edit_message_content(query.message, text, reply_markup=markup)
-    await query.answer(f"Mode switched to {'Image Logo 🖼️' if new_type == 'image' else 'Text 🔤'}!")
+    await query.answer(f"Mode switched to {'🖼️ PNG Logo' if new_type == 'image' else '🔤 Burned-in Text'}!")
 
 
 @Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_set_text$"))

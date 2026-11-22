@@ -12,6 +12,7 @@ RUN apt-get update && \
         g++ \
         build-essential \
         python3-dev \
+        fonts-dejavu-core \
         procps && \
     rm -rf /var/lib/apt/lists/*
 

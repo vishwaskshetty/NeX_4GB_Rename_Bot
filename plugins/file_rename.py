@@ -340,37 +340,37 @@ async def rename_start(client, message):
     if is_video:
         buttons = [
             [
-                InlineKeyboardButton("✏️ Rᴇɴᴀᴍᴇ Fɪʟᴇ", callback_data=f"rename_{message.id}"),
-                InlineKeyboardButton("⚡ Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ", callback_data=f"auto_rename_{message.id}")
+                InlineKeyboardButton("💧 Watermark Only", callback_data=f"media_wm_only_{message.id}")
             ],
             [
-                InlineKeyboardButton("🎧 Eᴅɪᴛ Tʀᴀᴄᴋꜱ (Aᴜᴅɪᴏ / Sᴜʙ)", callback_data=f"inspect_tracks_{message.id}")
+                InlineKeyboardButton("✏️ Rename Only (Fast)", callback_data=f"media_rename_fast_{message.id}"),
+                InlineKeyboardButton("✏️ Rename + 💧 Watermark", callback_data=f"media_rename_wm_{message.id}")
             ],
             [
-                InlineKeyboardButton("🎬 Sᴀᴍᴘʟᴇ Vɪᴅᴇᴏ", callback_data=f"extract_sample_only_{message.id}"),
-                InlineKeyboardButton("📸 Sᴄʀᴇᴇɴꜱʜᴏᴛꜱ", callback_data=f"extract_ss_only_{message.id}")
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}"),
+                InlineKeyboardButton("🎧 Edit Tracks", callback_data=f"inspect_tracks_{message.id}")
             ],
             [
-                InlineKeyboardButton("🎵 Aᴜᴅɪᴏ / Sᴜʙꜱ", callback_data=f"extract_streams_{message.id}"),
-                InlineKeyboardButton("🔄 MKV ⇄ MP4", callback_data=f"remux_action_{message.id}")
+                InlineKeyboardButton("🎬 Sample Video", callback_data=f"extract_sample_only_{message.id}"),
+                InlineKeyboardButton("📸 Screenshots", callback_data=f"extract_ss_only_{message.id}")
             ],
             [
-                InlineKeyboardButton("💧 Wᴀᴛᴇʀᴍᴀʀᴋ", callback_data=f"watermark_action_{message.id}"),
-                InlineKeyboardButton("⚙️ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings")
+                InlineKeyboardButton("💧 Watermark Settings", callback_data=f"watermark_action_{message.id}"),
+                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")
             ],
             [
-                InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data="close")
+                InlineKeyboardButton("❌ Cancel", callback_data="close")
             ]
         ]
     else:
         buttons = [
             [
-                InlineKeyboardButton("✏️ Rᴇɴᴀᴍᴇ Fɪʟᴇ", callback_data=f"rename_{message.id}"),
-                InlineKeyboardButton("⚡ Aᴜᴛᴏ-Rᴇɴᴀᴍᴇ", callback_data=f"auto_rename_{message.id}")
+                InlineKeyboardButton("✏️ Rename File", callback_data=f"rename_{message.id}"),
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
             ],
             [
-                InlineKeyboardButton("⚙️ Sᴇᴛᴛɪɴɢꜱ", callback_data="open_settings"),
-                InlineKeyboardButton("✖️ Cᴀɴᴄᴇʟ", callback_data="close")
+                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
+                InlineKeyboardButton("❌ Cancel", callback_data="close")
             ]
         ]
 
@@ -478,7 +478,7 @@ async def auto_rename_handler(client, update: CallbackQuery):
 
 
 @Client.on_callback_query(filters.regex(r'^rename(?:_(\d+))?$'))
-async def rename_handler(client, update: CallbackQuery):
+async def rename_handler(client, update: CallbackQuery, force_wm: bool = None):
     user_id = update.from_user.id
     file_msg_id = (
         (update.matches[0].group(1) if update.matches and update.matches[0].groups() and update.matches[0].group(1) else None)
@@ -486,10 +486,6 @@ async def rename_handler(client, update: CallbackQuery):
         or getattr(update.message.reply_to_message, "id", None)
         or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
     )
-    USER_RENAME_CACHE[user_id] = {
-        "file_msg_id": file_msg_id,
-        "chat_id": update.message.chat.id
-    }
     chat_id = update.message.chat.id
     try:
         await update.message.delete()
@@ -511,8 +507,68 @@ async def rename_handler(client, update: CallbackQuery):
     USER_RENAME_CACHE[user_id] = {
         "file_msg_id": file_msg_id,
         "chat_id": chat_id,
-        "prompt_msg_id": prompt_msg.id
+        "prompt_msg_id": prompt_msg.id,
+        "force_watermark": force_wm
     }
+
+
+@Client.on_callback_query(filters.regex(r'^media_rename_fast(?:_(\d+))?$'))
+async def media_rename_fast_cb(client, update: CallbackQuery):
+    await rename_handler(client, update, force_wm=False)
+
+
+@Client.on_callback_query(filters.regex(r'^media_rename_wm(?:_(\d+))?$'))
+async def media_rename_wm_cb(client, update: CallbackQuery):
+    user_id = update.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await update.answer("💎 Video Watermark is a Premium Feature!\n\nUpgrade via /plan to unlock.", show_alert=True)
+    await rename_handler(client, update, force_wm=True)
+
+
+@Client.on_callback_query(filters.regex(r'^media_wm_only(?:_(\d+))?$'))
+async def media_wm_only_cb(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await query.answer("💎 Video Watermark is a Premium Feature!\n\nUpgrade via /plan to unlock.", show_alert=True)
+
+    wm_info = await db.get_watermark(user_id)
+    if wm_info.get("type", "image") == "image" and not wm_info.get("image_id"):
+        return await query.answer("⚠️ No PNG watermark logo configured! Please tap 'Watermark Settings' to set your logo.", show_alert=True)
+
+    target_id = (
+        (query.matches[0].group(1) if query.matches and query.matches[0].groups() and query.matches[0].group(1) else None)
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+    file_msg = None
+    if target_id:
+        try:
+            file_msg = await client.get_messages(query.message.chat.id, int(target_id))
+        except Exception:
+            pass
+    if not file_msg:
+        file_msg = query.message.reply_to_message
+
+    if not file_msg or not (file_msg.video or file_msg.document):
+        return await query.answer("❌ Media message could not be retrieved! Please resend your file.", show_alert=True)
+
+    file = file_msg.video or file_msg.document
+    filename = file.file_name or "video.mp4"
+    upload_mode = await db.get_upload_mode(user_id)
+    current_upload_type = "document" if upload_mode == "Document" else "video"
+
+    await query.answer("💧 Starting Watermark Only...")
+    return await route_to_extras_or_execute(
+        client=client,
+        update=query,
+        new_filename=filename,
+        upload_type=current_upload_type,
+        file_msg=file_msg,
+        extras={"watermark": True, "keep_caption": True}
+    )
 
 
 # ==================== STANDALONE SAMPLE & SCREENSHOTS ONLY ====================
@@ -1072,11 +1128,13 @@ async def refunc(client, message):
         final_name = apply_prefix_suffix(new_name, prefix, suffix)
 
         # Cache in USER_RENAME_CACHE for upload_callback_router
+        cached_force_wm = USER_RENAME_CACHE.get(user_id, {}).get("force_watermark")
         if user_id not in USER_RENAME_CACHE:
             USER_RENAME_CACHE[user_id] = {}
         USER_RENAME_CACHE[user_id]["final_name"] = final_name
         USER_RENAME_CACHE[user_id]["file_msg_id"] = file_msg.id
         USER_RENAME_CACHE[user_id]["chat_id"] = message.chat.id
+        USER_RENAME_CACHE[user_id]["force_watermark"] = cached_force_wm
 
         # Delete prompt message cleanly
         if reply_message:
@@ -1104,6 +1162,16 @@ async def refunc(client, message):
         )
 
         if is_video:
+            if cached_force_wm is not None:
+                return await route_to_extras_or_execute(
+                    client=client,
+                    update=message,
+                    new_filename=final_name,
+                    upload_type=current_upload_type,
+                    file_msg=file_msg,
+                    extras={"watermark": cached_force_wm}
+                )
+
             wm_info = await db.get_watermark(user_id)
             wm_is_enabled = wm_info.get("enabled", False)
             wm_status = "ON 🟢" if wm_is_enabled else "OFF 🔴"
@@ -1238,8 +1306,8 @@ async def rename_choice_callback(client, query: CallbackQuery):
             return await query.answer("❌ Original media not found! Please resend your file.", show_alert=True)
         wm_info = await db.get_watermark(user_id)
         has_logo = bool(wm_info.get("image_id"))
-        has_text = bool(wm_info.get("text"))
-        has_configured = (has_logo if wm_info.get("type") == "image" else has_text) or has_logo or has_text
+        has_text = bool(wm_info.get("text")) or (wm_info.get("type") == "text")
+        has_configured = has_logo if wm_info.get("type") == "image" else True
         if not has_configured:
             await query.answer("⚠️ No watermark logo or text configured!", show_alert=True)
             no_wm_buttons = [
@@ -1551,7 +1619,8 @@ async def execute_rename_pipeline(
             wm_info = await db.get_watermark(user_id)
             if isinstance(extras, dict) and "watermark" in extras:
                 wm_choice = extras["watermark"]
-                wm_enabled = bool(is_video and is_prem and wm_choice and (wm_info.get("image_id") or wm_info.get("text")))
+                has_target = bool(wm_info.get("image_id") or wm_info.get("text") or wm_info.get("type") == "text")
+                wm_enabled = bool(is_video and is_prem and wm_choice and has_target)
             else:
                 wm_enabled = bool(is_video and is_prem and wm_info.get("enabled"))
 
@@ -1879,7 +1948,7 @@ async def execute_rename_pipeline(
                                     can_apply = True
                             except Exception as err:
                                 print(f"Failed to download watermark logo: {err}", flush=True)
-                        elif wm_info.get("text"):
+                        elif wm_type == "text" or wm_info.get("text"):
                             can_apply = True
 
                         if not can_apply:
@@ -1894,7 +1963,7 @@ async def execute_rename_pipeline(
                                 wm_ok = await apply_video_watermark(
                                     input_path=file_path,
                                     output_path=wm_file,
-                                    text=wm_info.get("text", ""),
+                                    text=wm_info.get("text") or "KNR MOVIEES",
                                     wm_type=wm_type,
                                     image_path=wm_img_path,
                                     position=wm_info.get("position", "top_left"),
@@ -1954,7 +2023,14 @@ async def execute_rename_pipeline(
             # 5. Format Clean Caption (Clean filename on top, custom caption, and bottom caption / footer)
             c_caption = await db.get_caption(user_id)
             b_caption = await db.get_bottom_caption(user_id)
-            if c_caption:
+            keep_caption = bool(extras.get("keep_caption")) if isinstance(extras, dict) else False
+            orig_caption = getattr(file_msg, "caption", None) or ""
+
+            if keep_caption and orig_caption and not c_caption:
+                caption = orig_caption
+                if b_caption and b_caption.strip() not in caption:
+                    caption = f"{caption}\n\n{b_caption.strip()}"
+            elif c_caption:
                 try:
                     if "{filename}" in c_caption:
                         caption = c_caption.format(

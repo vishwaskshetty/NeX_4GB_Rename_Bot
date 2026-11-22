@@ -11,7 +11,9 @@ import gc
 import random
 import logging
 import json
+import subprocess
 from typing import Tuple, List, Dict
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 log = logger
@@ -135,6 +137,29 @@ async def generate_sample_video(input_path: str, output_path: str, total_duratio
         return False
 
 
+_NVENC_AVAILABLE = None
+
+def check_nvenc_support() -> bool:
+    """
+    Auto-detects host NVIDIA GPU NVENC encoder support (h264_nvenc).
+    Cached in _NVENC_AVAILABLE for zero overhead on subsequent checks.
+    """
+    global _NVENC_AVAILABLE
+    if _NVENC_AVAILABLE is not None:
+        return _NVENC_AVAILABLE
+    try:
+        res = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=s=64x64:d=0.04", "-c:v", "h264_nvenc", "-f", "null", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5
+        )
+        _NVENC_AVAILABLE = (res.returncode == 0)
+    except Exception:
+        _NVENC_AVAILABLE = False
+    return _NVENC_AVAILABLE
+
+
 async def apply_video_watermark(
     input_path: str,
     output_path: str,
@@ -151,183 +176,243 @@ async def apply_video_watermark(
 ) -> bool:
     """
     Applies clean OTT-style corner logo or text watermark over video using FFmpeg.
-    - Uses scale2ref to auto-scale logo to 11% of video width with aspect ratio preservation.
-    - Applies subtle OTT transparency (aa=0.78 by default).
-    - Uses -c:v libx264 -preset ultrafast -crf 23 -c:a copy -c:s copy -threads 2 for fast, lossless audio/subtitle remuxing.
-    - Shows live FFmpeg encoding progress (% + ETA + Speed) in Telegram status message.
+    - PNG mode: Pre-scales logo once with Pillow to 11% of video width preserving aspect ratio,
+      applies opacity (0.78 default), and overlays using [0:v][1:v]overlay=...:shortest=1:format=auto.
+    - Text mode: Uses drawtext with bold system font (DejaVuSans-Bold), auto-scaled to video height
+      (fontsize=h*0.04) with subtle shadow. Default text is 'KNR MOVIEES'.
+    - Hardware Acceleration: Auto-detects NVIDIA GPU NVENC (h264_nvenc) with automatic fast CPU fallback
+      (libx264 ultrafast CRF 26).
+    - Shows live FFmpeg encoding progress (% + ETA + Speed + Encoder badge) in Telegram status message.
     - Always deletes temporary or failed files in a finally: block.
     """
     from helper.utils import CANCEL_REQUESTS, edit_message_content
     from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+    dur, vid_w, vid_h = await get_video_duration_and_dims(input_path)
     if total_duration <= 0:
-        try:
-            dur, _, _ = await get_video_duration_and_dims(input_path)
-            total_duration = int(dur or 0)
-        except Exception:
-            total_duration = 0
+        total_duration = int(dur or 0)
+    if vid_w <= 0:
+        vid_w = 1280
+    if vid_h <= 0:
+        vid_h = 720
 
     norm_pos = str(position).lower().strip() if position else "top_left"
     pos_coords_img = {
-        "top_left": "overlay=W*0.03:H*0.04",
-        "top_right": "overlay=W-w-W*0.03:H*0.04",
-        "center": "overlay=(W-w)/2:(H-h)/2",
-        "bottom_left": "overlay=W*0.03:H-h-H*0.04",
-        "bottom_right": "overlay=W-w-W*0.03:H-h-H*0.04"
+        "top_left": "x=W*0.03:y=H*0.04",
+        "top_right": "x=W-w-W*0.03:y=H*0.04",
+        "center": "x=(W-w)/2:y=(H-h)/2",
+        "bottom_left": "x=W*0.03:y=H-h-H*0.04",
+        "bottom_right": "x=W-w-W*0.03:y=H-h-H*0.04"
     }
-    coords_img = pos_coords_img.get(norm_pos, "overlay=W*0.03:H*0.04")
+    coords_img = pos_coords_img.get(norm_pos, "x=W*0.03:y=H*0.04")
+
+    pos_coords_text = {
+        "top_left": "x=w*0.03:y=h*0.04",
+        "top_right": "x=w-tw-w*0.03:y=h*0.04",
+        "center": "x=(w-tw)/2:y=(h-th)/2",
+        "bottom_left": "x=w*0.03:y=h-th-h*0.04",
+        "bottom_right": "x=w-tw-w*0.03:y=h-th-h*0.04"
+    }
+    coords_txt = pos_coords_text.get(norm_pos, "x=w*0.03:y=h*0.04")
 
     op = max(0.1, min(1.0, float(opacity if opacity is not None else 0.78)))
     is_img = bool(wm_type == "image" and image_path and os.path.exists(image_path) and os.path.getsize(image_path) > 0)
 
+    wm_ready_path = None
     if is_img:
-        filter_complex = (
-            f"[1:v]format=rgba,colorchannelmixer=aa={op:.2f}[wm];"
-            f"[wm][0:v]scale2ref=w=trunc(main_w*0.11/2)*2:h=-2[wm_s][vid];"
-            f"[vid][wm_s]{coords_img}[outv]"
-        )
-        cmd = [
-            "ffmpeg", "-y",
-            "-threads", "2",
+        wm_ready_path = os.path.join(os.path.dirname(output_path), f"wm_ready_{int(time.time() * 1000)}.png")
+        try:
+            with Image.open(image_path) as img:
+                img = img.convert("RGBA")
+                orig_w, orig_h = img.size
+                target_w = max(16, int(vid_w * 0.11))
+                scale = target_w / float(orig_w) if orig_w > 0 else 1.0
+                target_h = max(16, int(round(orig_h * scale)))
+                resized = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                r, g, b, a = resized.split()
+                a = a.point(lambda p: int(p * op))
+                resized.putalpha(a)
+                resized.save(wm_ready_path, "PNG")
+        except Exception as err:
+            logger.error(f"Pillow watermark pre-scaling error: {err}")
+            wm_ready_path = image_path
+
+        filter_args = [
             "-i", input_path,
-            "-i", image_path,
-            "-filter_complex", filter_complex,
+            "-i", wm_ready_path,
+            "-filter_complex", f"[0:v][1:v]overlay={coords_img}:shortest=1:format=auto[outv]",
             "-map", "[outv]",
             "-map", "0:a?",
-            "-map", "0:s?",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            "-c:a", "copy",
-            "-c:s", "copy",
-            "-movflags", "+faststart",
-            "-progress", "pipe:1",
-            "-nostats",
-            output_path
+            "-map", "0:s?"
         ]
     else:
-        pos_coords_text = {
-            "top_left": "x=w*0.03:y=h*0.04",
-            "top_right": "x=w-tw-w*0.03:y=h*0.04",
-            "center": "x=(w-tw)/2:y=(h-th)/2",
-            "bottom_left": "x=w*0.03:y=h-th-h*0.04",
-            "bottom_right": "x=w-tw-w*0.03:y=h-th-h*0.04"
-        }
-        coords_txt = pos_coords_text.get(norm_pos, "x=w*0.03:y=h*0.04")
-        safe_text = str(text or "").replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace('%', '\\%')
+        font_candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/arial.ttf"
+        ]
+        font_file = None
+        for fc in font_candidates:
+            if os.path.exists(fc):
+                font_file = fc.replace("\\", "/").replace(":", "\\:")
+                break
+        font_clause = f"fontfile='{font_file}':" if font_file else ""
+        text_content = str(text or "").strip() or "KNR MOVIEES"
+        safe_text = text_content.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace('%', '\\%')
         font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
-        font_size = int(size) if int(size) > 0 else 28
 
         vf_filter = (
-            f"drawtext=text='{safe_text}':{coords_txt}:fontsize={font_size}:fontcolor={font_color}@{op:.2f}:"
-            f"box=1:boxcolor=black@{op*0.55:.2f}:boxborderw=4"
+            f"drawtext={font_clause}text='{safe_text}':fontcolor={font_color}@{op:.2f}:"
+            f"fontsize=h*0.04:shadowcolor=black@0.6:shadowx=2:shadowy=2:{coords_txt}"
         )
-        cmd = [
-            "ffmpeg", "-y",
-            "-threads", "2",
+        filter_args = [
             "-i", input_path,
             "-vf", vf_filter,
             "-map", "0:v:0",
             "-map", "0:a?",
-            "-map", "0:s?",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            "-c:a", "copy",
-            "-c:s", "copy",
-            "-movflags", "+faststart",
-            "-progress", "pipe:1",
-            "-nostats",
-            output_path
+            "-map", "0:s?"
         ]
+
+    def get_encoder_options(use_gpu: bool) -> Tuple[List[str], str]:
+        if use_gpu:
+            return [
+                "-c:v", "h264_nvenc",
+                "-preset", "p1",
+                "-rc", "vbr",
+                "-cq", "24",
+                "-c:a", "copy",
+                "-c:s", "copy",
+                "-movflags", "+faststart"
+            ], "🎮 NVIDIA NVENC GPU"
+        else:
+            return [
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "26",
+                "-tune", "fastdecode",
+                "-x264-params", "no-mbtree=1:rc-lookahead=0:aq-mode=0",
+                "-c:a", "copy",
+                "-c:s", "copy",
+                "-threads", "0",
+                "-movflags", "+faststart"
+            ], "⚡ CPU Ultrafast"
+
+    # Auto-detect host NVENC; fallback to CPU if not supported or on failure
+    gpu_available = check_nvenc_support()
+    attempts = [True, False] if gpu_available else [False]
 
     proc = None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *_wrap_nice(cmd),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        for try_gpu in attempts:
+            enc_args, enc_badge = get_encoder_options(try_gpu)
+            cmd = ["ffmpeg", "-y"] + filter_args + enc_args + [
+                "-progress", "pipe:1",
+                "-nostats",
+                output_path
+            ]
 
-        start_time = time.time()
-        last_edit_time = 0.0
-        current_sec = 0.0
-        speed_val = "1.0x"
+            proc = await asyncio.create_subprocess_exec(
+                *_wrap_nice(cmd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
 
-        msg_id = getattr(status_msg, 'id', None)
-        chat_id = getattr(status_msg.chat, 'id', None) if (status_msg and getattr(status_msg, 'chat', None)) else None
+            start_time = time.time()
+            last_edit_time = 0.0
+            current_sec = 0.0
+            speed_val = "1.0x"
 
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            line_str = line.decode('utf-8', errors='ignore').strip()
+            msg_id = getattr(status_msg, 'id', None)
+            chat_id = getattr(status_msg.chat, 'id', None) if (status_msg and getattr(status_msg, 'chat', None)) else None
 
-            if line_str.startswith("out_time_us="):
-                try:
-                    out_us = int(line_str.split("=")[1])
-                    current_sec = out_us / 1_000_000.0
-                except Exception:
-                    pass
-            elif line_str.startswith("speed="):
-                speed_val = line_str.split("=")[1].strip()
-            elif line_str.startswith("progress="):
-                prog = line_str.split("=")[1].strip()
-                now = time.time()
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                line_str = line.decode('utf-8', errors='ignore').strip()
 
-                if msg_id and (
-                    msg_id in CANCEL_REQUESTS
-                    or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS))
-                ):
+                if line_str.startswith("out_time_us="):
                     try:
-                        proc.terminate()
+                        out_us = int(line_str.split("=")[1])
+                        current_sec = out_us / 1_000_000.0
                     except Exception:
                         pass
-                    return False
+                elif line_str.startswith("speed="):
+                    speed_val = line_str.split("=")[1].strip()
+                elif line_str.startswith("progress="):
+                    prog = line_str.split("=")[1].strip()
+                    now = time.time()
 
-                if status_msg and total_duration > 0 and (now - last_edit_time >= 3.5 or prog == "end"):
-                    last_edit_time = now
-                    pct = min(99.0, max(0.0, (current_sec / total_duration) * 100.0))
-                    completed_blocks = min(20, max(0, math.floor(pct / 5.0)))
-                    progress_bar = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
+                    if msg_id and (
+                        msg_id in CANCEL_REQUESTS
+                        or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS))
+                    ):
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        return False
 
-                    elapsed = max(now - start_time, 0.001)
-                    rem_sec = max(0.0, total_duration - current_sec)
-                    try:
-                        speed_mult = float(speed_val.replace('x', '').strip())
-                    except Exception:
-                        speed_mult = 1.0
+                    if status_msg and total_duration > 0 and (now - last_edit_time >= 3.5 or prog == "end"):
+                        last_edit_time = now
+                        pct = min(99.0, max(0.0, (current_sec / total_duration) * 100.0))
+                        completed_blocks = min(20, max(0, math.floor(pct / 5.0)))
+                        progress_bar = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
 
-                    if speed_mult > 0.1:
-                        eta_sec = int(rem_sec / speed_mult)
-                    elif current_sec > 0:
-                        eta_sec = int((elapsed / current_sec) * rem_sec)
-                    else:
-                        eta_sec = 0
+                        elapsed = max(now - start_time, 0.001)
+                        rem_sec = max(0.0, total_duration - current_sec)
+                        try:
+                            speed_mult = float(speed_val.replace('x', '').strip())
+                        except Exception:
+                            speed_mult = 1.0
 
-                    eta_str = f"{eta_sec // 60}m {eta_sec % 60}s" if eta_sec >= 60 else f"{eta_sec}s"
-                    curr_fmt = f"{int(current_sec) // 60:02d}:{int(current_sec) % 60:02d}"
-                    tot_fmt = f"{int(total_duration) // 60:02d}:{int(total_duration) % 60:02d}"
+                        if speed_mult > 0.1:
+                            eta_sec = int(rem_sec / speed_mult)
+                        elif current_sec > 0:
+                            eta_sec = int((elapsed / current_sec) * rem_sec)
+                        else:
+                            eta_sec = 0
 
-                    status_text = (
-                        "<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>\n\n"
-                        f"{progress_bar} <b>{pct:.1f}%</b>\n\n"
-                        f"▸ <b>Sᴘᴇᴇᴅ :</b> <code>{speed_val}</code>\n"
-                        f"▸ <b>Tɪᴍᴇ :</b> <code>{curr_fmt} / {tot_fmt}</code>\n"
-                        f"▸ <b>ETA :</b> <code>{eta_str}</code>\n\n"
-                        "⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> | @Nex_bots"
-                    )
-                    try:
-                        cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{msg_id}")]])
-                        await edit_message_content(status_msg, status_text, reply_markup=cancel_markup)
-                    except Exception:
-                        pass
+                        eta_str = f"{eta_sec // 60}m {eta_sec % 60}s" if eta_sec >= 60 else f"{eta_sec}s"
+                        curr_fmt = f"{int(current_sec) // 60:02d}:{int(current_sec) % 60:02d}"
+                        tot_fmt = f"{int(total_duration) // 60:02d}:{int(total_duration) % 60:02d}"
 
-        stderr_data = await proc.stderr.read()
-        await proc.wait()
-        if proc.returncode != 0:
+                        status_text = (
+                            "<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>\n\n"
+                            f"{progress_bar} <b>{pct:.1f}%</b>\n\n"
+                            f"▸ <b>Eɴᴄᴏᴅᴇʀ :</b> <code>{enc_badge}</code>\n"
+                            f"▸ <b>Sᴘᴇᴇᴅ :</b> <code>{speed_val}</code>\n"
+                            f"▸ <b>Tɪᴍᴇ :</b> <code>{curr_fmt} / {tot_fmt}</code>\n"
+                            f"▸ <b>ETA :</b> <code>{eta_str}</code>\n\n"
+                            "⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> | @Nex_bots"
+                        )
+                        try:
+                            cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{msg_id}")]])
+                            await edit_message_content(status_msg, status_text, reply_markup=cancel_markup)
+                        except Exception:
+                            pass
+
+            stderr_data = await proc.stderr.read()
+            await proc.wait()
+
+            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return True
+
             err_msg = stderr_data.decode('utf-8', errors='ignore') if stderr_data else ""
-            print(f"FFmpeg apply_video_watermark non-zero exit ({proc.returncode}): {err_msg[-1000:]}", flush=True)
+            print(f"FFmpeg apply_video_watermark ({enc_badge}) non-zero exit ({proc.returncode}): {err_msg[-1000:]}", flush=True)
+
+            if try_gpu:
+                # NVENC failed during encoding; log and fallback to CPU ultrafast
+                print("⚠️ NVENC failed. Retrying with ultrafast CPU encoding...", flush=True)
+                if os.path.exists(output_path):
+                    try:
+                        os.remove(output_path)
+                    except Exception:
+                        pass
+                continue
+
+            # If CPU also failed (or was only attempt)
             if status_msg:
                 try:
                     await edit_message_content(
@@ -337,6 +422,7 @@ async def apply_video_watermark(
                 except Exception:
                     pass
             return False
+
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
     except Exception as e:
         print(f"FFmpeg apply_video_watermark error: {e}")
@@ -348,6 +434,11 @@ async def apply_video_watermark(
                 await asyncio.sleep(0.2)
                 if proc.returncode is None:
                     proc.kill()
+            except Exception:
+                pass
+        if wm_ready_path and os.path.exists(wm_ready_path) and wm_ready_path != image_path:
+            try:
+                os.remove(wm_ready_path)
             except Exception:
                 pass
         if not (os.path.exists(output_path) and os.path.getsize(output_path) > 0):
