@@ -210,6 +210,7 @@ async def rename_start(client, message):
     _, ext = os.path.splitext(filename)
     file_extension = ext.replace(".", "") if ext else "unknown"
     mime_type = get_full_mime_type(filename)
+    is_video = bool(message.video or (message.document and ((message.document.mime_type or "").startswith("video/") or (message.document.file_name or "").lower().endswith((".mkv", ".mp4", ".avi", ".mov", ".webm", ".flv", ".m4v")))))
     user_id = message.from_user.id
     try:
         asyncio.create_task(db.update_user_info(message.from_user))

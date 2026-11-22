@@ -29,6 +29,29 @@ async def _safe(coro, default=None):
         return default
 
 
+TIER_INFO = {
+    0: {"name": "Free", "icon": "🆓", "badge": "🆓", "speed": "Turbo (40-80 MB/s)"},
+    1: {"name": "Silver Plan", "icon": "🥈", "badge": "🥈", "speed": "Turbo (40-80 MB/s)"},
+    2: {"name": "Gold Plan", "icon": "🥇", "badge": "🥇", "speed": "Turbo (40-80 MB/s)"},
+    3: {"name": "Diamond VIP", "icon": "💎", "badge": "💎", "speed": "Unlimited Max Speed"},
+}
+DURATION_LABELS = {
+    30: "1 Month (30 Days)",
+    90: "3 Months (90 Days)",
+    180: "6 Months (180 Days)",
+    365: "1 Year (365 Days)"
+}
+
+
+async def build_tier_durations_view(tier: int):
+    return await build_plans_panel(0, selected_tier=tier)
+
+
+async def build_checkout_view(tier: int, days: int):
+    months = max(1, days // 30)
+    return await build_plans_panel(0, selected_tier=tier, months=months)
+
+
 # ==================== DYNAMIC 3-TIER PLANS HUB BUILDER ====================
 
 async def build_plans_panel(user_id: int, selected_tier: int = 2, months: int = 1):
