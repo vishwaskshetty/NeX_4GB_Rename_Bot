@@ -77,7 +77,8 @@ from helper.ffmpeg_utils import (
     generate_sample_video,
     generate_screenshots,
     get_video_duration_and_dims,
-    apply_video_watermark
+    apply_video_watermark,
+    apply_smart_interval_watermark
 )
 from helper.database import db, TIER_LIMITS
 from config import Config, Txt, parse_channel_id
@@ -338,27 +339,30 @@ async def rename_start(client, message):
     )
 
     if is_video:
+        wm_info_start = await db.get_watermark(user_id)
+        smart_int_min = int(wm_info_start.get("interval", 600)) // 60
         buttons = [
             [
-                InlineKeyboardButton("💧 Watermark Only", callback_data=f"media_wm_only_{message.id}")
+                InlineKeyboardButton(f"⚡ Smart Permanent Watermark (Every {smart_int_min}m)", callback_data=f"media_smart_wm_{message.id}")
             ],
             [
                 InlineKeyboardButton("✏️ Rename Only (Fast)", callback_data=f"media_rename_fast_{message.id}"),
                 InlineKeyboardButton("✏️ Rename + 💧 Watermark", callback_data=f"media_rename_wm_{message.id}")
             ],
             [
-                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}"),
-                InlineKeyboardButton("🎧 Edit Tracks", callback_data=f"inspect_tracks_{message.id}")
+                InlineKeyboardButton("💧 Full Watermark Only", callback_data=f"media_wm_only_{message.id}"),
+                InlineKeyboardButton("⚡ Auto-Rename", callback_data=f"auto_rename_{message.id}")
             ],
             [
-                InlineKeyboardButton("🎬 Sample Video", callback_data=f"extract_sample_only_{message.id}"),
-                InlineKeyboardButton("📸 Screenshots", callback_data=f"extract_ss_only_{message.id}")
+                InlineKeyboardButton("🎧 Edit Tracks", callback_data=f"inspect_tracks_{message.id}"),
+                InlineKeyboardButton("🎬 Sample Video", callback_data=f"extract_sample_only_{message.id}")
             ],
             [
-                InlineKeyboardButton("💧 Watermark Settings", callback_data=f"watermark_action_{message.id}"),
-                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")
+                InlineKeyboardButton("📸 Screenshots", callback_data=f"extract_ss_only_{message.id}"),
+                InlineKeyboardButton("💧 Watermark Settings", callback_data=f"watermark_action_{message.id}")
             ],
             [
+                InlineKeyboardButton("⚙️ Settings", callback_data="open_settings"),
                 InlineKeyboardButton("❌ Cancel", callback_data="close")
             ]
         ]
@@ -387,13 +391,14 @@ def build_rename_choice_menu(file_msg_id: int, final_name: str, upload_type: str
     buttons = [
         [
             InlineKeyboardButton("⚡ Only Rename (Fast)", callback_data=f"rchoice_fast_{file_msg_id}"),
-            InlineKeyboardButton("💧 Rename + Watermark", callback_data=f"rchoice_wm_{file_msg_id}")
+            InlineKeyboardButton("⚡ Smart Watermark (Every 10m)", callback_data=f"rchoice_smart_{file_msg_id}")
         ],
         [
-            InlineKeyboardButton(f"🔄 Watermark: {wm_status}", callback_data=f"rchoice_toggle_{file_msg_id}"),
-            InlineKeyboardButton(format_btn_label, callback_data=f"rchoice_fmt_{file_msg_id}")
+            InlineKeyboardButton("💧 Full Watermark", callback_data=f"rchoice_wm_{file_msg_id}"),
+            InlineKeyboardButton(f"🔄 Watermark: {wm_status}", callback_data=f"rchoice_toggle_{file_msg_id}")
         ],
         [
+            InlineKeyboardButton(format_btn_label, callback_data=f"rchoice_fmt_{file_msg_id}"),
             InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{file_msg_id}")
         ]
     ]
@@ -403,7 +408,8 @@ def build_rename_choice_menu(file_msg_id: int, final_name: str, upload_type: str
         f"▸ <b>Wᴀᴛᴇʀᴍᴀʀᴋ Sᴛᴀᴛᴜꜱ :</b> <b>{wm_status}</b>\n"
         f"▸ <b>Oᴜᴛᴘᴜᴛ Tʏᴘᴇ :</b> <b>{'📁 Document' if upload_type == 'document' else '🎥 Video'}</b>\n\n"
         "<i>⚡ <b>Only Rename (Fast):</b> Instant stream-copy / zero-disk mode.\n"
-        "💧 <b>Rename + Watermark:</b> Burns your OTT corner logo into video.</i>\n\n"
+        "⚡ <b>Smart Watermark:</b> Burns logo/text every 10m for 10s (2-3 min total speed).\n"
+        "💧 <b>Full Watermark:</b> Burns logo/text continuously into all frames.</i>\n\n"
         "⚡ @Nex_bots"
     )
     return menu_text, InlineKeyboardMarkup(buttons)
@@ -568,6 +574,50 @@ async def media_wm_only_cb(client, query: CallbackQuery):
         upload_type=current_upload_type,
         file_msg=file_msg,
         extras={"watermark": True, "keep_caption": True}
+    )
+
+
+@Client.on_callback_query(filters.regex(r'^media_smart_wm(?:_(\d+))?$'))
+async def media_smart_wm_cb(client, query: CallbackQuery):
+    user_id = query.from_user.id
+    prem_info = await db.get_premium_info(user_id)
+    is_prem = (prem_info.get("tier", 0) >= 1) or (user_id in Config.ADMIN)
+    if not is_prem:
+        return await query.answer("💎 Smart Watermark is a Premium Feature!\n\nUpgrade via /plan to unlock.", show_alert=True)
+
+    wm_info = await db.get_watermark(user_id)
+    if wm_info.get("type", "image") == "image" and not wm_info.get("image_id"):
+        return await query.answer("⚠️ No PNG watermark logo configured! Please tap 'Watermark Settings' to set your logo.", show_alert=True)
+
+    target_id = (
+        (query.matches[0].group(1) if query.matches and query.matches[0].groups() and query.matches[0].group(1) else None)
+        or USER_FILE_CONTEXT.get(user_id, {}).get("file_msg_id")
+    )
+    file_msg = None
+    if target_id:
+        try:
+            file_msg = await client.get_messages(query.message.chat.id, int(target_id))
+        except Exception:
+            pass
+    if not file_msg:
+        file_msg = query.message.reply_to_message
+
+    if not file_msg or not (file_msg.video or file_msg.document):
+        return await query.answer("❌ Media message could not be retrieved! Please resend your file.", show_alert=True)
+
+    file = file_msg.video or file_msg.document
+    filename = file.file_name or "video.mp4"
+    upload_mode = await db.get_upload_mode(user_id)
+    current_upload_type = "document" if upload_mode == "Document" else "video"
+
+    await query.answer("⚡ Starting Smart Interval Watermark...")
+    return await route_to_extras_or_execute(
+        client=client,
+        update=query,
+        new_filename=filename,
+        upload_type=current_upload_type,
+        file_msg=file_msg,
+        extras={"watermark": True, "smart_watermark": True, "keep_caption": True}
     )
 
 
@@ -1223,7 +1273,7 @@ async def refunc(client, message):
             pass
 
 
-@Client.on_callback_query(filters.regex(r"^rchoice_(fast|wm|toggle|fmt|cancel|back)(?:_(\d+))?$"))
+@Client.on_callback_query(filters.regex(r"^rchoice_(fast|smart|wm|toggle|fmt|cancel|back)(?:_(\d+))?$"))
 async def rename_choice_callback(client, query: CallbackQuery):
     choice = query.matches[0].group(1)
     file_msg_id_str = query.matches[0].group(2)
@@ -1300,6 +1350,37 @@ async def rename_choice_callback(client, query: CallbackQuery):
             return await query.answer("❌ Original media not found! Please resend your file.", show_alert=True)
         await query.answer("⚡ Starting Fast Rename (Zero-Disk)...")
         return await route_to_extras_or_execute(client, query, final_name, upload_type, file_msg, extras={"watermark": False})
+
+    elif choice == "smart":
+        if not file_msg:
+            return await query.answer("❌ Original media not found! Please resend your file.", show_alert=True)
+        wm_info = await db.get_watermark(user_id)
+        has_logo = bool(wm_info.get("image_id"))
+        has_configured = has_logo if wm_info.get("type", "image") == "image" else True
+        if not has_configured:
+            await query.answer("⚠️ No watermark logo or text configured!", show_alert=True)
+            no_wm_buttons = [
+                [
+                    InlineKeyboardButton("🖼️ Set Watermark Logo", callback_data="cb_wm_set_logo"),
+                    InlineKeyboardButton("🔤 Set Watermark Text", callback_data="cb_wm_set_text")
+                ],
+                [
+                    InlineKeyboardButton("⬅️ Back to Rename", callback_data=f"rchoice_back_{target_id}"),
+                    InlineKeyboardButton("❌ Cancel", callback_data=f"rchoice_cancel_{target_id}")
+                ]
+            ]
+            no_wm_text = (
+                "⚠️ <b>No Watermark Configured!</b>\n\n"
+                "You haven't uploaded an OTT logo or set watermark text yet.\n"
+                "Tap <b>Set Watermark Logo</b> to upload your PNG channel bug, or <b>Set Watermark Text</b>.\n\n"
+                "⚡ @Nex_bots"
+            )
+            return await edit_message_content(query.message, no_wm_text, reply_markup=InlineKeyboardMarkup(no_wm_buttons))
+
+        if not wm_info.get("enabled"):
+            await db.set_watermark(user_id, enabled=True)
+        await query.answer("⚡ Starting Smart Interval Watermark...")
+        return await route_to_extras_or_execute(client, query, final_name, upload_type, file_msg, extras={"watermark": True, "smart_watermark": True})
 
     elif choice == "wm":
         if not file_msg:
@@ -1958,22 +2039,42 @@ async def execute_rename_pipeline(
 
                         if can_apply:
                             try:
-                                await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                                is_smart_wm = bool(extras.get("smart_watermark") or extras.get("watermark") == "smart_interval") if isinstance(extras, dict) else False
                                 wm_file = os.path.join(work_dir, f"wm_{new_filename}")
-                                wm_ok = await apply_video_watermark(
-                                    input_path=file_path,
-                                    output_path=wm_file,
-                                    text=wm_info.get("text") or "KNR MOVIEES",
-                                    wm_type=wm_type,
-                                    image_path=wm_img_path,
-                                    position=wm_info.get("position", "top_left"),
-                                    size=wm_info.get("size", 28),
-                                    opacity=wm_info.get("opacity", 0.78),
-                                    color=wm_info.get("color", "white"),
-                                    status_msg=ms,
-                                    client=client,
-                                    total_duration=duration
-                                )
+                                if is_smart_wm:
+                                    await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ꜱᴍᴀʀᴛ ɪɴᴛᴇʀᴠᴀʟ ᴡᴀᴛᴇʀᴍᴀʀᴋ... ⚡</b>")
+                                    wm_ok = await apply_smart_interval_watermark(
+                                        input_path=file_path,
+                                        output_path=wm_file,
+                                        text=wm_info.get("text") or "KNR MOVIEES",
+                                        wm_type=wm_type,
+                                        image_path=wm_img_path,
+                                        position=wm_info.get("position", "top_left"),
+                                        size=wm_info.get("size", 28),
+                                        opacity=wm_info.get("opacity", 0.78),
+                                        color=wm_info.get("color", "white"),
+                                        interval=wm_info.get("interval", 600),
+                                        clip_duration=wm_info.get("clip_duration", 10),
+                                        status_msg=ms,
+                                        client=client,
+                                        total_duration=duration
+                                    )
+                                else:
+                                    await ms.edit("<b>◈ ᴀᴘᴘʟʏɪɴɢ ᴠɪᴅᴇᴏ ᴡᴀᴛᴇʀᴍᴀʀᴋ... 💧</b>")
+                                    wm_ok = await apply_video_watermark(
+                                        input_path=file_path,
+                                        output_path=wm_file,
+                                        text=wm_info.get("text") or "KNR MOVIEES",
+                                        wm_type=wm_type,
+                                        image_path=wm_img_path,
+                                        position=wm_info.get("position", "top_left"),
+                                        size=wm_info.get("size", 28),
+                                        opacity=wm_info.get("opacity", 0.78),
+                                        color=wm_info.get("color", "white"),
+                                        status_msg=ms,
+                                        client=client,
+                                        total_duration=duration
+                                    )
                                 if wm_ok and os.path.exists(wm_file) and os.path.getsize(wm_file) > 0:
                                     if os.path.exists(file_path) and file_path != wm_file:
                                         try:

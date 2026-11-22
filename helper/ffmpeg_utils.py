@@ -449,6 +449,425 @@ async def apply_video_watermark(
                     pass
 
 
+async def get_video_stream_details(file_path: str) -> dict:
+    """
+    Extracts duration, codec_name, pix_fmt, r_frame_rate, width, and height using ffprobe.
+    """
+    details = {
+        "duration": 0.0,
+        "codec_name": "h264",
+        "pix_fmt": "yuv420p",
+        "r_frame_rate": "24/1",
+        "width": 1280,
+        "height": 720
+    }
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,pix_fmt,r_frame_rate,width,height:format=duration",
+            "-of", "json",
+            file_path
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *_wrap_nice(cmd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        if stdout:
+            data = json.loads(stdout.decode('utf-8', errors='ignore'))
+            if "format" in data and "duration" in data["format"]:
+                try:
+                    details["duration"] = float(data["format"]["duration"])
+                except Exception:
+                    pass
+            streams = data.get("streams", [])
+            if streams:
+                st = streams[0]
+                details["codec_name"] = str(st.get("codec_name", "h264")).lower()
+                details["pix_fmt"] = str(st.get("pix_fmt", "yuv420p"))
+                details["r_frame_rate"] = str(st.get("r_frame_rate", "24/1"))
+                details["width"] = int(st.get("width", 1280) or 1280)
+                details["height"] = int(st.get("height", 720) or 720)
+                if not details["duration"] and "duration" in st:
+                    try:
+                        details["duration"] = float(st["duration"])
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning(f"get_video_stream_details error: {e}")
+    return details
+
+
+async def get_keyframes_in_window(file_path: str, start_sec: float, end_sec: float) -> List[float]:
+    """
+    Extracts keyframe presentation timestamps within [start_sec, end_sec] using ffprobe -read_intervals.
+    """
+    s_int = max(0.0, float(start_sec))
+    e_int = max(s_int + 1.0, float(end_sec))
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-read_intervals", f"{s_int:.2f}%{e_int:.2f}",
+        "-select_streams", "v:0",
+        "-skip_frame", "nokey",
+        "-show_entries", "frame=pts_time",
+        "-of", "csv=p=0",
+        file_path
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *_wrap_nice(cmd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await proc.communicate()
+        pts_list = []
+        if stdout:
+            for line in stdout.decode('utf-8', errors='ignore').splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        pts_list.append(float(line))
+                    except ValueError:
+                        pass
+        return sorted(list(set(pts_list)))
+    except Exception as e:
+        logger.warning(f"get_keyframes_in_window error: {e}")
+        return []
+
+
+async def apply_smart_interval_watermark(
+    input_path: str,
+    output_path: str,
+    text: str = "",
+    wm_type: str = "image",
+    image_path: str = None,
+    position: str = "top_left",
+    size: int = 28,
+    opacity: float = 0.78,
+    color: str = "white",
+    interval: int = 600,
+    clip_duration: int = 10,
+    status_msg = None,
+    client = None,
+    total_duration: int = 0
+) -> bool:
+    """
+    Smart Interval Permanent Watermark:
+    Permanently burns PNG logo or text at regular keyframe-aligned intervals (e.g. intro + every 10 minutes)
+    for 10 seconds, while stream-copying the rest of the movie for 2-3 minute total execution.
+    """
+    from helper.utils import CANCEL_REQUESTS, edit_message_content
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    details = await get_video_stream_details(input_path)
+    dur = details["duration"] or total_duration
+    if dur <= 0:
+        dur, _, _ = await get_video_duration_and_dims(input_path)
+    if dur <= 0:
+        dur = 60.0
+
+    codec_name = details["codec_name"]
+    pix_fmt = details["pix_fmt"]
+    r_frame_rate = details["r_frame_rate"]
+    vid_w = details["width"]
+    vid_h = details["height"]
+
+    norm_pos = str(position).lower().strip() if position else "top_left"
+    pos_coords_img = {
+        "top_left": "x=W*0.03:y=H*0.04",
+        "top_right": "x=W-w-W*0.03:y=H*0.04",
+        "center": "x=(W-w)/2:y=(H-h)/2",
+        "bottom_left": "x=W*0.03:y=H-h-H*0.04",
+        "bottom_right": "x=W-w-W*0.03:y=H-h-H*0.04"
+    }
+    coords_img = pos_coords_img.get(norm_pos, "x=W*0.03:y=H*0.04")
+
+    pos_coords_text = {
+        "top_left": "x=w*0.03:y=h*0.04",
+        "top_right": "x=w-tw-w*0.03:y=h*0.04",
+        "center": "x=(w-tw)/2:y=(h-th)/2",
+        "bottom_left": "x=w*0.03:y=h-th-h*0.04",
+        "bottom_right": "x=w-tw-w*0.03:y=h-th-h*0.04"
+    }
+    coords_txt = pos_coords_text.get(norm_pos, "x=w*0.03:y=h*0.04")
+    op = max(0.1, min(1.0, float(opacity if opacity is not None else 0.78)))
+    is_img = bool(wm_type == "image" and image_path and os.path.exists(image_path) and os.path.getsize(image_path) > 0)
+
+    # 1. Target timestamp planning
+    int_sec = max(60, int(interval if interval else 600))
+    clip_len = max(3, min(60, int(clip_duration if clip_duration else 10)))
+
+    target_ts = [0.0]
+    t = float(int_sec)
+    while t < (dur - 15.0):
+        target_ts.append(t)
+        t += float(int_sec)
+    if len(target_ts) == 1 and dur >= 120.0:
+        target_ts.append(round(dur / 2.0, 1))
+
+    # 2. Keyframe snapping around each target window
+    wm_ranges = []
+    prev_end = 0.0
+    for target in target_ts:
+        if target == 0.0:
+            k_start = 0.0
+        else:
+            k_cands = await get_keyframes_in_window(input_path, max(prev_end, target - 12.0), target + 12.0)
+            if k_cands:
+                k_start = min(k_cands, key=lambda k: abs(k - target))
+            else:
+                k_start = target
+
+        if k_start < prev_end:
+            k_start = prev_end
+
+        target_end = k_start + clip_len
+        end_cands = await get_keyframes_in_window(input_path, k_start + clip_len - 2.0, k_start + clip_len + 12.0)
+        valid_end_cands = [k for k in end_cands if k > k_start + 3.0]
+        if valid_end_cands:
+            k_end = min(valid_end_cands, key=lambda k: abs(k - target_end))
+        else:
+            k_end = min(dur, k_start + clip_len)
+
+        if k_end > dur:
+            k_end = dur
+
+        if k_end - k_start >= 3.0:
+            wm_ranges.append((round(k_start, 2), round(k_end, 2)))
+            prev_end = k_end
+
+    # 3. Build sequence of alternating unwatermarked (copy) and watermarked (wm) segments
+    segments = []
+    curr = 0.0
+    for (w_s, w_e) in wm_ranges:
+        if w_s > curr + 0.2:
+            segments.append(("copy", curr, w_s))
+        segments.append(("wm", w_s, w_e))
+        curr = w_e
+    if curr < dur - 0.5:
+        segments.append(("copy", curr, dur))
+
+    if not segments:
+        return False
+
+    # 4. Prepare pre-scaled logo or drawtext filter
+    wm_ready_path = None
+    if is_img:
+        wm_ready_path = os.path.join(os.path.dirname(output_path), f"wm_ready_{int(time.time()*1000)}.png")
+        try:
+            with Image.open(image_path) as img:
+                img = img.convert("RGBA")
+                orig_w, orig_h = img.size
+                target_w = max(16, int(vid_w * 0.11))
+                scale = target_w / float(orig_w) if orig_w > 0 else 1.0
+                target_h = max(16, int(round(orig_h * scale)))
+                resized = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                r, g, b, a = resized.split()
+                a = a.point(lambda p: int(p * op))
+                resized.putalpha(a)
+                resized.save(wm_ready_path, "PNG")
+        except Exception as err:
+            logger.error(f"Pillow pre-scaling error: {err}")
+            wm_ready_path = image_path
+    else:
+        font_candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+            "C:/Windows/Fonts/arial.ttf"
+        ]
+        font_file = None
+        for fc in font_candidates:
+            if os.path.exists(fc):
+                font_file = fc.replace("\\", "/").replace(":", "\\:")
+                break
+        font_clause = f"fontfile='{font_file}':" if font_file else ""
+        text_content = str(text or "").strip() or "KNR MOVIEES"
+        safe_text = text_content.replace('\\', '\\\\').replace("'", "'\\\\''").replace(':', '\\:').replace('%', '\\%')
+        font_color = str(color).lower() if str(color).lower() in ("white", "yellow", "cyan", "red", "green") else "white"
+        vf_filter = (
+            f"drawtext={font_clause}text='{safe_text}':fontcolor={font_color}@{op:.2f}:"
+            f"fontsize=h*0.04:shadowcolor=black@0.6:shadowx=2:shadowy=2:{coords_txt}"
+        )
+
+    # 5. Matching codec & encoder
+    use_gpu = check_nvenc_support()
+    is_hevc = codec_name in ("hevc", "h265")
+    if is_hevc:
+        v_codec = "hevc_nvenc" if use_gpu else "libx265"
+    else:
+        v_codec = "h264_nvenc" if use_gpu else "libx264"
+
+    # Temporary directory for segments
+    seg_dir = os.path.join(os.path.dirname(output_path), f"smart_wm_{int(time.time()*1000)}")
+    os.makedirs(seg_dir, exist_ok=True)
+    seg_files = []
+
+    msg_id = getattr(status_msg, 'id', None)
+    chat_id = getattr(status_msg.chat, 'id', None) if (status_msg and getattr(status_msg, 'chat', None)) else None
+    cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{msg_id}")]]) if msg_id else None
+
+    try:
+        total_segs = len(segments)
+        for i, (seg_type, s_time, e_time) in enumerate(segments):
+            if msg_id and (
+                msg_id in CANCEL_REQUESTS
+                or (chat_id and (f"{chat_id}_{msg_id}" in CANCEL_REQUESTS or chat_id in CANCEL_REQUESTS))
+            ):
+                return False
+
+            seg_out = os.path.join(seg_dir, f"seg_{i:04d}.mkv")
+            seg_files.append(seg_out)
+
+            if status_msg and (i % 2 == 0 or i == total_segs - 1):
+                try:
+                    pct = int((i / total_segs) * 100.0)
+                    completed_blocks = min(20, max(0, math.floor(pct / 5.0)))
+                    progress_bar = '▣' * completed_blocks + '▢' * (20 - completed_blocks)
+                    seg_label = "💧 Watermark Bug" if seg_type == "wm" else "⚡ Fast Stream-Copy"
+                    status_text = (
+                        "<b>◈ ᴀᴘᴘʟʏɪɴɢ ꜱᴍᴀʀᴛ ɪɴᴛᴇʀᴠᴀʟ ᴡᴀᴛᴇʀᴍᴀʀᴋ... ⚡</b>\n\n"
+                        f"{progress_bar} <b>{pct}%</b>\n\n"
+                        f"▸ <b>Sᴇɢᴍᴇɴᴛ :</b> <code>{i + 1} / {total_segs}</code> ({seg_label})\n"
+                        f"▸ <b>Tɪᴍᴇ :</b> <code>{int(s_time)}s - {int(e_time)}s</code>\n"
+                        f"▸ <b>Iɴᴛᴇʀᴠᴀʟ :</b> <code>Every {int_sec // 60}m ({clip_len}s clip)</code>\n\n"
+                        "⚡ <b>NᴇX 4GB Rᴇɴᴀᴍᴇ Bᴏᴛ</b> | @Nex_bots"
+                    )
+                    await edit_message_content(status_msg, status_text, reply_markup=cancel_markup)
+                except Exception:
+                    pass
+
+            if seg_type == "copy":
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", f"{s_time:.2f}",
+                    "-i", input_path,
+                    "-to", f"{e_time:.2f}",
+                    "-copyts",
+                    "-avoid_negative_ts", "make_zero",
+                    "-map", "0",
+                    "-c", "copy",
+                    seg_out
+                ]
+            else:
+                if is_img:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{s_time:.2f}",
+                        "-i", input_path,
+                        "-i", wm_ready_path,
+                        "-to", f"{e_time:.2f}",
+                        "-copyts",
+                        "-avoid_negative_ts", "make_zero",
+                        "-filter_complex", f"[0:v][1:v]overlay={coords_img}:shortest=1:format=auto[outv]",
+                        "-map", "[outv]",
+                        "-map", "0:a?",
+                        "-map", "0:s?",
+                        "-c:v", v_codec,
+                        "-preset", "ultrafast",
+                        "-crf", "26",
+                        "-pix_fmt", pix_fmt,
+                        "-r", r_frame_rate,
+                        "-c:a", "copy",
+                        "-c:s", "copy",
+                        seg_out
+                    ]
+                else:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", f"{s_time:.2f}",
+                        "-i", input_path,
+                        "-to", f"{e_time:.2f}",
+                        "-copyts",
+                        "-avoid_negative_ts", "make_zero",
+                        "-vf", vf_filter,
+                        "-map", "0:v:0",
+                        "-map", "0:a?",
+                        "-map", "0:s?",
+                        "-c:v", v_codec,
+                        "-preset", "ultrafast",
+                        "-crf", "26",
+                        "-pix_fmt", pix_fmt,
+                        "-r", r_frame_rate,
+                        "-c:a", "copy",
+                        "-c:s", "copy",
+                        seg_out
+                    ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *_wrap_nice(cmd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            _, err_bytes = await proc.communicate()
+            if proc.returncode != 0:
+                err_text = err_bytes.decode('utf-8', errors='ignore') if err_bytes else ""
+                logger.error(f"Segment {i} failed ({proc.returncode}): {err_text[-500:]}")
+                return False
+
+        # 6. Concat all segments together
+        if status_msg:
+            try:
+                await edit_message_content(
+                    status_msg,
+                    "<b>◈ ꜱᴛɪᴛᴄʜɪɴɢ ꜱᴇɢᴍᴇɴᴛꜱ (ᴢᴇʀᴏ-ᴅɪꜱᴋ ᴄᴏɴᴄᴀᴛ)... 🎬</b>\n\n<i>Merging keyframe-aligned segments losslessly...</i>",
+                    reply_markup=cancel_markup
+                )
+            except Exception:
+                pass
+
+        list_file = os.path.join(seg_dir, "list.txt")
+        with open(list_file, "w", encoding="utf-8") as f:
+            for s_file in seg_files:
+                escaped = os.path.basename(s_file).replace("'", "'\\''")
+                f.write(f"file '{escaped}'\n")
+
+        concat_cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", list_file,
+            "-map", "0",
+            "-c", "copy",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *_wrap_nice(concat_cmd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        _, err_bytes = await proc.communicate()
+        if proc.returncode != 0:
+            err_text = err_bytes.decode('utf-8', errors='ignore') if err_bytes else ""
+            logger.error(f"Concat failed ({proc.returncode}): {err_text[-500:]}")
+            return False
+
+        return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+    except Exception as e:
+        logger.error(f"apply_smart_interval_watermark error: {e}")
+        return False
+    finally:
+        if os.path.exists(seg_dir):
+            try:
+                shutil.rmtree(seg_dir, ignore_errors=True)
+            except Exception:
+                pass
+        if wm_ready_path and os.path.exists(wm_ready_path) and wm_ready_path != image_path:
+            try:
+                os.remove(wm_ready_path)
+            except Exception:
+                pass
+        if not (os.path.exists(output_path) and os.path.getsize(output_path) > 0):
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except Exception:
+                    pass
+
+
 async def generate_screenshots(input_path: str, output_folder: str, total_duration: int, count: int) -> List[str]:
     """
     Extracts count high-quality evenly spaced JPEG screenshots from video.

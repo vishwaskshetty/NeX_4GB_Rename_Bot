@@ -951,7 +951,9 @@ class Database:
                 "position": "top_left",
                 "size": 28,
                 "opacity": 0.78,
-                "color": "white"
+                "color": "white",
+                "interval": 600,
+                "clip_duration": 10
             }
         return {
             "enabled": bool(user.get("wm_enabled", False)),
@@ -961,7 +963,9 @@ class Database:
             "position": str(user.get("wm_position", "top_left")),
             "size": int(user.get("wm_size", 28)),
             "opacity": float(user.get("wm_opacity", 0.78)),
-            "color": str(user.get("wm_color", "white"))
+            "color": str(user.get("wm_color", "white")),
+            "interval": int(user.get("wm_interval", 600)),
+            "clip_duration": int(user.get("wm_clip_duration", 10))
         }
 
     async def set_watermark(self, user_id: int, **kwargs):
@@ -982,6 +986,10 @@ class Database:
             update_dict["wm_opacity"] = float(kwargs["opacity"])
         if "color" in kwargs:
             update_dict["wm_color"] = str(kwargs["color"]).strip().lower()
+        if "interval" in kwargs:
+            update_dict["wm_interval"] = max(60, int(kwargs["interval"]))
+        if "clip_duration" in kwargs:
+            update_dict["wm_clip_duration"] = max(3, min(60, int(kwargs["clip_duration"])))
 
         if update_dict:
             await self.col.update_one({'_id': int(user_id)}, {'$set': update_dict}, upsert=True)
@@ -998,7 +1006,9 @@ class Database:
                 "wm_position": "top_left",
                 "wm_size": 28,
                 "wm_opacity": 0.78,
-                "wm_color": "white"
+                "wm_color": "white",
+                "wm_interval": 600,
+                "wm_clip_duration": 10
             }},
             upsert=True
         )

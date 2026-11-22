@@ -276,6 +276,9 @@ async def build_watermark_view(user_id: int):
     opacity_pct = int(float(wm.get("opacity", 0.78)) * 100)
     pos = wm.get("position", "top_left")
     op = float(wm.get("opacity", 0.78))
+    wm_interval = int(wm.get("interval", 600))
+    wm_clip_dur = int(wm.get("clip_duration", 10))
+    int_min = wm_interval // 60
 
     pos_display_map = {
         "top_left": "Top-Left (Default)",
@@ -293,8 +296,10 @@ async def build_watermark_view(user_id: int):
         f"▸ <b>Mᴏᴅᴇ :</b> <b>{type_display}</b>\n"
         f"▸ <b>Cᴏɴᴛᴇɴᴛ :</b> <code>{content_str}</code>\n"
         f"▸ <b>Pᴏꜱɪᴛɪᴏɴ :</b> <code>{pos_display}</code>\n"
-        f"▸ <b>Sɪᴢᴇ :</b> <code>{size_display}</code> | <b>Oᴘᴀᴄɪᴛʏ :</b> <code>{opacity_pct}%</code>\n\n"
+        f"▸ <b>Sɪᴢᴇ :</b> <code>{size_display}</code> | <b>Oᴘᴀᴄɪᴛʏ :</b> <code>{opacity_pct}%</code>\n"
+        f"▸ <b>Sᴍᴀʀᴛ Iɴᴛᴇʀᴠᴀʟ :</b> <code>Every {int_min}m ({wm_interval}s)</code> | <b>Cʟɪᴘ :</b> <code>{wm_clip_dur}s</code>\n\n"
         "<b>Iɴꜱᴛʀᴜᴄᴛɪᴏɴꜱ :</b>\n"
+        "• <b>⚡ Sᴍᴀʀᴛ Iɴᴛᴇʀᴠᴀʟ :</b> Burns watermark every 10m for 10s while stream-copying rest (2-3 min speed)!\n"
         "• <b>🖼️ PNG Lᴏɢᴏ :</b> Tap <b>Set Logo</b> or reply to PNG/Photo with <code>/set_wm_logo</code>\n"
         "• <b>🔤 Tᴇxᴛ :</b> Tap <b>Edit Text</b> (Default: <code>KNR MOVIEES</code>) or <code>/set_watermark Text</code>\n"
         "• <b>🔄 Rᴇꜱᴇᴛ :</b> Tap <b>Reset</b> or <code>/del_watermark</code>\n\n"
@@ -335,6 +340,17 @@ async def build_watermark_view(user_id: int):
             InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.78) < 0.03 else ''}💧 78% (OTT)", callback_data="cb_wm_op_78"),
             InlineKeyboardButton(f"{'🔘 ' if abs(op - 0.85) < 0.03 else ''}💧 85%", callback_data="cb_wm_op_85"),
             InlineKeyboardButton(f"{'🔘 ' if abs(op - 1.00) < 0.03 else ''}💧 100%", callback_data="cb_wm_op_100")
+        ],
+        [
+            InlineKeyboardButton(f"{'🔘 ' if wm_interval == 300 else ''}⏱️ 5m", callback_data="cb_wm_int_300"),
+            InlineKeyboardButton(f"{'🔘 ' if wm_interval == 600 else ''}⏱️ 10m (Def)", callback_data="cb_wm_int_600"),
+            InlineKeyboardButton(f"{'🔘 ' if wm_interval == 900 else ''}⏱️ 15m", callback_data="cb_wm_int_900"),
+            InlineKeyboardButton(f"{'🔘 ' if wm_interval == 1200 else ''}⏱️ 20m", callback_data="cb_wm_int_1200")
+        ],
+        [
+            InlineKeyboardButton(f"{'🔘 ' if wm_clip_dur == 5 else ''}⏳ 5s Bug", callback_data="cb_wm_dur_5"),
+            InlineKeyboardButton(f"{'🔘 ' if wm_clip_dur == 10 else ''}⏳ 10s Bug (Def)", callback_data="cb_wm_dur_10"),
+            InlineKeyboardButton(f"{'🔘 ' if wm_clip_dur == 15 else ''}⏳ 15s Bug", callback_data="cb_wm_dur_15")
         ],
         [
             InlineKeyboardButton("🔄 Rᴇꜱᴇᴛ ᴛᴏ Dᴇꜰᴀᴜʟᴛ", callback_data="cb_wm_reset"),
@@ -527,6 +543,24 @@ async def cb_wm_col(client, query: CallbackQuery):
     text, markup = await build_watermark_view(query.from_user.id)
     await edit_message_content(query.message, text, reply_markup=markup)
     await query.answer(f"Color set to {col}! 🎨")
+
+
+@Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_int_(\d+)$"))
+async def cb_wm_interval(client, query: CallbackQuery):
+    val = int(query.matches[0].group(1))
+    await db.set_watermark(query.from_user.id, interval=val)
+    text, markup = await build_watermark_view(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer(f"Smart interval set to every {val // 60}m! ⏱️")
+
+
+@Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_dur_(\d+)$"))
+async def cb_wm_duration(client, query: CallbackQuery):
+    val = int(query.matches[0].group(1))
+    await db.set_watermark(query.from_user.id, clip_duration=val)
+    text, markup = await build_watermark_view(query.from_user.id)
+    await edit_message_content(query.message, text, reply_markup=markup)
+    await query.answer(f"Watermark clip appearance set to {val}s! ⏳")
 
 
 @Client.on_callback_query(filters.regex(r"^(?:cb_)?wm_(?:reset|clear)$"))
